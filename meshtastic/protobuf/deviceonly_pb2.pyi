@@ -16,10 +16,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias as _TypeAlias
+if sys.version_info >= (3, 11):
+    from typing import TypeAlias as _TypeAlias, Never as _Never
 else:
-    from typing_extensions import TypeAlias as _TypeAlias
+    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
 if sys.version_info >= (3, 13):
     from warnings import deprecated as _deprecated
@@ -75,8 +75,11 @@ class PositionLite(_message.Message):
         time: _builtins.int = ...,
         location_source: _mesh_pb2.Position.LocSource.ValueType = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["altitude", b"altitude", "latitude_i", b"latitude_i", "location_source", b"location_source", "longitude_i", b"longitude_i", "time", b"time"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___PositionLite: _TypeAlias = PositionLite  # noqa: Y015
 
@@ -389,6 +392,7 @@ class DeviceState(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["did_gps_reset", b"did_gps_reset", "my_node", b"my_node", "no_save", b"no_save", "node_remote_hardware_pins", b"node_remote_hardware_pins", "owner", b"owner", "receive_queue", b"receive_queue", "rx_text_message", b"rx_text_message", "rx_waypoint", b"rx_waypoint", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeviceState: _TypeAlias = DeviceState  # noqa: Y015
 
@@ -416,8 +420,11 @@ class NodeDatabase(_message.Message):
         version: _builtins.int = ...,
         nodes: _abc.Iterable[Global___NodeInfoLite] | None = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["nodes", b"nodes", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NodeDatabase: _TypeAlias = NodeDatabase  # noqa: Y015
 
@@ -449,8 +456,11 @@ class ChannelFile(_message.Message):
         channels: _abc.Iterable[_channel_pb2.Channel] | None = ...,
         version: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["channels", b"channels", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___ChannelFile: _TypeAlias = ChannelFile  # noqa: Y015
 
@@ -514,5 +524,6 @@ class BackupPreferences(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["channels", b"channels", "config", b"config", "module_config", b"module_config", "owner", b"owner", "timestamp", b"timestamp", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___BackupPreferences: _TypeAlias = BackupPreferences  # noqa: Y015
