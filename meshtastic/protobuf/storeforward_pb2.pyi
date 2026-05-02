@@ -10,10 +10,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias as _TypeAlias
+if sys.version_info >= (3, 11):
+    from typing import TypeAlias as _TypeAlias, Never as _Never
 else:
-    from typing_extensions import TypeAlias as _TypeAlias
+    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -237,8 +237,11 @@ class StoreAndForward(_message.Message):
             return_max: _builtins.int = ...,
             return_window: _builtins.int = ...,
         ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
         _ClearFieldArgType: _TypeAlias = _typing.Literal["heartbeat", b"heartbeat", "messages_max", b"messages_max", "messages_saved", b"messages_saved", "messages_total", b"messages_total", "requests", b"requests", "requests_history", b"requests_history", "return_max", b"return_max", "return_window", b"return_window", "up_time", b"up_time"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
 
     @_typing.final
     class History(_message.Message):
@@ -271,8 +274,11 @@ class StoreAndForward(_message.Message):
             window: _builtins.int = ...,
             last_request: _builtins.int = ...,
         ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
         _ClearFieldArgType: _TypeAlias = _typing.Literal["history_messages", b"history_messages", "last_request", b"last_request", "window", b"window"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
 
     @_typing.final
     class Heartbeat(_message.Message):
@@ -298,8 +304,11 @@ class StoreAndForward(_message.Message):
             period: _builtins.int = ...,
             secondary: _builtins.int = ...,
         ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
         _ClearFieldArgType: _TypeAlias = _typing.Literal["period", b"period", "secondary", b"secondary"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
 
     RR_FIELD_NUMBER: _builtins.int
     STATS_FIELD_NUMBER: _builtins.int

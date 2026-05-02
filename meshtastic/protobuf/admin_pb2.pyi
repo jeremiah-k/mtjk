@@ -18,10 +18,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias as _TypeAlias
+if sys.version_info >= (3, 11):
+    from typing import TypeAlias as _TypeAlias, Never as _Never
 else:
-    from typing_extensions import TypeAlias as _TypeAlias
+    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
 if sys.version_info >= (3, 13):
     from warnings import deprecated as _deprecated
@@ -373,8 +373,11 @@ class AdminMessage(_message.Message):
             touch_x: _builtins.int = ...,
             touch_y: _builtins.int = ...,
         ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
         _ClearFieldArgType: _TypeAlias = _typing.Literal["event_code", b"event_code", "kb_char", b"kb_char", "touch_x", b"touch_x", "touch_y", b"touch_y"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
 
     @_typing.final
     class OTAEvent(_message.Message):
@@ -402,8 +405,11 @@ class AdminMessage(_message.Message):
             reboot_ota_mode: Global___OTAMode.ValueType = ...,
             ota_hash: _builtins.bytes = ...,
         ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
         _ClearFieldArgType: _TypeAlias = _typing.Literal["ota_hash", b"ota_hash", "reboot_ota_mode", b"reboot_ota_mode"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
 
     SESSION_PASSKEY_FIELD_NUMBER: _builtins.int
     GET_CHANNEL_REQUEST_FIELD_NUMBER: _builtins.int
@@ -872,8 +878,11 @@ class HamParameters(_message.Message):
         frequency: _builtins.float = ...,
         short_name: _builtins.str = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["call_sign", b"call_sign", "frequency", b"frequency", "short_name", b"short_name", "tx_power", b"tx_power"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___HamParameters: _TypeAlias = HamParameters  # noqa: Y015
 
@@ -897,8 +906,11 @@ class NodeRemoteHardwarePinsResponse(_message.Message):
         *,
         node_remote_hardware_pins: _abc.Iterable[_mesh_pb2.NodeRemoteHardwarePin] | None = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["node_remote_hardware_pins", b"node_remote_hardware_pins"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NodeRemoteHardwarePinsResponse: _TypeAlias = NodeRemoteHardwarePinsResponse  # noqa: Y015
 
@@ -940,6 +952,7 @@ class SharedContact(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["manually_verified", b"manually_verified", "node_num", b"node_num", "should_ignore", b"should_ignore", "user", b"user"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___SharedContact: _TypeAlias = SharedContact  # noqa: Y015
 
@@ -1077,6 +1090,7 @@ class SensorConfig(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["scd30_config", b"scd30_config", "scd4x_config", b"scd4x_config", "sen5x_config", b"sen5x_config", "shtxx_config", b"shtxx_config"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___SensorConfig: _TypeAlias = SensorConfig  # noqa: Y015
 
