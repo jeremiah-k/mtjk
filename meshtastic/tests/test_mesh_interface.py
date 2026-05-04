@@ -24,6 +24,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import meshtastic.mesh_interface as mesh_interface_module
+from meshtastic.mesh_interface_runtime import receive_pipeline as receive_pipeline_module
 from meshtastic.mesh_interface_runtime import flows as flows_module
 from meshtastic.mesh_interface_runtime.request_wait import (
     UNSCOPED_WAIT_REQUEST_ID,
@@ -116,7 +117,7 @@ def _install_protocol_stub(
         onReceive=on_receive,
     )
     monkeypatch.setattr(
-        mesh_interface_module,
+        receive_pipeline_module,
         "protocols",
         {portnum: fake_protocol},
     )
@@ -3862,12 +3863,20 @@ def test_handle_from_radio_branch_matrix(
         handle_packet = MagicMock()
         handle_log_record = MagicMock()
         handle_queue_status = MagicMock()
-        monkeypatch.setattr(iface, "_handle_config_complete", handle_config_complete)
-        monkeypatch.setattr(iface, "_handle_channel", handle_channel)
-        monkeypatch.setattr(iface, "_handle_packet_from_radio", handle_packet)
-        monkeypatch.setattr(iface, "_handle_log_record", handle_log_record)
         monkeypatch.setattr(
-            iface, "_handle_queue_status_from_radio", handle_queue_status
+            iface._receive_pipeline, "_handle_config_complete", handle_config_complete
+        )
+        monkeypatch.setattr(iface._receive_pipeline, "_handle_channel", handle_channel)
+        monkeypatch.setattr(
+            iface._receive_pipeline, "_handle_packet_from_radio", handle_packet
+        )
+        monkeypatch.setattr(
+            iface._receive_pipeline, "_handle_log_record", handle_log_record
+        )
+        monkeypatch.setattr(
+            iface._receive_pipeline,
+            "_handle_queue_status_from_radio",
+            handle_queue_status,
         )
 
         config_complete_msg = mesh_pb2.FromRadio()
@@ -4057,7 +4066,7 @@ def test_handle_packet_from_radio_toid_warning_and_response_handler_paths(
         setattr(packet_for_toid, "from", 1)
         packet_for_toid.to = 2
         with patch.object(
-            iface,
+            iface._receive_pipeline,
             "_node_num_to_id",
             side_effect=["!00000001", RuntimeError("toId failure")],
         ):
@@ -4089,7 +4098,7 @@ def test_handle_packet_from_radio_toid_warning_and_response_handler_paths(
             onReceive=_on_receive,
         )
         monkeypatch.setattr(
-            mesh_interface_module,
+            receive_pipeline_module,
             "protocols",
             {portnums_pb2.PortNum.ROUTING_APP: fake_protocol},
         )
@@ -4638,6 +4647,58 @@ class _FakeSendPipeline:
 
     def sendMqttClientProxyMessage(self, *args: object, **kwargs: object) -> None:
         self.calls.append(("sendMqttClientProxyMessage", args, kwargs))
+
+
+class _FakeReceivePipeline:
+    """Test double capturing receive pipeline call patterns."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def _handle_from_radio(self, *args: object, **kwargs: object) -> None:
+        self.calls.append(("_handle_from_radio", args, kwargs))
+
+    def _handle_packet_from_radio(
+        self, *args: object, **kwargs: object
+    ) -> list[object]:
+        self.calls.append(("_handle_packet_from_radio", args, kwargs))
+        return ["handled-packet"]
+
+
+@pytest.mark.unit
+def test_mesh_interface_handle_from_radio_delegates_to_receive_pipeline() -> None:
+    """_handle_from_radio should route through ReceivePipeline, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeReceivePipeline()
+    interface._receive_pipeline = fake
+
+    interface._handle_from_radio(b"payload")
+
+    assert fake.calls == [("_handle_from_radio", (b"payload",), {})]
+
+
+@pytest.mark.unit
+def test_mesh_interface_handle_packet_delegates_to_receive_pipeline() -> None:
+    """_handle_packet_from_radio should route through ReceivePipeline."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeReceivePipeline()
+    interface._receive_pipeline = fake
+    packet = mesh_pb2.MeshPacket()
+
+    result = interface._handle_packet_from_radio(
+        packet,
+        hack=True,
+        emit_publication=False,
+    )
+
+    assert result == ["handled-packet"]
+    assert fake.calls == [
+        (
+            "_handle_packet_from_radio",
+            (packet,),
+            {"allow_zero_source": True, "emit_publication": False},
+        )
+    ]
 
 
 @pytest.mark.unit

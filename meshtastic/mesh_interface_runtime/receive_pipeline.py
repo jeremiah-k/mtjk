@@ -643,11 +643,11 @@ class ReceivePipeline:
         """Populate fromId/toId fields from known node-number mappings."""
         try:
             packet_dict["fromId"] = self._node_num_to_id(packet_dict["from"], False)
-        except (KeyError, TypeError, ValueError) as ex:
+        except Exception as ex:
             logger.warning("Not populating fromId: %s", ex, exc_info=True)
         try:
             packet_dict["toId"] = self._node_num_to_id(packet_dict["to"])
-        except (KeyError, TypeError, ValueError) as ex:
+        except Exception as ex:
             logger.warning("Not populating toId: %s", ex, exc_info=True)
 
     def _node_num_to_id(self, num: int, isDest: bool = True) -> str | None:

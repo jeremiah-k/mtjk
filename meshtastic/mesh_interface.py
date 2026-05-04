@@ -4,8 +4,6 @@
 
 import base64
 import collections
-import copy
-import hashlib
 import logging
 import random
 import sys
@@ -14,9 +12,6 @@ import time
 import traceback
 from types import TracebackType
 from typing import IO, Any, Callable, TypeAlias, cast
-
-import google.protobuf.json_format
-from google.protobuf import message as protobuf_message
 
 try:
     import print_color  # type: ignore[import-untyped]
@@ -28,10 +23,8 @@ from pubsub import pub
 import meshtastic.node
 from meshtastic import (
     BROADCAST_ADDR,
-    BROADCAST_NUM,
     NODELESS_WANT_CONFIG_ID,
     ResponseHandler,
-    protocols,
     publishingThread,
 )
 from meshtastic.mesh_interface_runtime.flows import (
@@ -41,17 +34,12 @@ from meshtastic.mesh_interface_runtime.flows import (
 from meshtastic.mesh_interface_runtime.node_view import NodeView
 from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
 from meshtastic.mesh_interface_runtime.receive_pipeline import (
-    LOCAL_CONFIG_FROM_RADIO_FIELDS,
-    MODULE_CONFIG_FROM_RADIO_FIELDS,
     ReceivePipeline,
     _FromRadioContext,
-    _LazyMessageDict,
     _PacketRuntimeContext,
     _PublicationIntent,
 )
 from meshtastic.mesh_interface_runtime.request_wait import (
-    DECODE_ERROR_KEY,
-    DECODE_FAILED_PREFIX,
     RETIRED_WAIT_REQUEST_ID_TTL_SECONDS,
     _RequestWaitRuntime,
 )
@@ -75,7 +63,6 @@ from meshtastic.protobuf import (
 from meshtastic.util import (
     Acknowledgment,
     Timeout,
-    stripnl,
 )
 
 logger = logging.getLogger(__name__)
@@ -1728,314 +1715,139 @@ class MeshInterface:  # pylint: disable=R0902
 
     def _handle_from_radio(self, fromRadioBytes: bytes) -> None:
         """Handle a raw FromRadio payload."""
-        from_radio = self._parse_from_radio_bytes(fromRadioBytes)
-        context = self._normalize_from_radio_message(from_radio)
-        publication_intents = self._dispatch_from_radio_message(context)
-        self._emit_publication_intents(publication_intents)
+        self._receive_pipeline._handle_from_radio(fromRadioBytes)
 
     def _parse_from_radio_bytes(self, from_radio_bytes: bytes) -> mesh_pb2.FromRadio:
         """Parse raw FromRadio bytes into protobuf form."""
-        from_radio = mesh_pb2.FromRadio()
-        frame_length = len(from_radio_bytes)
-        frame_checksum = hashlib.sha256(from_radio_bytes).hexdigest()[:12]
-        logger.debug(
-            "Received FromRadio frame len=%d sha256=%s",
-            frame_length,
-            frame_checksum,
-        )
-        try:
-            from_radio.ParseFromString(from_radio_bytes)
-        except Exception:
-            logger.exception(
-                "Error while parsing FromRadio frame len=%d sha256=%s",
-                frame_length,
-                frame_checksum,
-            )
-            raise
-        return from_radio
+        return self._receive_pipeline._parse_from_radio_bytes(from_radio_bytes)
 
     def _normalize_from_radio_message(
         self, from_radio: mesh_pb2.FromRadio
     ) -> _FromRadioContext:
         """Normalize parsed FromRadio data for dispatch and mutation handlers."""
-        logger.debug("Received from radio: %s", from_radio)
-        with self._node_db_lock:
-            config_id = self.configId
-        return _FromRadioContext(
-            message=from_radio,
-            message_dict=_LazyMessageDict(from_radio),
-            config_id=config_id,
-        )
+        return self._receive_pipeline._normalize_from_radio_message(from_radio)
 
     def _dispatch_from_radio_message(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Dispatch normalized FromRadio payloads to dedicated branch handlers."""
-        branch = self._select_from_radio_branch(context)
-        if branch is None:
-            logger.debug("Unexpected FromRadio payload")
-            return []
-        handler = self._from_radio_dispatch_map()[branch]
-        return handler(context)
+        return self._receive_pipeline._dispatch_from_radio_message(context)
 
     def _select_from_radio_branch(self, context: _FromRadioContext) -> str | None:
         """Select the active FromRadio branch using the historical precedence order."""
-        from_radio = context.message
-        branches: list[
-            tuple[
-                Callable[[mesh_pb2.FromRadio, _FromRadioContext], bool],
-                str,
-            ]
-        ] = [
-            (_FR_HAS_MY_INFO, "my_info"),
-            (_FR_HAS_METADATA, "metadata"),
-            (_FR_HAS_NODE_INFO, "node_info"),
-            (_FR_IS_CONFIG_COMPLETE_ID, "config_complete_id"),
-            (_FR_HAS_CHANNEL, "channel"),
-            (_FR_HAS_PACKET, "packet"),
-            (_FR_HAS_LOG_RECORD, "log_record"),
-            (_FR_HAS_QUEUE_STATUS, "queueStatus"),
-            (_FR_HAS_CLIENT_NOTIFICATION, "clientNotification"),
-            (_FR_HAS_MQTT_CLIENT_PROXY_MESSAGE, "mqttClientProxyMessage"),
-            (_FR_HAS_XMODEM_PACKET, "xmodemPacket"),
-            (_FR_IS_REBOOTED, "rebooted"),
-            (_FR_HAS_CONFIG_OR_MODULE_CONFIG, "config_or_moduleConfig"),
-        ]
-        for predicate, branch_name in branches:
-            if predicate(from_radio, context):
-                return branch_name
-        return None
+        return self._receive_pipeline._select_from_radio_branch(context)
 
     def _from_radio_dispatch_map(
         self,
     ) -> dict[str, Callable[[_FromRadioContext], list[_PublicationIntent]]]:
         """Return branch handlers for FromRadio dispatch."""
-        if self._from_radio_dispatch_map_cache is None:
-            self._from_radio_dispatch_map_cache = {
-                "my_info": self._handle_from_radio_my_info,
-                "metadata": self._handle_from_radio_metadata,
-                "node_info": self._handle_from_radio_node_info,
-                "config_complete_id": self._handle_from_radio_config_complete_id,
-                "channel": self._handle_from_radio_channel,
-                "packet": self._handle_from_radio_packet,
-                "log_record": self._handle_from_radio_log_record,
-                "queueStatus": self._handle_from_radio_queue_status,
-                "clientNotification": self._handle_from_radio_client_notification,
-                "mqttClientProxyMessage": self._handle_from_radio_mqtt_client_proxy_message,
-                "xmodemPacket": self._handle_from_radio_xmodem_packet,
-                "rebooted": self._handle_from_radio_rebooted,
-                "config_or_moduleConfig": self._handle_from_radio_config_update,
-            }
-        return self._from_radio_dispatch_map_cache
+        return self._receive_pipeline._from_radio_dispatch_map()
 
     def _handle_from_radio_my_info(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Apply my_info updates to interface state."""
-        from_radio = context.message
-        with self._node_db_lock:
-            my_info = mesh_pb2.MyNodeInfo()
-            my_info.CopyFrom(from_radio.my_info)
-            self.myInfo = my_info
-            self.localNode.nodeNum = my_info.my_node_num
-        logger.debug("Received myinfo: %s", stripnl(from_radio.my_info))
-        return []
+        return self._receive_pipeline._handle_from_radio_my_info(context)
 
     def _handle_from_radio_metadata(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Apply metadata updates to interface state."""
-        from_radio = context.message
-        with self._node_db_lock:
-            metadata = mesh_pb2.DeviceMetadata()
-            metadata.CopyFrom(from_radio.metadata)
-            self.metadata = metadata
-        logger.debug("Received device metadata: %s", stripnl(from_radio.metadata))
-        return []
+        return self._receive_pipeline._handle_from_radio_metadata(context)
 
     def _handle_from_radio_node_info(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Apply node_info updates and emit node-updated publication intents."""
-        node_info = context.message_dict.get()["nodeInfo"]
-        logger.debug("Received nodeinfo: %s", node_info)
-
-        node = self._get_or_create_by_num(node_info["num"])
-        with self._node_db_lock:
-            node.update(node_info)
-            try:
-                node["position"] = self._fixup_position(node["position"])
-            except KeyError:
-                logger.debug("Node has no position key")
-
-            # no longer necessary since we're mutating directly in nodesByNum via _get_or_create_by_num
-            # self.nodesByNum[node["num"]] = node
-            # Some nodes might not have user/ids assigned yet.
-            # Keep nodes and nodesByNum mutation under the same lock so readers
-            # never observe partially-updated node mappings.
-            if "user" in node and "id" in node["user"] and self.nodes is not None:
-                self.nodes[node["user"]["id"]] = node
-            published_node = copy.deepcopy(node)
-
-        return [
-            self._publication_intent("meshtastic.node.updated", node=published_node),
-        ]
+        return self._receive_pipeline._handle_from_radio_node_info(context)
 
     def _handle_from_radio_config_complete_id(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle config-complete correlation and startup completion."""
-        logger.debug("Config complete ID %s", context.config_id)
-        self._handle_config_complete()
-        return []
+        return self._receive_pipeline._handle_from_radio_config_complete_id(context)
 
     def _handle_from_radio_channel(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle incoming channel updates."""
-        self._handle_channel(context.message.channel)
-        return []
+        return self._receive_pipeline._handle_from_radio_channel(context)
 
     def _handle_from_radio_packet(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle incoming mesh packets and return publication intents."""
-        return self._handle_packet_from_radio(
-            context.message.packet,
-            emit_publication=False,
-        )
+        return self._receive_pipeline._handle_from_radio_packet(context)
 
     def _handle_from_radio_log_record(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle incoming log records."""
-        self._handle_log_record(context.message.log_record)
-        return []
+        return self._receive_pipeline._handle_from_radio_log_record(context)
 
     def _handle_from_radio_queue_status(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle inbound queue status updates/correlation."""
-        self._handle_queue_status_from_radio(context.message.queueStatus)
-        return []
+        return self._receive_pipeline._handle_from_radio_queue_status(context)
 
     def _handle_from_radio_client_notification(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Build publication intent for client notifications."""
-        return [
-            self._publication_intent(
-                "meshtastic.clientNotification",
-                notification=context.message.clientNotification,
-            ),
-        ]
+        return self._receive_pipeline._handle_from_radio_client_notification(context)
 
     def _handle_from_radio_mqtt_client_proxy_message(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Build publication intent for MQTT client proxy messages."""
-        return [
-            self._publication_intent(
-                "meshtastic.mqttclientproxymessage",
-                proxymessage=context.message.mqttClientProxyMessage,
-            ),
-        ]
+        return self._receive_pipeline._handle_from_radio_mqtt_client_proxy_message(
+            context
+        )
 
     def _handle_from_radio_xmodem_packet(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Build publication intent for inbound XMODEM payloads."""
-        return [
-            self._publication_intent(
-                "meshtastic.xmodempacket",
-                packet=context.message.xmodemPacket,
-            ),
-        ]
+        return self._receive_pipeline._handle_from_radio_xmodem_packet(context)
 
     def _handle_from_radio_rebooted(
         self, _context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Handle reboot notifications by disconnecting and restarting config flow."""
-        # Tell clients the device went away.  Careful not to call the overridden
-        # subclass version that closes the serial port
-        MeshInterface._disconnected(self)
-        self._start_config()  # redownload the node db etc...
-        return []
+        return self._receive_pipeline._handle_from_radio_rebooted(_context)
 
     def _handle_from_radio_config_update(
         self, context: _FromRadioContext
     ) -> list[_PublicationIntent]:
         """Apply localConfig/moduleConfig updates from inbound FromRadio payloads."""
-        self._apply_config_from_radio(context.message)
-        return []
+        return self._receive_pipeline._handle_from_radio_config_update(context)
 
     def _apply_config_from_radio(self, from_radio: mesh_pb2.FromRadio) -> None:
         """Copy the active config/moduleConfig submessage into local cached config."""
-        with self._node_db_lock:
-            self._apply_local_config_from_radio(from_radio.config)
-            self._apply_module_config_from_radio(from_radio.moduleConfig)
+        self._receive_pipeline._apply_config_from_radio(from_radio)
 
     def _apply_local_config_from_radio(self, config: config_pb2.Config) -> bool:
         """Apply all present localConfig fields from inbound config payload."""
-        applied = False
-        source_fields = config.DESCRIPTOR.fields_by_name
-        target_fields = self.localNode.localConfig.DESCRIPTOR.fields_by_name
-        for field_name in LOCAL_CONFIG_FROM_RADIO_FIELDS:
-            if field_name not in source_fields:
-                continue
-            if field_name not in target_fields:
-                logger.debug(
-                    "Skipping unsupported localConfig field from radio update: %s",
-                    field_name,
-                )
-                continue
-            if config.HasField(field_name):  # type: ignore[arg-type]  # field_name is from known-valid LOCAL_CONFIG_FROM_RADIO_FIELDS
-                getattr(self.localNode.localConfig, field_name).CopyFrom(
-                    getattr(config, field_name)
-                )
-                applied = True
-        return applied
+        return self._receive_pipeline._apply_local_config_from_radio(config)
 
     def _apply_module_config_from_radio(
         self, module_config: module_config_pb2.ModuleConfig
     ) -> bool:
         """Apply all present moduleConfig fields from inbound moduleConfig payload."""
-        applied = False
-        source_fields = module_config.DESCRIPTOR.fields_by_name
-        target_fields = self.localNode.moduleConfig.DESCRIPTOR.fields_by_name
-        for field_name in MODULE_CONFIG_FROM_RADIO_FIELDS:
-            if field_name not in source_fields:
-                continue
-            if field_name not in target_fields:
-                logger.debug(
-                    "Skipping unsupported moduleConfig field from radio update: %s",
-                    field_name,
-                )
-                continue
-            if module_config.HasField(field_name):  # type: ignore[arg-type]  # field_name is from known-valid MODULE_CONFIG_FROM_RADIO_FIELDS
-                getattr(self.localNode.moduleConfig, field_name).CopyFrom(
-                    getattr(module_config, field_name)
-                )
-                applied = True
-        return applied
+        return self._receive_pipeline._apply_module_config_from_radio(module_config)
 
     def _publication_intent(self, topic: str, **payload: Any) -> _PublicationIntent:
         """Create a publication intent for deferred emission."""
-        return _PublicationIntent(topic=topic, payload=dict(payload))
+        return self._receive_pipeline._publication_intent(topic, **payload)
 
     def _emit_publication_intents(self, intents: list[_PublicationIntent]) -> None:
         """Emit queued publication intents in a dedicated publication phase."""
-        for intent in intents:
-            self._queue_publication(intent.topic, **intent.payload)
+        self._receive_pipeline._emit_publication_intents(intents)
 
     def _queue_publication(self, topic: str, **payload: Any) -> None:
         """Queue a pubsub emission for the publishing thread."""
-        payload_snapshot = dict(payload)
-
-        def publish_work() -> None:
-            pub.sendMessage(topic, interface=self, **payload_snapshot)
-
-        publishingThread.queueWork(publish_work)
+        self._receive_pipeline._queue_publication(topic, **payload)
 
     def _fixup_position(self, position: dict[str, Any]) -> dict[str, Any]:
         """Convert integer micro-degree coordinates in a position dict to floating-point degrees.
@@ -2053,11 +1865,7 @@ class MeshInterface:  # pylint: disable=R0902
         dict[str, Any]
             The same position dictionary with 'latitude' and/or 'longitude' set to float degrees when corresponding integer fields were present.
         """
-        if "latitudeI" in position:
-            position["latitude"] = position["latitudeI"] * 1e-7
-        if "longitudeI" in position:
-            position["longitude"] = position["longitudeI"] * 1e-7
-        return position
+        return self._receive_pipeline._fixup_position(position)
 
     def _node_num_to_id(self, num: int, isDest: bool = True) -> str | None:
         """Map a mesh numeric node number to its node ID string or a broadcast/unknown literal.
@@ -2080,29 +1888,7 @@ class MeshInterface:  # pylint: disable=R0902
             The node ID string, BROADCAST_ADDR for broadcast destinations, "Unknown" for
             broadcast sources, or `None` if the node number is not present in the local node map.
         """
-        if num == BROADCAST_NUM:
-            return BROADCAST_ADDR if isDest else "Unknown"
-
-        with self._node_db_lock:
-            nodes = self.nodesByNum
-            if nodes is None:
-                logger.debug(
-                    "Node database not initialized while resolving node id for %s", num
-                )
-                return None
-            node = nodes.get(num)
-            if not isinstance(node, dict):
-                logger.debug("Node %s not found for fromId", num)
-                return None
-            user = node.get("user")
-            if not isinstance(user, dict):
-                logger.debug("Node %s has no user payload for fromId", num)
-                return None
-            node_id = user.get("id")
-            if not isinstance(node_id, str):
-                logger.debug("Node %s user payload has no valid id", num)
-                return None
-            return node_id
+        return self._receive_pipeline._node_num_to_id(num, isDest=isDest)
 
     def _get_or_create_by_num(self, nodeNum: int) -> dict[str, Any]:
         """Retrieve the node record for a numeric node ID, creating a minimal placeholder if none exists.
@@ -2122,29 +1908,7 @@ class MeshInterface:  # pylint: disable=R0902
         MeshInterface.MeshInterfaceError
             If nodeNum is the broadcast node number or if the node database has not been initialized.
         """
-        if nodeNum == BROADCAST_NUM:
-            raise MeshInterface.MeshInterfaceError(
-                "Can not create/find nodenum by the broadcast num"
-            )
-
-        with self._node_db_lock:
-            if self.nodesByNum is None:
-                raise MeshInterface.MeshInterfaceError("Node database not initialized")
-
-            if nodeNum in self.nodesByNum:
-                return self.nodesByNum[nodeNum]
-            presumptive_id = f"!{nodeNum:08x}"
-            n = {
-                "num": nodeNum,
-                "user": {
-                    "id": presumptive_id,
-                    "longName": f"Meshtastic {presumptive_id[-4:]}",
-                    "shortName": f"{presumptive_id[-4:]}",
-                    "hwModel": "UNSET",
-                },
-            }  # Create a minimal node db entry
-            self.nodesByNum[nodeNum] = n
-            return n
+        return self._receive_pipeline._get_or_create_by_num(nodeNum)
 
     def _handle_channel(self, channel: channel_pb2.Channel) -> None:
         """Record a received local channel descriptor for later configuration.
@@ -2154,8 +1918,7 @@ class MeshInterface:  # pylint: disable=R0902
         channel : channel_pb2.Channel
             Channel descriptor to append to the internal _localChannels list.
         """
-        with self._node_db_lock:
-            self._localChannels.append(channel)
+        self._receive_pipeline._handle_channel(channel)
 
     def _handle_packet_from_radio(
         self,
@@ -2169,32 +1932,11 @@ class MeshInterface:  # pylint: disable=R0902
         The `hack` flag bypasses the normal rejection of packets with from==0; this
         compatibility path exists for tests and legacy call paths.
         """
-        packet_dict = self._normalize_packet_from_radio(meshPacket, hack=hack)
-        if packet_dict is None:
-            return []
-
-        packet_context = _PacketRuntimeContext(packet_dict=packet_dict)
-        self._enrich_packet_identity(packet_context.packet_dict)
-        self._classify_packet_runtime(packet_context, meshPacket)
-        self._apply_packet_runtime_mutations(packet_context, meshPacket)
-        self._invoke_packet_on_receive(packet_context)
-        self._correlate_packet_response_handler(packet_context)
-        published_packet = copy.deepcopy(packet_context.packet_dict)
-
-        publication_intents = [
-            self._publication_intent(
-                packet_context.topic,
-                packet=published_packet,
-            )
-        ]
-        logger.debug(
-            "Publishing %s: packet=%s",
-            packet_context.topic,
-            stripnl(published_packet),
+        return self._receive_pipeline._handle_packet_from_radio(
+            meshPacket,
+            allow_zero_source=hack,
+            emit_publication=emit_publication,
         )
-        if emit_publication:
-            self._emit_publication_intents(publication_intents)
-        return publication_intents
 
     def _normalize_packet_from_radio(
         self,
@@ -2203,37 +1945,14 @@ class MeshInterface:  # pylint: disable=R0902
         hack: bool,
     ) -> dict[str, Any] | None:
         """Convert protobuf packet into runtime dict and enforce legacy defaults."""
-        if not hack and getattr(meshPacket, "from") == 0:
-            packet_dict = {"raw": meshPacket, "from": 0}
-            logger.error(
-                "Device returned a packet we sent, ignoring: %s",
-                stripnl(packet_dict),
-            )
-            return None
-
-        packet_dict = _LazyMessageDict(meshPacket).get()
-
-        # We normally decompose the payload into a dictionary so that the client
-        # doesn't need to understand protobufs.  But advanced clients might
-        # want the raw protobuf, so we provide it in "raw"
-        packet_dict["raw"] = meshPacket
-        if hack and "from" not in packet_dict and getattr(meshPacket, "from") == 0:
-            packet_dict["from"] = 0
-
-        if "to" not in packet_dict:
-            packet_dict["to"] = 0
-        return packet_dict
+        return self._receive_pipeline._normalize_packet_from_radio(
+            meshPacket,
+            allow_zero_source=hack,
+        )
 
     def _enrich_packet_identity(self, packet_dict: dict[str, Any]) -> None:
         """Populate fromId/toId fields from known node-number mappings."""
-        try:
-            packet_dict["fromId"] = self._node_num_to_id(packet_dict["from"], False)
-        except Exception as ex:
-            logger.warning("Not populating fromId: %s", ex, exc_info=True)
-        try:
-            packet_dict["toId"] = self._node_num_to_id(packet_dict["to"])
-        except Exception as ex:
-            logger.warning("Not populating toId: %s", ex, exc_info=True)
+        self._receive_pipeline._enrich_packet_identity(packet_dict)
 
     def _classify_packet_runtime(
         self,
@@ -2241,30 +1960,7 @@ class MeshInterface:  # pylint: disable=R0902
         mesh_packet: mesh_pb2.MeshPacket,
     ) -> None:
         """Classify packet topic and decoded payload view."""
-        # We could provide our objects as DotMaps - which work with . notation or as dictionaries
-        # asObj = DotMap(asDict)
-        packet_context.topic = "meshtastic.receive"  # Generic unknown packet type
-
-        if "decoded" not in packet_context.packet_dict:
-            return
-
-        decoded = cast(dict[str, Any], packet_context.packet_dict["decoded"])
-        packet_context.decoded = decoded
-        # The default MessageToDict converts byte arrays into base64 strings.
-        # We don't want that - it messes up data payload.  So slam in the correct
-        # byte array.
-        decoded["payload"] = mesh_packet.decoded.payload
-
-        portnum = portnums_pb2.PortNum.Name(portnums_pb2.PortNum.UNKNOWN_APP)
-        # UNKNOWN_APP is the default protobuf portnum value, and therefore if not
-        # set it will not be populated at all to make API usage easier, set
-        # it to prevent confusion
-        if "portnum" not in decoded:
-            decoded["portnum"] = portnum
-            logger.warning("portnum was not in decoded. Setting to:%s", portnum)
-        else:
-            portnum = decoded["portnum"]
-        packet_context.topic = f"meshtastic.receive.data.{portnum}"
+        self._receive_pipeline._classify_packet_runtime(packet_context, mesh_packet)
 
     def _apply_packet_runtime_mutations(
         self,
@@ -2272,29 +1968,14 @@ class MeshInterface:  # pylint: disable=R0902
         mesh_packet: mesh_pb2.MeshPacket,
     ) -> None:
         """Decode known payloads and run protocol-specific onReceive handlers."""
-        if packet_context.decoded is None:
-            return
-
-        # decode position protobufs and update nodedb, provide decoded version
-        # as "position" in the published msg move the following into a 'decoders'
-        # API that clients could register?
-        port_num_int = mesh_packet.decoded.portnum  # we want portnum as an int
-        handler = protocols.get(port_num_int)
-        if handler is None:
-            return
-
-        packet_context.topic = f"meshtastic.receive.{handler.name}"
-        self._decode_packet_payload_with_handler(packet_context, mesh_packet, handler)
-
-        # Call specialized onReceive if necessary
-        if handler.onReceive is not None:
-            packet_context.on_receive_callback = handler.onReceive
+        self._receive_pipeline._apply_packet_runtime_mutations(
+            packet_context,
+            mesh_packet,
+        )
 
     def _invoke_packet_on_receive(self, packet_context: _PacketRuntimeContext) -> None:
         """Run protocol onReceive callback if one was selected during mutation."""
-        if packet_context.on_receive_callback is None:
-            return
-        packet_context.on_receive_callback(self, packet_context.packet_dict)
+        self._receive_pipeline._invoke_packet_on_receive(packet_context)
 
     def _decode_packet_payload_with_handler(
         self,
@@ -2303,48 +1984,14 @@ class MeshInterface:  # pylint: disable=R0902
         handler: Any,
     ) -> None:
         """Decode decoded.payload using a protocol handler protobuf factory when available."""
-        if handler.protobufFactory is None:
-            return
-
-        pb = handler.protobufFactory()
-        try:
-            pb.ParseFromString(mesh_packet.decoded.payload)
-            decoded_payload = google.protobuf.json_format.MessageToDict(pb)
-            packet_context.packet_dict["decoded"][handler.name] = decoded_payload
-            # Also provide the protobuf raw
-            packet_context.packet_dict["decoded"][handler.name]["raw"] = pb
-        except (protobuf_message.DecodeError, TypeError, ValueError) as exc:
-            decode_error = f"{DECODE_FAILED_PREFIX}{exc}"
-            logger.warning(
-                "Failed to decode %s payload for packet id=%s from=%s to=%s: %s",
-                handler.name,
-                getattr(mesh_packet, "id", 0),
-                packet_context.packet_dict.get("from"),
-                packet_context.packet_dict.get("to"),
-                exc,
-            )
-            packet_context.packet_dict["decoded"][handler.name] = {
-                DECODE_ERROR_KEY: decode_error
-            }
-            if handler.name == "routing":
-                packet_context.packet_dict["decoded"][handler.name][
-                    "errorReason"
-                ] = decode_error
-            if handler.name == "admin":
-                # Admin callbacks frequently expect decoded.admin.raw.
-                # Avoid dispatching malformed payloads through that path.
-                packet_context.skip_response_callback_for_decode_failure = True
+        self._receive_pipeline._decode_packet_payload_with_handler(
+            packet_context,
+            mesh_packet,
+            handler,
+        )
 
     def _correlate_packet_response_handler(
         self, packet_context: _PacketRuntimeContext
     ) -> None:
         """Correlate requestId responses with registered response handlers."""
-        if packet_context.decoded is None:
-            return
-        self._request_wait_runtime.correlate_inbound_response(
-            packet_dict=packet_context.packet_dict,
-            skip_response_callback_for_decode_failure=(
-                packet_context.skip_response_callback_for_decode_failure
-            ),
-            extract_request_id=self._extract_request_id_from_packet,
-        )
+        self._receive_pipeline._correlate_packet_response_handler(packet_context)
