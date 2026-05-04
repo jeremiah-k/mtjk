@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
 from meshtastic.protobuf import mesh_pb2
 
 
@@ -21,9 +22,8 @@ class _QueueHarness:
         self.queue_status = queue_status
 
 
+@pytest.mark.unit
 def test_has_free_space_returns_true_when_no_status() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -33,12 +33,11 @@ def test_has_free_space_returns_true_when_no_status() -> None:
         queue_wait_delay_seconds=0.0,
     )
 
-    assert runtime.has_free_space()
+    assert runtime._has_free_space()
 
 
+@pytest.mark.unit
 def test_claim_does_nothing_when_no_queue_status() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -48,14 +47,13 @@ def test_claim_does_nothing_when_no_queue_status() -> None:
         queue_wait_delay_seconds=0.0,
     )
 
-    runtime.claim()
+    runtime._claim()
 
     assert len(harness.queue) == 0
 
 
+@pytest.mark.unit
 def test_claim_decrements_free_when_status_available() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -69,14 +67,13 @@ def test_claim_decrements_free_when_status_available() -> None:
     status.maxlen = 10
     harness.set_queue_status(status)
 
-    runtime.claim()
+    runtime._claim()
 
     assert status.free == 2
 
 
+@pytest.mark.unit
 def test_pop_for_send_returns_oldest_entry_when_no_status() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -89,14 +86,13 @@ def test_pop_for_send_returns_oldest_entry_when_no_status() -> None:
     packet.packet.id = 123
     harness.queue[123] = packet
 
-    popped = runtime.pop_for_send()
+    popped = runtime._pop_for_send()
 
     assert popped == (123, packet)
 
 
+@pytest.mark.unit
 def test_pop_for_send_returns_none_when_queue_empty() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -106,14 +102,13 @@ def test_pop_for_send_returns_none_when_queue_empty() -> None:
         queue_wait_delay_seconds=0.0,
     )
 
-    popped = runtime.pop_for_send()
+    popped = runtime._pop_for_send()
 
     assert popped is None
 
 
+@pytest.mark.unit
 def test_pop_for_send_obeys_free_space_limit() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -130,14 +125,13 @@ def test_pop_for_send_obeys_free_space_limit() -> None:
     packet.packet.id = 456
     harness.queue[456] = packet
 
-    popped = runtime.pop_for_send()
+    popped = runtime._pop_for_send()
 
     assert popped is None
 
 
+@pytest.mark.unit
 def test_correlate_queue_status_reply_removes_matching_packet() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -153,14 +147,35 @@ def test_correlate_queue_status_reply_removes_matching_packet() -> None:
     status.mesh_packet_id = 456
     status.free = 1
 
-    runtime.correlate_queue_status_reply(status)
+    runtime._correlate_queue_status_reply(status)
 
     assert 456 not in harness.queue
 
 
-def test_record_queue_status_persists_status() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
+@pytest.mark.unit
+def test_correlate_queue_status_reply_mismatched_id_preserves_queue() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 456
+    harness.queue[456] = packet
+    status = mesh_pb2.QueueStatus()
+    status.mesh_packet_id = 999
+    status.free = 1
 
+    runtime._correlate_queue_status_reply(status)
+
+    assert 456 in harness.queue
+
+
+@pytest.mark.unit
+def test_record_queue_status_persists_status() -> None:
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -173,14 +188,13 @@ def test_record_queue_status_persists_status() -> None:
     status.free = 4
     status.maxlen = 10
 
-    runtime.record_queue_status(status)
+    runtime._record_queue_status(status)
 
     assert harness.queue_status == status
 
 
+@pytest.mark.unit
 def test_send_to_radio_propagates_transport_failure() -> None:
-    from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
-
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -197,9 +211,9 @@ def test_send_to_radio_propagates_transport_failure() -> None:
         raise OSError("radio unavailable")
 
     with pytest.raises(OSError, match="radio unavailable"):
-        runtime.send_to_radio(
+        runtime._send_to_radio(
             packet,
             send_impl=fail_send,
-            pop_for_send=runtime.pop_for_send,
+            pop_for_send=runtime._pop_for_send,
             sleep_fn=lambda _: None,
         )

@@ -3803,7 +3803,7 @@ def test_handle_queue_status_awaiting_correlation_not_marked_unexpected(
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool] = OrderedDict(
             [(packet_id, packet)]
         )
-        iface._queue_send_runtime.reconcile_resent_queue(
+        iface._queue_send_runtime._reconcile_resent_queue(
             resent_queue=resent_queue,
             sent_packet_ids={packet_id},
         )
@@ -4640,6 +4640,7 @@ class _FakeSendPipeline:
         self.calls.append(("sendMqttClientProxyMessage", args, kwargs))
 
 
+@pytest.mark.unit
 def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
     """SendText should route through _send_pipeline.sendText, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
@@ -4661,6 +4662,7 @@ def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
     assert kwargs["hopLimit"] is None
 
 
+@pytest.mark.unit
 def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
     """SendAlert should route through _send_pipeline.sendAlert, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
@@ -4680,6 +4682,7 @@ def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
     assert kwargs["hopLimit"] is None
 
 
+@pytest.mark.unit
 def test_mesh_interface_mqtt_proxy_delegates_to_send_pipeline() -> None:
     """SendMqttClientProxyMessage should route through _send_pipeline, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)

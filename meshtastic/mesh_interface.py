@@ -1623,14 +1623,14 @@ class MeshInterface:  # pylint: disable=R0902
         bool
             `True` if at least one free slot is available or the queue status is unknown, `False` otherwise.
         """
-        return self._queue_send_runtime.has_free_space()
+        return self._queue_send_runtime._has_free_space()
 
     def _queue_claim(self) -> None:
         """Decrement the cached transmit-queue free-slot counter when a packet is claimed.
 
         Does nothing if queue status information is not available.
         """
-        self._queue_send_runtime.claim()
+        self._queue_send_runtime._claim()
 
     def _queue_pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
         """Atomically pop the next queued packet if TX queue state permits sending.
@@ -1641,7 +1641,7 @@ class MeshInterface:  # pylint: disable=R0902
             The popped queue entry `(packet_id, payload)` when available and sendable,
             otherwise `None`.
         """
-        return self._queue_send_runtime.pop_for_send()
+        return self._queue_send_runtime._pop_for_send()
 
     def _send_to_radio(self, toRadio: mesh_pb2.ToRadio) -> None:
         """Queue and transmit a ToRadio protobuf to the radio device.
@@ -1663,7 +1663,7 @@ class MeshInterface:  # pylint: disable=R0902
             )
             return
 
-        self._queue_send_runtime.send_to_radio(
+        self._queue_send_runtime._send_to_radio(
             toRadio,
             send_impl=self._send_to_radio_impl,
             pop_for_send=self._queue_pop_for_send,
@@ -1715,15 +1715,15 @@ class MeshInterface:  # pylint: disable=R0902
             An object (protobuf-like) with attributes `free`, `maxlen`,
             `res`, and `mesh_packet_id` describing the radio's transmit-queue state.
         """
-        self._queue_send_runtime.handle_queue_status_from_radio(queueStatus)
+        self._queue_send_runtime._handle_queue_status_from_radio(queueStatus)
 
     def _record_queue_status(self, queueStatus: mesh_pb2.QueueStatus) -> None:
         """Persist latest radio TX queue status under queue ownership."""
-        self._queue_send_runtime.record_queue_status(queueStatus)
+        self._queue_send_runtime._record_queue_status(queueStatus)
 
     def _correlate_queue_status_reply(self, queueStatus: mesh_pb2.QueueStatus) -> None:
         """Correlate queue reply IDs with local pending queue entries."""
-        self._queue_send_runtime.correlate_queue_status_reply(queueStatus)
+        self._queue_send_runtime._correlate_queue_status_reply(queueStatus)
         # logger.warn("queue: " + " ".join(f'{k:08x}' for k in self.queue))
 
     def _handle_from_radio(self, fromRadioBytes: bytes) -> None:

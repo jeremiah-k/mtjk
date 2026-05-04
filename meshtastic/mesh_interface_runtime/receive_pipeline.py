@@ -557,7 +557,7 @@ class ReceivePipeline:
         self, queueStatus: mesh_pb2.QueueStatus
     ) -> None:
         """Update internal transmit-queue state from a received QueueStatus message."""
-        self._queue_send_runtime.handle_queue_status_from_radio(queueStatus)
+        self._queue_send_runtime._handle_queue_status_from_radio(queueStatus)
 
     def _handle_packet_from_radio(
         self,

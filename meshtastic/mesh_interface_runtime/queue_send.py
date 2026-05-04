@@ -36,7 +36,7 @@ class _QueueSendRuntime:
         self._queue_wait_delay_seconds = queue_wait_delay_seconds
         self._awaiting_queue_status_ids: set[int] = set()
 
-    def has_free_space(self) -> bool:
+    def _has_free_space(self) -> bool:
         """Return whether queue status indicates free TX slots."""
         with self._lock:
             queue_status = self._get_queue_status()
@@ -44,7 +44,7 @@ class _QueueSendRuntime:
                 return True
             return queue_status.free > 0
 
-    def claim(self) -> None:
+    def _claim(self) -> None:
         """Claim one queue slot when queue status is available."""
         with self._lock:
             queue_status = self._get_queue_status()
@@ -54,7 +54,7 @@ class _QueueSendRuntime:
                 return
             queue_status.free -= 1
 
-    def pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
+    def _pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
         """Pop the next sendable queue entry while honoring queue free-space state."""
         with self._lock:
             queue = self._get_queue()
@@ -70,7 +70,7 @@ class _QueueSendRuntime:
                 queue_status.free -= 1
             return to_resend
 
-    def send_to_radio(
+    def _send_to_radio(
         self,
         to_radio: mesh_pb2.ToRadio,
         *,
@@ -110,12 +110,12 @@ class _QueueSendRuntime:
                 send_impl(packet)
                 sent_packet_ids.add(packet_id)
         finally:
-            self.reconcile_resent_queue(
+            self._reconcile_resent_queue(
                 resent_queue=resent_queue,
                 sent_packet_ids=sent_packet_ids,
             )
 
-    def reconcile_resent_queue(
+    def _reconcile_resent_queue(
         self,
         *,
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool],
@@ -160,7 +160,7 @@ class _QueueSendRuntime:
                             )
                     self._get_queue()[packet_id] = packet_to_requeue
 
-    def record_queue_status(self, queue_status: mesh_pb2.QueueStatus) -> None:
+    def _record_queue_status(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Persist latest queue status update."""
         with self._lock:
             self._set_queue_status(queue_status)
@@ -172,7 +172,7 @@ class _QueueSendRuntime:
             queue_status.mesh_packet_id,
         )
 
-    def correlate_queue_status_reply(
+    def _correlate_queue_status_reply(
         self, queue_status: mesh_pb2.QueueStatus
     ) -> None:
         """Correlate queue status mesh_packet_id replies to pending entries."""
@@ -204,15 +204,15 @@ class _QueueSendRuntime:
                 packet_id,
             )
 
-    def handle_queue_status_from_radio(
+    def _handle_queue_status_from_radio(
         self, queue_status: mesh_pb2.QueueStatus
     ) -> None:
         """Apply queue status updates and queue reply correlation."""
-        self.record_queue_status(queue_status)
+        self._record_queue_status(queue_status)
         if queue_status.res:
             packet_id = queue_status.mesh_packet_id
             if packet_id != 0:
                 with self._lock:
                     self._awaiting_queue_status_ids.discard(packet_id)
             return
-        self.correlate_queue_status_reply(queue_status)
+        self._correlate_queue_status_reply(queue_status)
