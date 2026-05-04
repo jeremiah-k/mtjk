@@ -6,6 +6,7 @@ Internal module — not part of stable public API.
 from __future__ import annotations
 
 import logging
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
@@ -14,7 +15,8 @@ from meshtastic.protobuf import mesh_pb2
 
 logger = logging.getLogger(__name__)
 
-QUEUE_WAIT_DELAY_SECONDS = 0.5
+QUEUE_WAIT_DELAY_SECONDS: float = 0.5
+AWAITING_QUEUE_STATUS_TTL_SECONDS: float = 300.0
 
 
 class _QueueSendRuntime:
@@ -34,7 +36,8 @@ class _QueueSendRuntime:
         self._get_queue_status = get_queue_status
         self._set_queue_status = set_queue_status
         self._queue_wait_delay_seconds = queue_wait_delay_seconds
-        self._awaiting_queue_status_ids: set[int] = set()
+        self._awaiting_queue_status_ids: dict[int, float] = {}
+        self._queue_status_seen = False
 
     def _has_free_space(self) -> bool:
         """Return whether queue status indicates free TX slots."""
@@ -81,6 +84,7 @@ class _QueueSendRuntime:
         """Run outbound send/resend loop using queue ownership semantics."""
         if not to_radio.HasField("packet"):
             send_impl(to_radio)
+            return
         else:
             with self._lock:
                 self._get_queue()[to_radio.packet.id] = to_radio
@@ -103,7 +107,7 @@ class _QueueSendRuntime:
                 resent_queue[packet_id] = packet
                 if not isinstance(packet, mesh_pb2.ToRadio):
                     continue
-                if packet != to_radio:
+                if packet is not to_radio:
                     logger.debug(
                         "Resending packet ID %08x %s", packet_id, packet
                     )
@@ -122,20 +126,22 @@ class _QueueSendRuntime:
         sent_packet_ids: set[int],
     ) -> None:
         """Reconcile resent packets against ACK-under-us and requeue semantics."""
-        missing = object()
         for packet_id, packet in resent_queue.items():
             restore_queue_slot = False
             with self._lock:
-                queued_value: (
-                    mesh_pb2.ToRadio | bool | object
-                ) = self._get_queue().pop(packet_id, missing)
+                queued_value: mesh_pb2.ToRadio | bool | None = self._get_queue().pop(
+                    packet_id,
+                    None,
+                )
                 acked = queued_value is False
             if acked:
                 logger.debug("packet %08x got acked under us", packet_id)
                 continue
-            if queued_value is missing and packet_id in sent_packet_ids:
+            if queued_value is None and packet_id in sent_packet_ids:
                 with self._lock:
-                    self._awaiting_queue_status_ids.add(packet_id)
+                    self._prune_awaiting_queue_status_ids_locked(time.monotonic())
+                    if self._queue_status_seen:
+                        self._awaiting_queue_status_ids[packet_id] = time.monotonic()
                 logger.debug(
                     "packet %08x sent and awaiting queue-status correlation",
                     packet_id,
@@ -147,7 +153,7 @@ class _QueueSendRuntime:
             elif isinstance(packet, mesh_pb2.ToRadio):
                 packet_to_requeue = packet
                 restore_queue_slot = packet_id not in sent_packet_ids
-            elif queued_value is not missing and isinstance(queued_value, bool):
+            elif queued_value is not None and isinstance(queued_value, bool):
                 packet_to_requeue = queued_value
             if packet_to_requeue is not None:
                 with self._lock:
@@ -163,6 +169,7 @@ class _QueueSendRuntime:
     def _record_queue_status(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Persist latest queue status update."""
         with self._lock:
+            self._queue_status_seen = True
             self._set_queue_status(queue_status)
         logger.debug(
             "TX QUEUE free %s of %s, res = %s, id = %08x ",
@@ -179,12 +186,13 @@ class _QueueSendRuntime:
         packet_id = queue_status.mesh_packet_id
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         with self._lock:
+            self._prune_awaiting_queue_status_ids_locked(time.monotonic())
             queue = self._get_queue()
             queue_snapshot = tuple(queue.keys()) if debug_enabled else ()
             just_queued = queue.pop(packet_id, None)
             was_awaiting = packet_id in self._awaiting_queue_status_ids
             if packet_id != 0:
-                self._awaiting_queue_status_ids.discard(packet_id)
+                self._awaiting_queue_status_ids.pop(packet_id, None)
         if debug_enabled:
             logger.debug(
                 "queue: %s",
@@ -213,6 +221,13 @@ class _QueueSendRuntime:
             packet_id = queue_status.mesh_packet_id
             if packet_id != 0:
                 with self._lock:
-                    self._awaiting_queue_status_ids.discard(packet_id)
+                    self._awaiting_queue_status_ids.pop(packet_id, None)
             return
         self._correlate_queue_status_reply(queue_status)
+
+    def _prune_awaiting_queue_status_ids_locked(self, now: float) -> None:
+        """Drop stale queue-status correlation IDs. Caller must hold _lock."""
+        expired_before = now - AWAITING_QUEUE_STATUS_TTL_SECONDS
+        for packet_id, tracked_at in list(self._awaiting_queue_status_ids.items()):
+            if tracked_at < expired_before:
+                self._awaiting_queue_status_ids.pop(packet_id, None)

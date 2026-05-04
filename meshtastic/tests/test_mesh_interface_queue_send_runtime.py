@@ -194,6 +194,57 @@ def test_record_queue_status_persists_status() -> None:
 
 
 @pytest.mark.unit
+def test_non_packet_send_does_not_drain_existing_queue() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    queued_packet = mesh_pb2.ToRadio()
+    queued_packet.packet.id = 321
+    harness.queue[321] = queued_packet
+    control_frame = mesh_pb2.ToRadio()
+    control_frame.disconnect = True
+    sent: list[mesh_pb2.ToRadio] = []
+
+    runtime._send_to_radio(
+        control_frame,
+        send_impl=sent.append,
+        pop_for_send=runtime._pop_for_send,
+        sleep_fn=lambda _: None,
+    )
+
+    assert sent == [control_frame]
+    assert list(harness.queue.items()) == [(321, queued_packet)]
+
+
+@pytest.mark.unit
+def test_sent_packet_without_queue_status_does_not_track_awaiting_correlation() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 654
+
+    runtime._send_to_radio(
+        packet,
+        send_impl=lambda _: None,
+        pop_for_send=runtime._pop_for_send,
+        sleep_fn=lambda _: None,
+    )
+
+    assert runtime._awaiting_queue_status_ids == {}
+
+
+@pytest.mark.unit
 def test_send_to_radio_propagates_transport_failure() -> None:
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(

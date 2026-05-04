@@ -3687,11 +3687,13 @@ def test_send_to_radio_waits_resends_and_tracks_requeue(
         iface.queue = _RequeueQueue()
         packet = mesh_pb2.ToRadio()
         packet.packet.id = 123
+        incoming = mesh_pb2.ToRadio()
+        incoming.packet.id = 999
         monkeypatch.setattr(iface, "_send_to_radio_impl", lambda _msg: None)
         pops = iter([(123, packet), None])
         original_pop = iface._queue_pop_for_send
         monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
-        iface._send_to_radio(mesh_pb2.ToRadio())
+        iface._send_to_radio(incoming)
         monkeypatch.setattr(iface, "_queue_pop_for_send", original_pop)
         assert 123 in iface.queue
 
@@ -3704,8 +3706,15 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
     """A successfully-sent packet without immediate queue-status reply should not be requeued in the same cycle."""
     with MeshInterface(noProto=True) as iface:
         iface.noProto = False
+        class _FalsyQueue(OrderedDict[int, mesh_pb2.ToRadio | bool]):
+            def __bool__(self) -> bool:
+                return False
+
+        iface.queue = _FalsyQueue()
         packet = mesh_pb2.ToRadio()
         packet.packet.id = 123
+        incoming = mesh_pb2.ToRadio()
+        incoming.packet.id = 999
         sent_ids: list[int] = []
 
         def _send_impl(msg: mesh_pb2.ToRadio) -> None:
@@ -3716,7 +3725,7 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
         original_pop = iface._queue_pop_for_send
         monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
         try:
-            iface._send_to_radio(mesh_pb2.ToRadio())
+            iface._send_to_radio(incoming)
             assert 123 in sent_ids
             assert 123 not in iface.queue
         finally:
@@ -3799,6 +3808,9 @@ def test_handle_queue_status_awaiting_correlation_not_marked_unexpected(
     """Queue status for recently sent packets should not be logged as unexpected replies."""
     with MeshInterface(noProto=True) as iface:
         packet_id = 0x01020304
+        iface._queue_send_runtime._record_queue_status(
+            mesh_pb2.QueueStatus(free=3, maxlen=4, res=1, mesh_packet_id=0)
+        )
         packet = mesh_pb2.ToRadio()
         packet.packet.id = packet_id
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool] = OrderedDict(
@@ -4670,7 +4682,7 @@ def test_mesh_interface_handle_from_radio_delegates_to_receive_pipeline() -> Non
     """_handle_from_radio should route through ReceivePipeline, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
     fake = _FakeReceivePipeline()
-    interface._receive_pipeline = fake
+    interface._receive_pipeline = cast(Any, fake)
 
     interface._handle_from_radio(b"payload")
 
@@ -4682,7 +4694,7 @@ def test_mesh_interface_handle_packet_delegates_to_receive_pipeline() -> None:
     """_handle_packet_from_radio should route through ReceivePipeline."""
     interface = MeshInterface.__new__(MeshInterface)
     fake = _FakeReceivePipeline()
-    interface._receive_pipeline = fake
+    interface._receive_pipeline = cast(Any, fake)
     packet = mesh_pb2.MeshPacket()
 
     result = interface._handle_packet_from_radio(
