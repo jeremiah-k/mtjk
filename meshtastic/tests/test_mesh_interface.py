@@ -4641,9 +4641,9 @@ class _FakeSendPipeline:
 
 
 def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
-    """sendText should route through _send_pipeline.sendText, not local impl."""
+    """SendText should route through _send_pipeline.sendText, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
-    fake = _FakeSendPipeline()
+    fake: Any = _FakeSendPipeline()
     interface._send_pipeline = fake
 
     result = interface.sendText("hello", destinationId="!12345678", wantAck=True)
@@ -4662,9 +4662,9 @@ def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
 
 
 def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
-    """sendAlert should route through _send_pipeline.sendAlert, not local impl."""
+    """SendAlert should route through _send_pipeline.sendAlert, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
-    fake = _FakeSendPipeline()
+    fake: Any = _FakeSendPipeline()
     interface._send_pipeline = fake
 
     result = interface.sendAlert("wake", destinationId="!12345678")
@@ -4681,9 +4681,9 @@ def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
 
 
 def test_mesh_interface_mqtt_proxy_delegates_to_send_pipeline() -> None:
-    """sendMqttClientProxyMessage should route through _send_pipeline, not local impl."""
+    """SendMqttClientProxyMessage should route through _send_pipeline, not local impl."""
     interface = MeshInterface.__new__(MeshInterface)
-    fake = _FakeSendPipeline()
+    fake: Any = _FakeSendPipeline()
     interface._send_pipeline = fake
 
     interface.sendMqttClientProxyMessage("topic", b"payload")
