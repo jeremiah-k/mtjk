@@ -28,6 +28,10 @@ from meshtastic.mesh_interface_runtime import flows as flows_module
 from meshtastic.mesh_interface_runtime.request_wait import (
     UNSCOPED_WAIT_REQUEST_ID,
     WAIT_ATTR_NAK,
+    WAIT_ATTR_POSITION,
+    WAIT_ATTR_TELEMETRY,
+    WAIT_ATTR_TRACEROUTE,
+    WAIT_ATTR_WAYPOINT,
 )
 
 from .. import BROADCAST_ADDR, LOCAL_ADDR, NODELESS_WANT_CONFIG_ID, ResponseHandler
@@ -2161,14 +2165,14 @@ def test_on_response_position_success_and_routing_error(
         position.altitude = 250
         position.precision_bits = 32
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1001
+            WAIT_ATTR_POSITION, request_id=1001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2192,14 +2196,14 @@ def test_on_response_position_success_and_routing_error(
         unknown_position = mesh_pb2.Position()
         unknown_position.precision_bits = 5
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1002
+            WAIT_ATTR_POSITION, request_id=1002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1002,
         )
         caplog.clear()
@@ -2224,14 +2228,14 @@ def test_on_response_position_success_and_routing_error(
         disabled_position = mesh_pb2.Position()
         disabled_position.precision_bits = 0
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1003
+            WAIT_ATTR_POSITION, request_id=1003
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1003)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1003,
         )
         caplog.clear()
@@ -2254,14 +2258,14 @@ def test_on_response_position_success_and_routing_error(
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1004
+            WAIT_ATTR_POSITION, request_id=1004
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1004)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1004,
         )
         iface.onResponsePosition(
@@ -2466,14 +2470,14 @@ def test_send_traceroute_and_response_rendering(
         route.route_back.extend([12])
         route.snr_back.extend([16, 20])
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=88
+            WAIT_ATTR_TRACEROUTE, request_id=88
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=88)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=88,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2499,14 +2503,14 @@ def test_on_response_traceroute_routing_no_response_raises() -> None:
     """Traceroute routing NO_RESPONSE replies should be surfaced by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=9101
+            WAIT_ATTR_TRACEROUTE, request_id=9101
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9101)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=9101,
         )
         iface.onResponseTraceRoute(
@@ -2533,14 +2537,14 @@ def test_on_response_traceroute_parse_failures_surface_to_waiters() -> None:
     """Traceroute parse errors should be recorded and raised by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=9102
+            WAIT_ATTR_TRACEROUTE, request_id=9102
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9102)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=9102,
         )
         iface.onResponseTraceRoute(
@@ -2622,14 +2626,14 @@ def test_on_response_telemetry_paths(
         device_t.device_metrics.battery_level = 95
         device_t.device_metrics.voltage = 4.23
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2001
+            WAIT_ATTR_TELEMETRY, request_id=2001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2653,14 +2657,14 @@ def test_on_response_telemetry_paths(
         env_t = telemetry_pb2.Telemetry()
         env_t.environment_metrics.temperature = 21.5
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2002
+            WAIT_ATTR_TELEMETRY, request_id=2002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2002,
         )
         caplog.clear()
@@ -2683,14 +2687,14 @@ def test_on_response_telemetry_paths(
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2003
+            WAIT_ATTR_TELEMETRY, request_id=2003
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2003)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2003,
         )
         iface.onResponseTelemetry(
@@ -2711,14 +2715,14 @@ def test_on_response_telemetry_paths(
         assert "No response" in str(wait_errors[0])
 
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2004
+            WAIT_ATTR_TELEMETRY, request_id=2004
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2004)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2004,
         )
         iface.onResponseTelemetry(
@@ -2746,14 +2750,14 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
     with MeshInterface(noProto=True) as iface:
         waypoint = mesh_pb2.Waypoint(name="WPT", id=5)
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_WAYPOINT, request_id=3001
+            WAIT_ATTR_WAYPOINT, request_id=3001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_WAYPOINT,
+            acknowledgment_attr=WAIT_ATTR_WAYPOINT,
             request_id=3001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2775,14 +2779,14 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_WAYPOINT, request_id=3002
+            WAIT_ATTR_WAYPOINT, request_id=3002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_WAYPOINT,
+            acknowledgment_attr=WAIT_ATTR_WAYPOINT,
             request_id=3002,
         )
         iface.onResponseWaypoint(
@@ -2839,9 +2843,9 @@ def test_on_response_parse_failures_set_wait_errors(
 ) -> None:
     """Malformed response payloads should fail via wait-state errors, not false success."""
     wait_attr_by_waiter = {
-        "waitForPosition": mesh_interface_module.WAIT_ATTR_POSITION,
-        "waitForTelemetry": mesh_interface_module.WAIT_ATTR_TELEMETRY,
-        "waitForWaypoint": mesh_interface_module.WAIT_ATTR_WAYPOINT,
+        "waitForPosition": WAIT_ATTR_POSITION,
+        "waitForTelemetry": WAIT_ATTR_TELEMETRY,
+        "waitForWaypoint": WAIT_ATTR_WAYPOINT,
     }
     request_id = 4200
     with MeshInterface(noProto=True) as iface:
@@ -3406,7 +3410,7 @@ def test_on_response_telemetry_logs_all_device_metric_fields(
 def test_wait_helpers_use_request_scoped_waiter_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Request-scoped waitFor* helpers should call _wait_for_request_ack with attr-specific keys."""
+    """Request-scoped waitFor* helpers should delegate to send pipeline with attr-specific keys."""
     with MeshInterface(noProto=True) as iface:
         wait_calls: list[tuple[str, int, float]] = []
 
@@ -3419,7 +3423,9 @@ def test_wait_helpers_use_request_scoped_waiter_path(
             wait_calls.append((acknowledgment_attr, request_id, timeout_seconds))
             return True
 
-        monkeypatch.setattr(iface, "_wait_for_request_ack", _wait_for_request_ack)
+        monkeypatch.setattr(
+            iface._send_pipeline, "_wait_for_request_ack", _wait_for_request_ack
+        )
 
         iface.waitForTraceRoute(1.5, request_id=11)
         iface.waitForPosition(request_id=22)
@@ -3460,12 +3466,12 @@ def test_wait_for_request_ack_supports_overlapping_same_type_waits() -> None:
         assert wait_started[22].wait(timeout=1.0)
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=11,
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=22,
         )
         iface._mark_wait_acknowledged("receivedTelemetry", request_id=11)
