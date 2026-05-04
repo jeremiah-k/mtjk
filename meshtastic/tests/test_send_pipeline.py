@@ -1332,7 +1332,7 @@ class TestSendToRadio:
 
         send_pipeline._send_to_radio(to_radio)
 
-        mock_interface._queue_send_runtime.send_to_radio.assert_called_once()
+        mock_interface._queue_send_runtime._send_to_radio.assert_called_once()
 
     @pytest.mark.unit
     def test_send_to_radio_no_proto_skips(
@@ -1348,7 +1348,7 @@ class TestSendToRadio:
         with caplog.at_level(logging.WARNING):
             send_pipeline._send_to_radio(to_radio)
 
-        mock_interface._queue_send_runtime.send_to_radio.assert_not_called()
+        mock_interface._queue_send_runtime._send_to_radio.assert_not_called()
         assert "noProto" in caplog.text
 
 

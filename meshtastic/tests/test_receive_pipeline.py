@@ -602,7 +602,7 @@ class TestHandleFromRadioQueueStatus:
         result = receive_pipeline._handle_from_radio_queue_status(context)
 
         assert result == []  # No publication intents
-        mock_interface._queue_send_runtime.handle_queue_status_from_radio.assert_called_once()
+        mock_interface._queue_send_runtime._handle_queue_status_from_radio.assert_called_once()
 
 
 class TestHandleFromRadioClientNotification:
@@ -888,7 +888,7 @@ class TestHandleQueueStatusFromRadio:
 
         receive_pipeline._handle_queue_status_from_radio(queue_status)
 
-        mock_interface._queue_send_runtime.handle_queue_status_from_radio.assert_called_once_with(
+        mock_interface._queue_send_runtime._handle_queue_status_from_radio.assert_called_once_with(
             queue_status
         )
 
