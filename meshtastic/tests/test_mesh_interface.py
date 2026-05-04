@@ -2086,8 +2086,8 @@ def test_get_node_resets_retry_budget_on_new_channel_progress() -> None:
 def test_send_alert_and_mqtt_proxy_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """sendAlert() and sendMqttClientProxyMessage() should delegate with expected payloads."""
     with MeshInterface(noProto=True) as iface:
-        send_data = MagicMock(return_value=mesh_pb2.MeshPacket())
-        monkeypatch.setattr(iface, "sendData", send_data)
+        send_alert = MagicMock(return_value=mesh_pb2.MeshPacket())
+        monkeypatch.setattr(iface._send_pipeline, "sendAlert", send_alert)
         response_cb = MagicMock()
         iface.sendAlert(
             "SOS",
@@ -2097,19 +2097,19 @@ def test_send_alert_and_mqtt_proxy_paths(monkeypatch: pytest.MonkeyPatch) -> Non
             hopLimit=3,
         )
 
-        assert send_data.call_count == 1
-        send_args = send_data.call_args
-        assert send_args.args[0] == b"SOS"
-        assert send_args.kwargs["portNum"] == portnums_pb2.PortNum.ALERT_APP
-        assert send_args.kwargs["priority"] == mesh_pb2.MeshPacket.Priority.ALERT
+        assert send_alert.call_count == 1
+        send_args = send_alert.call_args
+        assert send_args.args[0] == "SOS"
+        assert send_args.kwargs["destinationId"] == 42
+        assert send_args.kwargs["channelIndex"] == 2
+        assert send_args.kwargs["hopLimit"] == 3
 
-        sent_to_radio: list[mesh_pb2.ToRadio] = []
-        monkeypatch.setattr(iface, "_send_to_radio", sent_to_radio.append)
+        send_mqtt = MagicMock()
+        monkeypatch.setattr(iface._send_pipeline, "sendMqttClientProxyMessage", send_mqtt)
         iface.sendMqttClientProxyMessage("mesh/topic", b"payload")
 
-        assert sent_to_radio
-        assert sent_to_radio[0].mqttClientProxyMessage.topic == "mesh/topic"
-        assert sent_to_radio[0].mqttClientProxyMessage.data == b"payload"
+        assert send_mqtt.call_count == 1
+        assert send_mqtt.call_args.args == ("mesh/topic", b"payload")
 
 
 @pytest.mark.unit
@@ -4614,3 +4614,78 @@ class TestUnscopedWaitForAckNakOverlappingCommands:
                 "Request B should timeout (not receive A's ACK). "
                 "Scoped waits properly isolate requests."
             )
+
+
+class _FakeSendPipeline:
+    """Test double capturing send pipeline call patterns."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def sendText(self, *args: object, **kwargs: object) -> str:
+        self.calls.append(("sendText", args, kwargs))
+        return "sent-text"
+
+    def sendAlert(self, *args: object, **kwargs: object) -> str:
+        self.calls.append(("sendAlert", args, kwargs))
+        return "sent-alert"
+
+    def sendMqttClientProxyMessage(self, *args: object, **kwargs: object) -> None:
+        self.calls.append(("sendMqttClientProxyMessage", args, kwargs))
+
+
+def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
+    """sendText should route through _send_pipeline.sendText, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    result = interface.sendText("hello", destinationId="!12345678", wantAck=True)
+
+    assert result == "sent-text"
+    assert len(fake.calls) == 1
+    name, args, kwargs = fake.calls[0]
+    assert name == "sendText"
+    assert args == ("hello",)
+    assert kwargs["destinationId"] == "!12345678"
+    assert kwargs["wantAck"] is True
+    assert kwargs["wantResponse"] is False
+    assert kwargs["onResponse"] is None
+    assert kwargs["channelIndex"] == 0
+    assert kwargs["hopLimit"] is None
+
+
+def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
+    """sendAlert should route through _send_pipeline.sendAlert, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    result = interface.sendAlert("wake", destinationId="!12345678")
+
+    assert result == "sent-alert"
+    assert len(fake.calls) == 1
+    name, args, kwargs = fake.calls[0]
+    assert name == "sendAlert"
+    assert args == ("wake",)
+    assert kwargs["destinationId"] == "!12345678"
+    assert kwargs["onResponse"] is None
+    assert kwargs["channelIndex"] == 0
+    assert kwargs["hopLimit"] is None
+
+
+def test_mesh_interface_mqtt_proxy_delegates_to_send_pipeline() -> None:
+    """sendMqttClientProxyMessage should route through _send_pipeline, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    interface.sendMqttClientProxyMessage("topic", b"payload")
+
+    assert fake.calls == [
+        (
+            "sendMqttClientProxyMessage",
+            ("topic", b"payload"),
+            {},
+        )
+    ]

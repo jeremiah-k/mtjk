@@ -640,14 +640,14 @@ class MeshInterface:  # pylint: disable=R0902
         mesh_pb2.MeshPacket
             The packet that was sent; its `id` field will be populated and can be used to track acknowledgments or naks.
         """
-        return self.sendData(
-            text.encode("utf-8"),
-            destinationId,
-            portNum=portNum,
+        return self._send_pipeline.sendText(
+            text,
+            destinationId=destinationId,
             wantAck=wantAck,
             wantResponse=wantResponse,
             onResponse=onResponse,
             channelIndex=channelIndex,
+            portNum=portNum,
             replyId=replyId,
             hopLimit=hopLimit,
         )
@@ -681,15 +681,11 @@ class MeshInterface:  # pylint: disable=R0902
         mesh_pb2.MeshPacket
             The sent mesh packet with its `id` populated.
         """
-        return self.sendData(
-            text.encode("utf-8"),
-            destinationId,
-            portNum=portnums_pb2.PortNum.ALERT_APP,
-            wantAck=False,
-            wantResponse=False,
+        return self._send_pipeline.sendAlert(
+            text,
+            destinationId=destinationId,
             onResponse=onResponse,
             channelIndex=channelIndex,
-            priority=mesh_pb2.MeshPacket.Priority.ALERT,
             hopLimit=hopLimit,
         )
 
@@ -703,12 +699,7 @@ class MeshInterface:  # pylint: disable=R0902
         data : bytes
             MQTT payload to forward.
         """
-        prox = mesh_pb2.MqttClientProxyMessage()
-        prox.topic = topic
-        prox.data = data
-        toRadio = mesh_pb2.ToRadio()
-        toRadio.mqttClientProxyMessage.CopyFrom(prox)
-        self._send_to_radio(toRadio)
+        self._send_pipeline.sendMqttClientProxyMessage(topic, data)
 
     def sendData(  # pylint: disable=R0913,too-many-positional-arguments
         self,
