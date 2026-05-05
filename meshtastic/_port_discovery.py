@@ -185,7 +185,7 @@ def _detect_windows_needs_driver(
         for block in _iter_pnp_device_blocks(
             _windows_pnp_device_output(present_only=False)
         )
-        if vendor_id in block.upper()
+        if f"VID_{vendor_id}" in block.upper()
     ]
     needs_driver = any("CM_PROB_FAILED_INSTALL" in block for block in matching_blocks)
     if needs_driver and log_reason:
@@ -364,13 +364,15 @@ def _detect_windows_port_from_output(
             product_id,
             field_name="product_id",
         )
+        if product_id is not None and normalized_product_id is None:
+            continue
         for device_block in device_blocks:
             device_block_upper = device_block.upper()
-            if normalized_vendor_id not in device_block_upper:
+            if f"VID_{normalized_vendor_id}" not in device_block_upper:
                 continue
             if (
                 normalized_product_id is not None
-                and normalized_product_id not in device_block_upper
+                and f"PID_{normalized_product_id}" not in device_block_upper
             ):
                 continue
             for com_suffix in _COM_PORT_RE.findall(device_block):
