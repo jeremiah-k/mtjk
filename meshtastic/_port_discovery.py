@@ -170,28 +170,41 @@ def _detect_windows_needs_driver(
     """Return whether Windows reports a failed driver install for a supported device."""
     if not sd or platform.system() != "Windows":
         return False
-    vendor_id = _normalize_usb_hex_id(
-        sd.usb_vendor_id_in_hex,
-        field_name="vendor_id",
-    )
-    if vendor_id is None:
+    usb_ids = getattr(sd, "usb_ids", None)
+    if (
+        not usb_ids
+        and getattr(sd, "usb_vendor_id_in_hex", None) is not None
+        and getattr(sd, "usb_product_id_in_hex", None) is not None
+    ):
+        usb_ids = (
+            (sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),  # type: ignore[union-attr]
+        )
+    if not usb_ids:
         return False
-    product_id = _normalize_usb_hex_id(
-        sd.usb_product_id_in_hex,
-        field_name="product_id",
-    )
 
-    matching_blocks = [
-        block
-        for block in _iter_pnp_device_blocks(
-            _windows_pnp_device_output(present_only=False)
+    device_blocks = tuple(_iter_pnp_device_blocks(
+        _windows_pnp_device_output(present_only=False),
+    ))
+    matching_blocks: list[str] = []
+    for vendor_id, product_id in usb_ids or ():
+        normalized_vendor_id = _normalize_usb_hex_id(
+            vendor_id,
+            field_name="vendor_id",
         )
-        if f"VID_{vendor_id}" in block.upper()
-        and (
-            product_id is None
-            or f"PID_{product_id}" in block.upper()
+        normalized_product_id = _normalize_usb_hex_id(
+            product_id,
+            field_name="product_id",
         )
-    ]
+        if normalized_vendor_id is None or normalized_product_id is None:
+            continue
+        for block in device_blocks:
+            block_upper = block.upper()
+            if (
+                f"VID_{normalized_vendor_id}" in block_upper
+                and f"PID_{normalized_product_id}" in block_upper
+            ):
+                matching_blocks.append(block)
+
     needs_driver = any("CM_PROB_FAILED_INSTALL" in block for block in matching_blocks)
     if needs_driver and log_reason:
         logger.debug("\n\n".join(matching_blocks))
