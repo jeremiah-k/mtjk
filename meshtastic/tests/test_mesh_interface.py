@@ -3697,13 +3697,15 @@ def test_send_to_radio_waits_resends_and_tracks_requeue(
             "_pop_for_send",
             lambda: next(pops),
         )
-        iface._send_to_radio(incoming)
-        monkeypatch.setattr(
-            iface._queue_send_runtime,
-            "_pop_for_send",
-            original_pop,
-        )
-        assert 123 in iface.queue
+        try:
+            iface._send_to_radio(incoming)
+            assert 123 in iface.queue
+        finally:
+            monkeypatch.setattr(
+                iface._queue_send_runtime,
+                "_pop_for_send",
+                original_pop,
+            )
 
 
 @pytest.mark.unit

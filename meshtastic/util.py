@@ -1,9 +1,12 @@
 """Utility functions."""
 
 import base64
+import glob  # noqa: F401
 import logging
 import os
+import platform  # noqa: F401
 import re
+import subprocess  # noqa: F401
 import sys
 import threading
 import time
@@ -14,16 +17,27 @@ from typing import (
     Any,
     Callable,
     NoReturn,
+    cast,
 )
 
 import packaging.version as pkg_version
 import requests
+import serial.tools.list_ports  # type: ignore[import-untyped] # noqa: F401
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import Message
 
-from meshtastic import _port_discovery
+import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
 from meshtastic.supported_device import SupportedDevice
 from meshtastic.version import get_active_version
+
+# Keep these module imports available for downstream tests and integrations that
+# historically monkeypatch meshtastic.util.<module> during port discovery.
+_PORT_DISCOVERY_MONKEYPATCH_MODULES = (
+    glob,
+    platform,
+    subprocess,
+    serial.tools.list_ports,
+)
 
 """Some devices such as a seger jlink or st-link we never want to accidentally open
      0483 STMicroelectronics ST-LINK/V2
@@ -919,7 +933,10 @@ def detect_windows_needs_driver(sd: Any, print_reason: bool = False) -> bool:
     bool
         `True` if Windows indicates the device has a failed installation (a driver likely needs installation), `False` otherwise.
     """
-    return _port_discovery._detect_windows_needs_driver(sd, print_reason=print_reason)
+    return _port_discovery._detect_windows_needs_driver(
+        cast(SupportedDevice | None, sd),
+        log_reason=print_reason,
+    )
 
 
 def eliminate_duplicate_port(ports: list[str]) -> list[str]:
@@ -1023,6 +1040,11 @@ def active_ports_on_supported_devices(
         eliminate_duplicates=eliminate_duplicates,
         detect_windows_port_fn=detectWindowsPort,
         eliminate_duplicate_port_fn=eliminate_duplicate_port,
+        detect_windows_port_from_output_fn=(
+            _port_discovery._detect_windows_port_from_output
+            if detectWindowsPort is _DEFAULT_DETECT_WINDOWS_PORT
+            else None
+        ),
     )
 
 
@@ -1053,6 +1075,9 @@ def detectWindowsPort(sd: SupportedDevice | None) -> set[str]:
 def detect_windows_port(sd: SupportedDevice | None) -> set[str]:
     """Compatibility alias for detectWindowsPort()."""
     return detectWindowsPort(sd)
+
+
+_DEFAULT_DETECT_WINDOWS_PORT = detectWindowsPort
 
 
 def check_if_newer_version() -> str | None:
