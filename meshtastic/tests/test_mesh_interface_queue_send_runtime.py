@@ -237,7 +237,6 @@ def test_non_packet_send_does_not_drain_existing_queue() -> None:
     runtime._send_to_radio(
         control_frame,
         send_impl=sent.append,
-        pop_for_send=runtime._pop_for_send,
         sleep_fn=lambda _: None,
     )
 
@@ -261,7 +260,6 @@ def test_sent_packet_without_queue_status_does_not_track_awaiting_correlation() 
     runtime._send_to_radio(
         packet,
         send_impl=lambda _: None,
-        pop_for_send=runtime._pop_for_send,
         sleep_fn=lambda _: None,
     )
 
@@ -288,7 +286,6 @@ def test_sent_packet_after_queue_status_tracks_awaiting_correlation() -> None:
     runtime._send_to_radio(
         packet,
         send_impl=lambda _: None,
-        pop_for_send=runtime._pop_for_send,
         sleep_fn=lambda _: None,
     )
 
@@ -330,7 +327,6 @@ def test_expired_awaiting_queue_status_id_is_treated_as_unexpected(
     runtime._send_to_radio(
         packet,
         send_impl=lambda _: None,
-        pop_for_send=runtime._pop_for_send,
         sleep_fn=lambda _: None,
     )
     queue_status_reply = mesh_pb2.QueueStatus()
@@ -379,6 +375,41 @@ def test_send_to_radio_propagates_transport_failure() -> None:
         runtime._send_to_radio(
             packet,
             send_impl=fail_send,
-            pop_for_send=runtime._pop_for_send,
             sleep_fn=lambda _: None,
         )
+
+
+@pytest.mark.unit
+def test_send_to_radio_uses_runtime_pop_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    existing = mesh_pb2.ToRadio()
+    existing.packet.id = 123
+    incoming = mesh_pb2.ToRadio()
+    incoming.packet.id = 456
+    pops = iter([(123, existing), (456, incoming), None])
+    sent: list[int] = []
+
+    def fake_pop_for_send() -> tuple[int, mesh_pb2.ToRadio | bool] | None:
+        popped = next(pops)
+        if popped is None:
+            harness.queue.clear()
+        return popped
+
+    monkeypatch.setattr(runtime, "_pop_for_send", fake_pop_for_send)
+
+    runtime._send_to_radio(
+        incoming,
+        send_impl=lambda msg: sent.append(msg.packet.id),
+        sleep_fn=lambda _: None,
+    )
+
+    assert sent == [123, 456]

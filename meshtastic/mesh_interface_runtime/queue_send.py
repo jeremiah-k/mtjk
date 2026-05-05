@@ -94,7 +94,6 @@ class _QueueSendRuntime:
         to_radio: mesh_pb2.ToRadio,
         *,
         send_impl: Callable[[mesh_pb2.ToRadio], None],
-        pop_for_send: Callable[[], tuple[int, mesh_pb2.ToRadio | bool] | None],
         sleep_fn: Callable[[float], None],
     ) -> None:
         """Run outbound send/resend loop using queue ownership semantics."""
@@ -109,7 +108,7 @@ class _QueueSendRuntime:
         sent_packet_ids: set[int] = set()
         try:
             while True:
-                to_resend = pop_for_send()
+                to_resend = self._pop_for_send()
                 if to_resend is None:
                     with self._lock:
                         queue_has_items = bool(self._get_queue())
@@ -140,14 +139,12 @@ class _QueueSendRuntime:
         to_radio: mesh_pb2.ToRadio,
         *,
         send_impl: Callable[[mesh_pb2.ToRadio], None],
-        pop_for_send: Callable[[], tuple[int, mesh_pb2.ToRadio | bool] | None],
         sleep_fn: Callable[[float], None],
     ) -> None:
         """Run outbound send/resend loop using queue ownership semantics."""
         self._send_to_radio(
             to_radio,
             send_impl=send_impl,
-            pop_for_send=pop_for_send,
             sleep_fn=sleep_fn,
         )
 

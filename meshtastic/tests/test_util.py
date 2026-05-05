@@ -571,7 +571,7 @@ def test_active_ports_on_supported_devices_empty(mock_platform: MagicMock) -> No
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Linux")
 def test_active_ports_on_supported_devices_linux(
     mock_platform: MagicMock,
@@ -591,7 +591,7 @@ def test_active_ports_on_supported_devices_linux(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac(
     mock_platform: MagicMock,
@@ -626,7 +626,7 @@ def test_active_ports_on_supported_devices_win(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac_no_duplicates_check(
     mock_platform: MagicMock,
@@ -650,7 +650,7 @@ def test_active_ports_on_supported_devices_mac_no_duplicates_check(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac_duplicates_check(
     mock_platform: MagicMock,

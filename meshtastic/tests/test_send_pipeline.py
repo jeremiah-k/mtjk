@@ -1335,6 +1335,20 @@ class TestSendToRadio:
         mock_interface._queue_send_runtime._send_to_radio.assert_called_once()
 
     @pytest.mark.unit
+    def test_send_to_radio_does_not_callback_through_interface_pop(
+        self, send_pipeline: SendPipeline, mock_interface: MagicMock
+    ) -> None:
+        """Queue send runtime should own pop orchestration without MeshInterface callbacks."""
+        to_radio = mesh_pb2.ToRadio()
+        to_radio.packet.id = 12345
+
+        send_pipeline._send_to_radio(to_radio)
+
+        call = mock_interface._queue_send_runtime._send_to_radio.call_args
+        assert call is not None
+        assert "pop_for_send" not in call.kwargs
+
+    @pytest.mark.unit
     def test_send_to_radio_no_proto_skips(
         self,
         send_pipeline: SendPipeline,

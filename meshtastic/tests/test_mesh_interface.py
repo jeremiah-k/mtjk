@@ -3691,10 +3691,18 @@ def test_send_to_radio_waits_resends_and_tracks_requeue(
         incoming.packet.id = 999
         monkeypatch.setattr(iface, "_send_to_radio_impl", lambda _msg: None)
         pops = iter([(123, packet), None])
-        original_pop = iface._queue_pop_for_send
-        monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
+        original_pop = iface._queue_send_runtime._pop_for_send
+        monkeypatch.setattr(
+            iface._queue_send_runtime,
+            "_pop_for_send",
+            lambda: next(pops),
+        )
         iface._send_to_radio(incoming)
-        monkeypatch.setattr(iface, "_queue_pop_for_send", original_pop)
+        monkeypatch.setattr(
+            iface._queue_send_runtime,
+            "_pop_for_send",
+            original_pop,
+        )
         assert 123 in iface.queue
 
 
@@ -3722,14 +3730,22 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
 
         monkeypatch.setattr(iface, "_send_to_radio_impl", _send_impl)
         pops = iter([(123, packet), None])
-        original_pop = iface._queue_pop_for_send
-        monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
+        original_pop = iface._queue_send_runtime._pop_for_send
+        monkeypatch.setattr(
+            iface._queue_send_runtime,
+            "_pop_for_send",
+            lambda: next(pops),
+        )
         try:
             iface._send_to_radio(incoming)
             assert 123 in sent_ids
             assert 123 not in iface.queue
         finally:
-            monkeypatch.setattr(iface, "_queue_pop_for_send", original_pop)
+            monkeypatch.setattr(
+                iface._queue_send_runtime,
+                "_pop_for_send",
+                original_pop,
+            )
 
 
 @pytest.mark.unit
@@ -3756,14 +3772,22 @@ def test_send_to_radio_requeues_packet_when_send_impl_raises(
 
         monkeypatch.setattr(iface, "_send_to_radio_impl", _failing_send)
         pops = iter([(123, packet), None])
-        original_pop = iface._queue_pop_for_send
-        monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
+        original_pop = iface._queue_send_runtime._pop_for_send
+        monkeypatch.setattr(
+            iface._queue_send_runtime,
+            "_pop_for_send",
+            lambda: next(pops),
+        )
         try:
             with pytest.raises(_SendImplFailure, match="send failed"):
                 iface._send_to_radio(incoming)
             assert 123 in iface.queue
         finally:
-            monkeypatch.setattr(iface, "_queue_pop_for_send", original_pop)
+            monkeypatch.setattr(
+                iface._queue_send_runtime,
+                "_pop_for_send",
+                original_pop,
+            )
             # Keep context-manager shutdown path from triggering the intentional send failure.
             monkeypatch.setattr(iface, "_send_to_radio_impl", lambda _msg: None)
 
