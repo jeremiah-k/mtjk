@@ -152,10 +152,7 @@ def _detect_supported_devices() -> set[SupportedDevice]:
             normalized_vid = _normalize_usb_hex_id(vid, field_name="vendor_id")
             if normalized_vid is None:
                 continue
-            if (
-                f"VID_{normalized_vid}" in sp_output_upper
-                or f"{normalized_vid}&PID_" in sp_output_upper
-            ):
+            if f"VID_{normalized_vid}" in sp_output_upper:
                 possible_devices.update(_get_devices_with_vendor_id(vid))
     elif system == "Darwin":
         _, sp_output = subprocess.getstatusoutput("system_profiler SPUSBDataType")
@@ -179,6 +176,10 @@ def _detect_windows_needs_driver(
     )
     if vendor_id is None:
         return False
+    product_id = _normalize_usb_hex_id(
+        sd.usb_product_id_in_hex,
+        field_name="product_id",
+    )
 
     matching_blocks = [
         block
@@ -186,6 +187,10 @@ def _detect_windows_needs_driver(
             _windows_pnp_device_output(present_only=False)
         )
         if f"VID_{vendor_id}" in block.upper()
+        and (
+            product_id is None
+            or f"PID_{product_id}" in block.upper()
+        )
     ]
     needs_driver = any("CM_PROB_FAILED_INSTALL" in block for block in matching_blocks)
     if needs_driver and log_reason:
