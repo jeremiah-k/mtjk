@@ -2,19 +2,25 @@
 
 import base64
 import binascii
+import glob
 import json
 import logging
+import platform
 import re
+import subprocess
 import threading
 import warnings
 from collections import Counter
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+import serial.tools.list_ports  # type: ignore[import-untyped]
 from hypothesis import given
 from hypothesis import strategies as st
 
+import meshtastic.util as util_module
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.supported_device import (
     SupportedDevice,
@@ -35,6 +41,8 @@ from meshtastic.util import (
     catchAndIgnore,
     channel_hash,
     convert_mac_addr,
+    detect_supported_devices,
+    detect_windows_needs_driver,
     dotdict,
     eliminate_duplicate_port,
     findPorts,
@@ -85,6 +93,15 @@ class _TempPort:
         """
         self.device = device
         self.vid = vid
+
+
+@pytest.mark.unit
+def test_util_preserves_port_discovery_monkeypatch_modules() -> None:
+    """Legacy tests can still patch module objects through meshtastic.util."""
+    assert util_module.glob is glob
+    assert util_module.platform is platform
+    assert util_module.subprocess is subprocess
+    assert util_module.serial.tools.list_ports is serial.tools.list_ports
 
 
 @pytest.mark.unit
@@ -417,6 +434,82 @@ def test_findPorts_keeps_tty_path_when_no_by_id_alias_matches(
     assert findPorts() == [tty_device]
 
 
+@pytest.mark.unit
+@patch("subprocess.run")
+@patch("platform.system", return_value="Windows")
+def test_detect_supported_devices_windows_uses_safe_pnp_query(
+    patch_system: MagicMock,
+    patch_run: MagicMock,
+) -> None:
+    """Windows supported-device detection should query PnP once without VID interpolation."""
+    patch_run.return_value = subprocess.CompletedProcess(
+        args=["powershell.exe"],
+        returncode=0,
+        stdout="DeviceID : USB\\VID_303A&PID_1001\n",
+        stderr="",
+    )
+
+    devices = detect_supported_devices()
+
+    assert any(device.usb_vendor_id_in_hex == "303a" for device in devices)
+    command = patch_run.call_args.args[0]
+    assert command[:3] == ["powershell.exe", "-NoProfile", "-Command"]
+    assert "303A" not in " ".join(command)
+    patch_system.assert_called()
+
+
+@pytest.mark.unit
+@patch("subprocess.run")
+@patch("platform.system", return_value="Windows")
+def test_detect_windows_needs_driver_filters_pnp_output(
+    patch_system: MagicMock,
+    patch_run: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Driver detection should filter one static PnP query in Python."""
+    patch_run.return_value = subprocess.CompletedProcess(
+        args=["powershell.exe"],
+        returncode=0,
+        stdout=(
+            "DeviceID : USB\\VID_303A&PID_1001\n"
+            "Status   : CM_PROB_FAILED_INSTALL\n"
+        ),
+        stderr="",
+    )
+    device = SupportedDevice(
+        name="x",
+        for_firmware="heltec-v3",
+        usb_vendor_id_in_hex="303A",
+        usb_product_id_in_hex="1001",
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert detect_windows_needs_driver(device, print_reason=True) is True
+
+    assert "CM_PROB_FAILED_INSTALL" in caplog.text
+    command = patch_run.call_args.args[0]
+    assert "303A" not in " ".join(command)
+    patch_system.assert_called()
+
+
+@pytest.mark.unit
+@patch("subprocess.run")
+@patch("platform.system", return_value="Windows")
+def test_detect_windows_needs_driver_rejects_invalid_vendor_id(
+    patch_system: MagicMock,
+    patch_run: MagicMock,
+) -> None:
+    """Invalid VID metadata should not be interpolated into a command."""
+    device = cast(
+        Any,
+        SimpleNamespace(usb_vendor_id_in_hex="303A'; Remove-Item C:\\"),
+    )
+
+    assert detect_windows_needs_driver(device) is False
+    patch_run.assert_not_called()
+    patch_system.assert_called()
+
+
 @pytest.mark.unitslow
 def test_convert_mac_addr() -> None:
     """Test convert_mac_addr()."""
@@ -485,6 +578,20 @@ def test_eliminate_duplicate_port() -> None:
     assert eliminate_duplicate_port(
         ["/dev/cu.wchusbserial53230051441", "/dev/cu.usbmodem53230051441"]
     ) == ["/dev/cu.wchusbserial53230051441"]
+    assert eliminate_duplicate_port(
+        [
+            "/dev/fake",
+            "/dev/cu.usbserial-1430",
+            "/dev/cu.wchusbserial1430",
+        ]
+    ) == ["/dev/fake", "/dev/cu.wchusbserial1430"]
+    assert eliminate_duplicate_port(
+        [
+            "/dev/cu.usbmodem11301",
+            "/dev/fake",
+            "/dev/cu.wchusbserial11301",
+        ]
+    ) == ["/dev/cu.wchusbserial11301", "/dev/fake"]
 
 
 @pytest.mark.unit
@@ -497,6 +604,22 @@ def test_is_windows11_true(
     patched_version: MagicMock,
 ) -> None:
     """Test is_windows11()."""
+    assert is_windows11() is True
+    patched_platform.assert_called()
+    patched_release.assert_called()
+    patched_version.assert_called()
+
+
+@pytest.mark.unit
+@patch("platform.version", return_value="10.0.123456.1")
+@patch("platform.release", return_value="10")
+@patch("platform.system", return_value="Windows")
+def test_is_windows11_allows_six_digit_build_numbers(
+    patched_platform: MagicMock,
+    patched_release: MagicMock,
+    patched_version: MagicMock,
+) -> None:
+    """Windows build parsing should not truncate future six-digit builds."""
     assert is_windows11() is True
     patched_platform.assert_called()
     patched_release.assert_called()
@@ -554,9 +677,12 @@ def test_is_windows11_false_win8_1(
 def test_is_windows11_false_winserver(
     patched_platform: MagicMock,
     patched_release: MagicMock,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test is_windows11()."""
-    assert is_windows11() is False
+    with caplog.at_level(logging.ERROR):
+        assert is_windows11() is False
+    assert "Problem detecting Windows 11" not in caplog.text
     patched_platform.assert_called()
     patched_release.assert_called()
 
@@ -571,7 +697,7 @@ def test_active_ports_on_supported_devices_empty(mock_platform: MagicMock) -> No
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Linux")
 def test_active_ports_on_supported_devices_linux(
     mock_platform: MagicMock,
@@ -591,7 +717,7 @@ def test_active_ports_on_supported_devices_linux(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac(
     mock_platform: MagicMock,
@@ -626,7 +752,70 @@ def test_active_ports_on_supported_devices_win(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic.util.detectWindowsPort", side_effect=[{"COM2"}, {"COM3"}])
+@patch("platform.system", return_value="Windows")
+def test_active_ports_on_supported_devices_win_accepts_generators(
+    mock_platform: MagicMock,
+    mock_dwp: MagicMock,
+) -> None:
+    """Windows active-port discovery should not exhaust one-shot iterables."""
+    fake_supported_devices = (
+        SupportedDevice(name=f"device-{index}", for_firmware="heltec-v2.1")
+        for index in range(2)
+    )
+
+    assert active_ports_on_supported_devices(fake_supported_devices) == {
+        "COM2",
+        "COM3",
+    }
+    assert mock_dwp.call_count == 2
+    mock_platform.assert_called()
+
+
+@pytest.mark.unit
+@patch("subprocess.run")
+@patch("platform.system", return_value="Windows")
+def test_active_ports_on_supported_devices_win_default_path_queries_once(
+    mock_platform: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """The default Windows path should query PnP once for all devices."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["powershell.exe"],
+        returncode=0,
+        stdout=(
+            "Name     : Meshtastic Serial (COM2)\n"
+            "DeviceID : USB\\VID_303A&PID_1001\n\n"
+            "Name     : Meshtastic Serial (COM3)\n"
+            "DeviceID : USB\\VID_303A&PID_1002\n"
+        ),
+        stderr="",
+    )
+    fake_supported_devices = [
+        SupportedDevice(
+            name="device-1",
+            for_firmware="heltec-v3",
+            usb_vendor_id_in_hex="303A",
+            usb_product_id_in_hex="1001",
+        ),
+        SupportedDevice(
+            name="device-2",
+            for_firmware="heltec-v3",
+            usb_vendor_id_in_hex="303A",
+            usb_product_id_in_hex="1002",
+        ),
+    ]
+
+    assert active_ports_on_supported_devices(fake_supported_devices) == {
+        "COM2",
+        "COM3",
+    }
+    mock_run.assert_called_once()
+    mock_platform.assert_called()
+
+
+@pytest.mark.unit
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac_no_duplicates_check(
     mock_platform: MagicMock,
@@ -650,7 +839,7 @@ def test_active_ports_on_supported_devices_mac_no_duplicates_check(
 
 
 @pytest.mark.unit
-@patch("meshtastic.util.glob.glob")
+@patch("meshtastic._port_discovery.glob.glob")
 @patch("platform.system", return_value="Darwin")
 def test_active_ports_on_supported_devices_mac_duplicates_check(
     mock_platform: MagicMock,

@@ -1,12 +1,12 @@
 """Utility functions."""
 
 import base64
-import glob
+import glob  # noqa: F401
 import logging
 import os
-import platform
+import platform  # noqa: F401
 import re
-import subprocess
+import subprocess  # noqa: F401
 import sys
 import threading
 import time
@@ -17,17 +17,27 @@ from typing import (
     Any,
     Callable,
     NoReturn,
+    cast,
 )
 
 import packaging.version as pkg_version
 import requests
-import serial  # type: ignore[import-untyped]
-import serial.tools.list_ports  # type: ignore[import-untyped]
+import serial.tools.list_ports  # type: ignore[import-untyped] # noqa: F401
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import Message
 
-from meshtastic.supported_device import SupportedDevice, supported_devices
+import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
+from meshtastic.supported_device import SupportedDevice
 from meshtastic.version import get_active_version
+
+# Keep these module imports available for downstream tests and integrations that
+# historically monkeypatch meshtastic.util.<module> during port discovery.
+_PORT_DISCOVERY_MONKEYPATCH_MODULES = (
+    glob,
+    platform,
+    subprocess,
+    serial.tools.list_ports,
+)
 
 """Some devices such as a seger jlink or st-link we never want to accidentally open
      0483 STMicroelectronics ST-LINK/V2
@@ -50,7 +60,6 @@ whitelistVids: set[int] = WHITELIST_VIDS
 
 # Interval for polling the deferred execution queue in seconds
 _DEFERRED_QUEUE_POLL_TIMEOUT_SECONDS = 0.1
-_LINUX_SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 
 logger = logging.getLogger(__name__)
 
@@ -345,65 +354,12 @@ def findPorts(eliminate_duplicates: bool = False) -> list[str]:
     list[str]
         Sorted list of serial device path strings.
     """
-
-    def _linux_by_id_aliases() -> dict[str, str]:
-        """Map Linux tty realpaths to stable /dev/serial/by-id aliases."""
-        if platform.system() != "Linux":
-            return {}
-        if not os.path.isdir(_LINUX_SERIAL_BY_ID_DIR):
-            return {}
-        aliases: dict[str, str] = {}
-        for alias in glob.glob(f"{_LINUX_SERIAL_BY_ID_DIR}/*"):
-            try:
-                resolved = os.path.realpath(alias)
-            except OSError:
-                continue
-            if resolved:
-                aliases[resolved] = alias
-        return aliases
-
-    all_ports = serial.tools.list_ports.comports()
-
-    # look for 'likely' meshtastic devices
-    ports: list[str] = list(
-        map(
-            lambda port: port.device,
-            filter(
-                lambda port: port.vid is not None and port.vid in WHITELIST_VIDS,
-                all_ports,
-            ),
-        )
+    return _port_discovery._find_ports(
+        eliminate_duplicates=eliminate_duplicates,
+        blacklist_vids=BLACKLIST_VIDS,
+        whitelist_vids=WHITELIST_VIDS,
+        eliminate_duplicate_port_fn=eliminate_duplicate_port,
     )
-
-    # if no likely devices, just list everything not blacklisted
-    if len(ports) == 0:
-        ports = list(
-            map(
-                lambda port: port.device,
-                filter(
-                    lambda port: port.vid is not None
-                    and port.vid not in BLACKLIST_VIDS,
-                    all_ports,
-                ),
-            )
-        )
-
-    alias_by_realpath = _linux_by_id_aliases()
-    if alias_by_realpath:
-        mapped_ports: list[str] = []
-        for device in ports:
-            try:
-                resolved_device = os.path.realpath(device)
-            except OSError:
-                resolved_device = device
-            mapped_ports.append(alias_by_realpath.get(resolved_device, device))
-        # Keep deterministic ordering while preventing alias/raw duplicate pairs.
-        ports = list(dict.fromkeys(mapped_ports))
-
-    ports.sort()
-    if eliminate_duplicates:
-        ports = eliminate_duplicate_port(ports)
-    return ports
 
 
 class DotDict(dict[str, Any]):
@@ -959,62 +915,7 @@ def detect_supported_devices() -> set[SupportedDevice]:
     set[SupportedDevice]
         A set of supported device descriptors for matching devices; empty set if none are found.
     """
-    system: str = platform.system()
-    # print(f'system:{system}')
-
-    possible_devices = set()
-    if system == "Linux":
-        # if linux, run lsusb and list ports
-
-        # linux: use lsusb
-        # Bus 001 Device 091: ID 10c4:ea60 Silicon Labs CP210x UART Bridge
-        _, lsusb_output = subprocess.getstatusoutput("lsusb")
-        vids = get_unique_vendor_ids()
-        for vid in vids:
-            # print(f'looking for {vid}...')
-            search = f" {vid}:"
-            # print(f'search:"{search}"')
-            if re.search(search, lsusb_output, re.MULTILINE):
-                # print(f'Found vendor id that matches')
-                devices = get_devices_with_vendor_id(vid)
-                for device in devices:
-                    possible_devices.add(device)
-
-    elif system == "Windows":
-        # if windows, run Get-PnpDevice
-        _, sp_output = subprocess.getstatusoutput(
-            'powershell.exe "[Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8;'
-            'Get-PnpDevice -PresentOnly | Format-List"'
-        )
-        # print(f'sp_output:{sp_output}')
-        vids = get_unique_vendor_ids()
-        for vid in vids:
-            # print(f'looking for {vid.upper()}...')
-            search = f"DeviceID.*{vid.upper()}&"
-            # search = f'{vid.upper()}'
-            # print(f'search:"{search}"')
-            if re.search(search, sp_output, re.MULTILINE):
-                # print(f'Found vendor id that matches')
-                devices = get_devices_with_vendor_id(vid)
-                for device in devices:
-                    possible_devices.add(device)
-
-    elif system == "Darwin":
-        # run: system_profiler SPUSBDataType
-        # Note: If in boot mode, the 19003 reports same product ID as 5005.
-
-        _, sp_output = subprocess.getstatusoutput("system_profiler SPUSBDataType")
-        vids = get_unique_vendor_ids()
-        for vid in vids:
-            # print(f'looking for {vid}...')
-            search = f"Vendor ID: 0x{vid}"
-            # print(f'search:"{search}"')
-            if re.search(search, sp_output, re.MULTILINE):
-                # print(f'Found vendor id that matches')
-                devices = get_devices_with_vendor_id(vid)
-                for device in devices:
-                    possible_devices.add(device)
-    return possible_devices
+    return _port_discovery._detect_supported_devices()
 
 
 def detect_windows_needs_driver(sd: Any, print_reason: bool = False) -> bool:
@@ -1032,39 +933,19 @@ def detect_windows_needs_driver(sd: Any, print_reason: bool = False) -> bool:
     bool
         `True` if Windows indicates the device has a failed installation (a driver likely needs installation), `False` otherwise.
     """
-    need_to_install_driver: bool = False
-
-    if sd:
-        system = platform.system()
-        # print(f'in detect_windows_needs_driver system:{system}')
-
-        if system == "Windows":
-            # if windows, see if we can find a DeviceId with the vendor id
-            # Get-PnpDevice  | Where-Object{ ($_.DeviceId -like '*10C4*')} | Format-List
-            command = 'powershell.exe "[Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8; Get-PnpDevice | Where-Object{ ($_.DeviceId -like '
-            command += f"'*{sd.usb_vendor_id_in_hex.upper()}*'"
-            command += ')} | Format-List"'
-
-            # print(f'command:{command}')
-            _, sp_output = subprocess.getstatusoutput(command)
-            # print(f'sp_output:{sp_output}')
-            search = "CM_PROB_FAILED_INSTALL"
-            # print(f'search:"{search}"')
-            if re.search(search, sp_output, re.MULTILINE):
-                need_to_install_driver = True
-                # if the want to see the reason
-                if print_reason:
-                    logger.debug(sp_output)
-    return need_to_install_driver
+    return _port_discovery._detect_windows_needs_driver(
+        cast(SupportedDevice | None, sd),
+        log_reason=print_reason,
+    )
 
 
 def eliminate_duplicate_port(ports: list[str]) -> list[str]:
     """Reduce paired serial port paths to a single representative when they likely refer to the same physical device.
 
-    This function examines a list of serial port path strings and, when the list contains exactly two entries
-    that match known duplicate naming patterns (e.g., usbserial vs wchusbserial, usbmodem vs wchusbserial,
-    SLAB_USBtoUART vs usbserial), returns a list containing a single preferred port.
-    If no duplicate pattern is detected or the list length is not two, the original list is returned unchanged.
+    This function examines a list of serial port path strings and collapses duplicate pairs
+    matching known naming patterns (e.g., usbserial vs wchusbserial, usbmodem vs wchusbserial,
+    SLAB_USBtoUART vs usbserial) into a single preferred port. Duplicate pairs are collapsed
+    even inside larger port lists, not only when exactly two ports are provided.
 
     Parameters
     ----------
@@ -1074,32 +955,9 @@ def eliminate_duplicate_port(ports: list[str]) -> list[str]:
     Returns
     -------
     list
-        Either the original list of ports or a list containing one representative port when a duplicate pair is recognized.
+        The deduplicated port list with duplicate pairs collapsed to one representative each.
     """
-    new_ports = []
-    if len(ports) != 2:
-        new_ports = ports
-    else:
-        sorted_ports = sorted(ports)
-        if "usbserial" in sorted_ports[0] and "wchusbserial" in sorted_ports[1]:
-            first = sorted_ports[0].replace("usbserial-", "")
-            second = sorted_ports[1].replace("wchusbserial", "")
-            if first == second:
-                new_ports.append(sorted_ports[1])
-            else:
-                new_ports = ports
-        elif "usbmodem" in sorted_ports[0] and "wchusbserial" in sorted_ports[1]:
-            first = sorted_ports[0].replace("usbmodem", "")
-            second = sorted_ports[1].replace("wchusbserial", "")
-            if first == second:
-                new_ports.append(sorted_ports[1])
-            else:
-                new_ports = ports
-        elif "SLAB_USBtoUART" in sorted_ports[0] and "usbserial" in sorted_ports[1]:
-            new_ports.append(sorted_ports[1])
-        else:
-            new_ports = ports
-    return new_ports
+    return _port_discovery._eliminate_duplicate_port(ports)
 
 
 def is_windows11() -> bool:
@@ -1110,18 +968,7 @@ def is_windows11() -> bool:
     bool
         `True` if the OS is Windows and the OS build (version patch) is 22000 or greater, `False` otherwise.
     """
-    is_win11: bool = False
-    if platform.system() == "Windows":
-        try:
-            if float(platform.release()) >= 10.0:
-                patch = platform.version().split(".")[2]
-                # in case they add some number suffix later, just get first 5 chars of patch
-                patch = patch[:5]
-                if int(patch) >= 22000:
-                    is_win11 = True
-        except Exception:
-            logger.exception("Problem detecting Windows 11")
-    return is_win11
+    return _port_discovery._is_windows11()
 
 
 def get_unique_vendor_ids() -> set[str]:
@@ -1133,14 +980,7 @@ def get_unique_vendor_ids() -> set[str]:
         A set of normalized lowercase USB vendor IDs from all known VID/PID
         tuples (primary IDs and aliases).
     """
-    vids: set[str] = set()
-    for d in supported_devices:
-        usb_ids = d.usb_ids
-        if usb_ids:
-            vids.update(vendor_id for vendor_id, _ in usb_ids)
-        elif d.usb_vendor_id_in_hex:
-            vids.add(d.usb_vendor_id_in_hex)
-    return vids
+    return _port_discovery._get_unique_vendor_ids()
 
 
 def get_devices_with_vendor_id(vid: str) -> set[SupportedDevice]:
@@ -1157,22 +997,7 @@ def get_devices_with_vendor_id(vid: str) -> set[SupportedDevice]:
         Set of SupportedDevice entries whose primary or aliased VID/PID tuples
         include the provided vendor id.
     """
-    normalized_vid = vid.strip().lower().removeprefix("0x")
-    sd: set[SupportedDevice] = set()
-    for d in supported_devices:
-        if any(
-            isinstance(vendor_id, str)
-            and vendor_id.lower().removeprefix("0x") == normalized_vid
-            for vendor_id, _ in d.usb_ids or ()
-        ):
-            sd.add(d)
-            continue
-        if (
-            isinstance(d.usb_vendor_id_in_hex, str)
-            and d.usb_vendor_id_in_hex.lower().removeprefix("0x") == normalized_vid
-        ):
-            sd.add(d)
-    return sd
+    return _port_discovery._get_devices_with_vendor_id(vid)
 
 
 def _discover_unix_ports(bp: str) -> set[str]:
@@ -1188,7 +1013,7 @@ def _discover_unix_ports(bp: str) -> set[str]:
     set[str]
         Matching absolute device paths, or an empty set.
     """
-    return set(glob.glob(f"/dev/{bp}*"))
+    return _port_discovery._discover_unix_ports(bp)
 
 
 def active_ports_on_supported_devices(
@@ -1210,34 +1035,17 @@ def active_ports_on_supported_devices(
     set[str]
         A set of active port path strings (for example, "/dev/ttyUSB0" on Unix or "COM3" on Windows).
     """
-    ports: set[str] = set()
-    baseports: set[str] = set()
-    system: str = platform.system()
-
-    # figure out what possible base ports there are
-    for d in sds:
-        if system == "Linux" and d.baseport_on_linux is not None:
-            baseports.add(d.baseport_on_linux)
-        elif system == "Darwin" and d.baseport_on_mac is not None:
-            baseports.add(d.baseport_on_mac)
-
-    if system in ("Linux", "Darwin"):
-        for bp in baseports:
-            ports |= _discover_unix_ports(bp)
-    elif system == "Windows":
-        # for each device in supported devices found
-        for d in sds:
-            # find the port(s)
-            com_ports = detectWindowsPort(d)
-            # print(f'com_ports:{com_ports}')
-            # add all ports
-            for com_port in com_ports:
-                ports.add(com_port)
-    if eliminate_duplicates:
-        portlist: list[str] = eliminate_duplicate_port(list(ports))
-        portlist.sort()
-        ports = set(portlist)
-    return ports
+    return _port_discovery._active_ports_on_supported_devices(
+        sds,
+        eliminate_duplicates=eliminate_duplicates,
+        detect_windows_port_fn=detectWindowsPort,
+        eliminate_duplicate_port_fn=eliminate_duplicate_port,
+        detect_windows_port_from_output_fn=(
+            _port_discovery._detect_windows_port_from_output
+            if detectWindowsPort is _DEFAULT_DETECT_WINDOWS_PORT
+            else None
+        ),
+    )
 
 
 def detectWindowsPort(sd: SupportedDevice | None) -> set[str]:
@@ -1260,38 +1068,16 @@ def detectWindowsPort(sd: SupportedDevice | None) -> set[str]:
         A set of COM port names (e.g., "COM3", "COM4") discovered for the
         device; empty if none found.
     """
-    ports = set()
-
-    if sd:
-        system = platform.system()
-        if system == "Windows":
-            usb_ids = sd.usb_ids
-            if (
-                not usb_ids
-                and sd.usb_vendor_id_in_hex is not None
-                and sd.usb_product_id_in_hex is not None
-            ):
-                usb_ids = ((sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),)
-            for vendor_id, product_id in usb_ids or ():
-                filters = [f"($_.DeviceId -like '*{vendor_id.upper()}*')"]
-                if product_id:
-                    filters.append(f"($_.DeviceId -like '*{product_id.upper()}*')")
-                where_clause = " -and ".join(filters)
-                command = (
-                    'powershell.exe "[Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8;'
-                    f'Get-PnpDevice -PresentOnly | Where-Object{{ {where_clause} }} | Format-List"'
-                )
-                _, sp_output = subprocess.getstatusoutput(command)
-                p = re.compile(r"\(COM(.*)\)")
-                for x in p.findall(sp_output):
-                    ports.add(f"COM{x}")
-    return ports
+    return _port_discovery._detect_windows_port(sd)
 
 
 # COMPAT_STABLE_SHIM: historical snake_case alias for detectWindowsPort().
 def detect_windows_port(sd: SupportedDevice | None) -> set[str]:
     """Compatibility alias for detectWindowsPort()."""
     return detectWindowsPort(sd)
+
+
+_DEFAULT_DETECT_WINDOWS_PORT = detectWindowsPort
 
 
 def check_if_newer_version() -> str | None:
