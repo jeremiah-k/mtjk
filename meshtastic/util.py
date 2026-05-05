@@ -942,10 +942,10 @@ def detect_windows_needs_driver(sd: Any, print_reason: bool = False) -> bool:
 def eliminate_duplicate_port(ports: list[str]) -> list[str]:
     """Reduce paired serial port paths to a single representative when they likely refer to the same physical device.
 
-    This function examines a list of serial port path strings and, when the list contains exactly two entries
-    that match known duplicate naming patterns (e.g., usbserial vs wchusbserial, usbmodem vs wchusbserial,
-    SLAB_USBtoUART vs usbserial), returns a list containing a single preferred port.
-    If no duplicate pattern is detected or the list length is not two, the original list is returned unchanged.
+    This function examines a list of serial port path strings and collapses duplicate pairs
+    matching known naming patterns (e.g., usbserial vs wchusbserial, usbmodem vs wchusbserial,
+    SLAB_USBtoUART vs usbserial) into a single preferred port. Duplicate pairs are collapsed
+    even inside larger port lists, not only when exactly two ports are provided.
 
     Parameters
     ----------
@@ -955,7 +955,7 @@ def eliminate_duplicate_port(ports: list[str]) -> list[str]:
     Returns
     -------
     list
-        Either the original list of ports or a list containing one representative port when a duplicate pair is recognized.
+        The deduplicated port list with duplicate pairs collapsed to one representative each.
     """
     return _port_discovery._eliminate_duplicate_port(ports)
 

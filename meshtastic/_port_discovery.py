@@ -21,6 +21,7 @@ from meshtastic.supported_device import (
 logger = logging.getLogger(__name__)
 
 _LINUX_SERIAL_BY_ID_DIR = "/dev/serial/by-id"
+_POWERSHELL_TIMEOUT_SECONDS = 10
 _COM_PORT_RE = re.compile(r"\(COM(\d+)\)")
 _PNP_DEVICE_BLOCK_RE = re.compile(r"(?:\r?\n){2,}")
 
@@ -49,7 +50,14 @@ def _run_powershell(command: str) -> str:
             capture_output=True,
             check=False,
             text=True,
+            timeout=_POWERSHELL_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        logger.debug(
+            "PowerShell command timed out after %s seconds",
+            _POWERSHELL_TIMEOUT_SECONDS,
+        )
+        return ""
     except OSError:
         logger.debug("Unable to run PowerShell command", exc_info=True)
         return ""
@@ -146,7 +154,7 @@ def _detect_supported_devices() -> set[SupportedDevice]:
                 continue
             if (
                 f"VID_{normalized_vid}" in sp_output_upper
-                or f"{normalized_vid}&" in sp_output_upper
+                or f"{normalized_vid}&PID_" in sp_output_upper
             ):
                 possible_devices.update(_get_devices_with_vendor_id(vid))
     elif system == "Darwin":
