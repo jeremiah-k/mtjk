@@ -602,7 +602,9 @@ class TestHandleFromRadioQueueStatus:
         result = receive_pipeline._handle_from_radio_queue_status(context)
 
         assert result == []  # No publication intents
-        mock_interface._queue_send_runtime.handle_queue_status_from_radio.assert_called_once()
+        mock_interface._queue_send_runtime._handle_queue_status_from_radio.assert_called_once_with(
+            from_radio.queueStatus
+        )
 
 
 class TestHandleFromRadioClientNotification:
@@ -888,7 +890,7 @@ class TestHandleQueueStatusFromRadio:
 
         receive_pipeline._handle_queue_status_from_radio(queue_status)
 
-        mock_interface._queue_send_runtime.handle_queue_status_from_radio.assert_called_once_with(
+        mock_interface._queue_send_runtime._handle_queue_status_from_radio.assert_called_once_with(
             queue_status
         )
 
@@ -983,6 +985,29 @@ class TestEnrichPacketIdentity:
         # When nodes are missing, fromId/toId should be set to None, not absent
         assert packet_dict["fromId"] is None
         assert packet_dict["toId"] is None
+
+    @pytest.mark.unit
+    def test_enrich_packet_identity_exception_sets_missing_ids_to_none(
+        self,
+        receive_pipeline: ReceivePipeline,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Unexpected node lookup failures should preserve fromId/toId keys."""
+
+        def fail_lookup(_num: int, isDest: bool = True) -> str | None:  # noqa: N803
+            raise RuntimeError("lookup failed")
+
+        monkeypatch.setattr(receive_pipeline, "_node_num_to_id", fail_lookup)
+        packet_dict = {"from": 12345, "to": 67890}
+
+        with caplog.at_level(logging.WARNING):
+            receive_pipeline._enrich_packet_identity(packet_dict)
+
+        assert packet_dict["fromId"] is None
+        assert packet_dict["toId"] is None
+        assert "Not populating fromId" in caplog.text
+        assert "Not populating toId" in caplog.text
 
 
 class TestNodeNumToId:

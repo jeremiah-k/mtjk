@@ -215,7 +215,7 @@ class TestWaitForPositionWorkflow:
 
         # Mock the wait to avoid actual waiting
         with patch.object(
-            iface, "_wait_for_request_ack", return_value=True
+            iface._send_pipeline, "_wait_for_request_ack", return_value=True
         ) as mock_wait:
             with patch.object(iface, "_raise_wait_error_if_present"):
                 iface.waitForPosition(request_id=12345)
@@ -285,7 +285,7 @@ class TestWaitForTelemetryWorkflow:
         iface = mock_interface
 
         with patch.object(
-            iface, "_wait_for_request_ack", return_value=True
+            iface._send_pipeline, "_wait_for_request_ack", return_value=True
         ) as mock_wait:
             with patch.object(iface, "_raise_wait_error_if_present"):
                 iface.waitForTelemetry(request_id=54321)
@@ -333,7 +333,7 @@ class TestWaitForTraceRouteWorkflow:
         iface = mock_interface
 
         with patch.object(
-            iface, "_wait_for_request_ack", return_value=True
+            iface._send_pipeline, "_wait_for_request_ack", return_value=True
         ) as mock_wait:
             with patch.object(iface, "_raise_wait_error_if_present"):
                 iface.waitForTraceRoute(waitFactor=3.0, request_id=11111)
@@ -349,7 +349,7 @@ class TestWaitForTraceRouteWorkflow:
         iface = mock_interface
 
         with patch.object(
-            iface, "_wait_for_request_ack", return_value=True
+            iface._send_pipeline, "_wait_for_request_ack", return_value=True
         ) as mock_wait:
             with patch.object(iface, "_raise_wait_error_if_present"):
                 iface.waitForTraceRoute(waitFactor=1.0, request_id=22222)
@@ -397,7 +397,7 @@ class TestWaitForWaypointWorkflow:
         iface = mock_interface
 
         with patch.object(
-            iface, "_wait_for_request_ack", return_value=True
+            iface._send_pipeline, "_wait_for_request_ack", return_value=True
         ) as mock_wait:
             with patch.object(iface, "_raise_wait_error_if_present"):
                 iface.waitForWaypoint(request_id=33333)

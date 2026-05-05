@@ -24,10 +24,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import meshtastic.mesh_interface as mesh_interface_module
+from meshtastic.mesh_interface_runtime import receive_pipeline as receive_pipeline_module
 from meshtastic.mesh_interface_runtime import flows as flows_module
 from meshtastic.mesh_interface_runtime.request_wait import (
     UNSCOPED_WAIT_REQUEST_ID,
     WAIT_ATTR_NAK,
+    WAIT_ATTR_POSITION,
+    WAIT_ATTR_TELEMETRY,
+    WAIT_ATTR_TRACEROUTE,
+    WAIT_ATTR_WAYPOINT,
 )
 
 from .. import BROADCAST_ADDR, LOCAL_ADDR, NODELESS_WANT_CONFIG_ID, ResponseHandler
@@ -112,7 +117,7 @@ def _install_protocol_stub(
         onReceive=on_receive,
     )
     monkeypatch.setattr(
-        mesh_interface_module,
+        receive_pipeline_module,
         "protocols",
         {portnum: fake_protocol},
     )
@@ -2086,8 +2091,8 @@ def test_get_node_resets_retry_budget_on_new_channel_progress() -> None:
 def test_send_alert_and_mqtt_proxy_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """sendAlert() and sendMqttClientProxyMessage() should delegate with expected payloads."""
     with MeshInterface(noProto=True) as iface:
-        send_data = MagicMock(return_value=mesh_pb2.MeshPacket())
-        monkeypatch.setattr(iface, "sendData", send_data)
+        send_alert = MagicMock(return_value=mesh_pb2.MeshPacket())
+        monkeypatch.setattr(iface._send_pipeline, "sendAlert", send_alert)
         response_cb = MagicMock()
         iface.sendAlert(
             "SOS",
@@ -2097,19 +2102,19 @@ def test_send_alert_and_mqtt_proxy_paths(monkeypatch: pytest.MonkeyPatch) -> Non
             hopLimit=3,
         )
 
-        assert send_data.call_count == 1
-        send_args = send_data.call_args
-        assert send_args.args[0] == b"SOS"
-        assert send_args.kwargs["portNum"] == portnums_pb2.PortNum.ALERT_APP
-        assert send_args.kwargs["priority"] == mesh_pb2.MeshPacket.Priority.ALERT
+        assert send_alert.call_count == 1
+        send_args = send_alert.call_args
+        assert send_args.args[0] == "SOS"
+        assert send_args.kwargs["destinationId"] == 42
+        assert send_args.kwargs["channelIndex"] == 2
+        assert send_args.kwargs["hopLimit"] == 3
 
-        sent_to_radio: list[mesh_pb2.ToRadio] = []
-        monkeypatch.setattr(iface, "_send_to_radio", sent_to_radio.append)
+        send_mqtt = MagicMock()
+        monkeypatch.setattr(iface._send_pipeline, "sendMqttClientProxyMessage", send_mqtt)
         iface.sendMqttClientProxyMessage("mesh/topic", b"payload")
 
-        assert sent_to_radio
-        assert sent_to_radio[0].mqttClientProxyMessage.topic == "mesh/topic"
-        assert sent_to_radio[0].mqttClientProxyMessage.data == b"payload"
+        assert send_mqtt.call_count == 1
+        assert send_mqtt.call_args.args == ("mesh/topic", b"payload")
 
 
 @pytest.mark.unit
@@ -2161,14 +2166,14 @@ def test_on_response_position_success_and_routing_error(
         position.altitude = 250
         position.precision_bits = 32
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1001
+            WAIT_ATTR_POSITION, request_id=1001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2192,14 +2197,14 @@ def test_on_response_position_success_and_routing_error(
         unknown_position = mesh_pb2.Position()
         unknown_position.precision_bits = 5
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1002
+            WAIT_ATTR_POSITION, request_id=1002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1002,
         )
         caplog.clear()
@@ -2224,14 +2229,14 @@ def test_on_response_position_success_and_routing_error(
         disabled_position = mesh_pb2.Position()
         disabled_position.precision_bits = 0
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1003
+            WAIT_ATTR_POSITION, request_id=1003
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1003)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1003,
         )
         caplog.clear()
@@ -2254,14 +2259,14 @@ def test_on_response_position_success_and_routing_error(
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_POSITION, request_id=1004
+            WAIT_ATTR_POSITION, request_id=1004
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1004)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_POSITION,
+            acknowledgment_attr=WAIT_ATTR_POSITION,
             request_id=1004,
         )
         iface.onResponsePosition(
@@ -2466,14 +2471,14 @@ def test_send_traceroute_and_response_rendering(
         route.route_back.extend([12])
         route.snr_back.extend([16, 20])
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=88
+            WAIT_ATTR_TRACEROUTE, request_id=88
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=88)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=88,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2499,14 +2504,14 @@ def test_on_response_traceroute_routing_no_response_raises() -> None:
     """Traceroute routing NO_RESPONSE replies should be surfaced by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=9101
+            WAIT_ATTR_TRACEROUTE, request_id=9101
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9101)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=9101,
         )
         iface.onResponseTraceRoute(
@@ -2533,14 +2538,14 @@ def test_on_response_traceroute_parse_failures_surface_to_waiters() -> None:
     """Traceroute parse errors should be recorded and raised by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TRACEROUTE, request_id=9102
+            WAIT_ATTR_TRACEROUTE, request_id=9102
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9102)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TRACEROUTE,
+            acknowledgment_attr=WAIT_ATTR_TRACEROUTE,
             request_id=9102,
         )
         iface.onResponseTraceRoute(
@@ -2622,14 +2627,14 @@ def test_on_response_telemetry_paths(
         device_t.device_metrics.battery_level = 95
         device_t.device_metrics.voltage = 4.23
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2001
+            WAIT_ATTR_TELEMETRY, request_id=2001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2653,14 +2658,14 @@ def test_on_response_telemetry_paths(
         env_t = telemetry_pb2.Telemetry()
         env_t.environment_metrics.temperature = 21.5
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2002
+            WAIT_ATTR_TELEMETRY, request_id=2002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2002,
         )
         caplog.clear()
@@ -2683,14 +2688,14 @@ def test_on_response_telemetry_paths(
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2003
+            WAIT_ATTR_TELEMETRY, request_id=2003
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2003)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2003,
         )
         iface.onResponseTelemetry(
@@ -2711,14 +2716,14 @@ def test_on_response_telemetry_paths(
         assert "No response" in str(wait_errors[0])
 
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_TELEMETRY, request_id=2004
+            WAIT_ATTR_TELEMETRY, request_id=2004
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2004)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=2004,
         )
         iface.onResponseTelemetry(
@@ -2746,14 +2751,14 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
     with MeshInterface(noProto=True) as iface:
         waypoint = mesh_pb2.Waypoint(name="WPT", id=5)
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_WAYPOINT, request_id=3001
+            WAIT_ATTR_WAYPOINT, request_id=3001
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3001)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_WAYPOINT,
+            acknowledgment_attr=WAIT_ATTR_WAYPOINT,
             request_id=3001,
         )
         with caplog.at_level(logging.INFO, logger=flows_module.__name__):
@@ -2775,14 +2780,14 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
 
     with MeshInterface(noProto=True) as iface:
         iface._clear_wait_error(
-            mesh_interface_module.WAIT_ATTR_WAYPOINT, request_id=3002
+            WAIT_ATTR_WAYPOINT, request_id=3002
         )
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3002)
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_WAYPOINT,
+            acknowledgment_attr=WAIT_ATTR_WAYPOINT,
             request_id=3002,
         )
         iface.onResponseWaypoint(
@@ -2839,9 +2844,9 @@ def test_on_response_parse_failures_set_wait_errors(
 ) -> None:
     """Malformed response payloads should fail via wait-state errors, not false success."""
     wait_attr_by_waiter = {
-        "waitForPosition": mesh_interface_module.WAIT_ATTR_POSITION,
-        "waitForTelemetry": mesh_interface_module.WAIT_ATTR_TELEMETRY,
-        "waitForWaypoint": mesh_interface_module.WAIT_ATTR_WAYPOINT,
+        "waitForPosition": WAIT_ATTR_POSITION,
+        "waitForTelemetry": WAIT_ATTR_TELEMETRY,
+        "waitForWaypoint": WAIT_ATTR_WAYPOINT,
     }
     request_id = 4200
     with MeshInterface(noProto=True) as iface:
@@ -3406,7 +3411,7 @@ def test_on_response_telemetry_logs_all_device_metric_fields(
 def test_wait_helpers_use_request_scoped_waiter_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Request-scoped waitFor* helpers should call _wait_for_request_ack with attr-specific keys."""
+    """Request-scoped waitFor* helpers should delegate to send pipeline with attr-specific keys."""
     with MeshInterface(noProto=True) as iface:
         wait_calls: list[tuple[str, int, float]] = []
 
@@ -3419,7 +3424,9 @@ def test_wait_helpers_use_request_scoped_waiter_path(
             wait_calls.append((acknowledgment_attr, request_id, timeout_seconds))
             return True
 
-        monkeypatch.setattr(iface, "_wait_for_request_ack", _wait_for_request_ack)
+        monkeypatch.setattr(
+            iface._send_pipeline, "_wait_for_request_ack", _wait_for_request_ack
+        )
 
         iface.waitForTraceRoute(1.5, request_id=11)
         iface.waitForPosition(request_id=22)
@@ -3460,12 +3467,12 @@ def test_wait_for_request_ack_supports_overlapping_same_type_waits() -> None:
         assert wait_started[22].wait(timeout=1.0)
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=11,
         )
         _wait_for_scoped_wait_registration(
             iface,
-            acknowledgment_attr=mesh_interface_module.WAIT_ATTR_TELEMETRY,
+            acknowledgment_attr=WAIT_ATTR_TELEMETRY,
             request_id=22,
         )
         iface._mark_wait_acknowledged("receivedTelemetry", request_id=11)
@@ -3680,11 +3687,13 @@ def test_send_to_radio_waits_resends_and_tracks_requeue(
         iface.queue = _RequeueQueue()
         packet = mesh_pb2.ToRadio()
         packet.packet.id = 123
+        incoming = mesh_pb2.ToRadio()
+        incoming.packet.id = 999
         monkeypatch.setattr(iface, "_send_to_radio_impl", lambda _msg: None)
         pops = iter([(123, packet), None])
         original_pop = iface._queue_pop_for_send
         monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
-        iface._send_to_radio(mesh_pb2.ToRadio())
+        iface._send_to_radio(incoming)
         monkeypatch.setattr(iface, "_queue_pop_for_send", original_pop)
         assert 123 in iface.queue
 
@@ -3697,8 +3706,15 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
     """A successfully-sent packet without immediate queue-status reply should not be requeued in the same cycle."""
     with MeshInterface(noProto=True) as iface:
         iface.noProto = False
+        class _FalsyQueue(OrderedDict[int, mesh_pb2.ToRadio | bool]):
+            def __bool__(self) -> bool:
+                return False
+
+        iface.queue = _FalsyQueue()
         packet = mesh_pb2.ToRadio()
         packet.packet.id = 123
+        incoming = mesh_pb2.ToRadio()
+        incoming.packet.id = 999
         sent_ids: list[int] = []
 
         def _send_impl(msg: mesh_pb2.ToRadio) -> None:
@@ -3709,7 +3725,7 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
         original_pop = iface._queue_pop_for_send
         monkeypatch.setattr(iface, "_queue_pop_for_send", lambda: next(pops))
         try:
-            iface._send_to_radio(mesh_pb2.ToRadio())
+            iface._send_to_radio(incoming)
             assert 123 in sent_ids
             assert 123 not in iface.queue
         finally:
@@ -3792,12 +3808,15 @@ def test_handle_queue_status_awaiting_correlation_not_marked_unexpected(
     """Queue status for recently sent packets should not be logged as unexpected replies."""
     with MeshInterface(noProto=True) as iface:
         packet_id = 0x01020304
+        iface._queue_send_runtime._record_queue_status(
+            mesh_pb2.QueueStatus(free=3, maxlen=4, res=1, mesh_packet_id=0)
+        )
         packet = mesh_pb2.ToRadio()
         packet.packet.id = packet_id
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool] = OrderedDict(
             [(packet_id, packet)]
         )
-        iface._queue_send_runtime.reconcile_resent_queue(
+        iface._queue_send_runtime._reconcile_resent_queue(
             resent_queue=resent_queue,
             sent_packet_ids={packet_id},
         )
@@ -3856,12 +3875,20 @@ def test_handle_from_radio_branch_matrix(
         handle_packet = MagicMock()
         handle_log_record = MagicMock()
         handle_queue_status = MagicMock()
-        monkeypatch.setattr(iface, "_handle_config_complete", handle_config_complete)
-        monkeypatch.setattr(iface, "_handle_channel", handle_channel)
-        monkeypatch.setattr(iface, "_handle_packet_from_radio", handle_packet)
-        monkeypatch.setattr(iface, "_handle_log_record", handle_log_record)
         monkeypatch.setattr(
-            iface, "_handle_queue_status_from_radio", handle_queue_status
+            iface._receive_pipeline, "_handle_config_complete", handle_config_complete
+        )
+        monkeypatch.setattr(iface._receive_pipeline, "_handle_channel", handle_channel)
+        monkeypatch.setattr(
+            iface._receive_pipeline, "_handle_packet_from_radio", handle_packet
+        )
+        monkeypatch.setattr(
+            iface._receive_pipeline, "_handle_log_record", handle_log_record
+        )
+        monkeypatch.setattr(
+            iface._receive_pipeline,
+            "_handle_queue_status_from_radio",
+            handle_queue_status,
         )
 
         config_complete_msg = mesh_pb2.FromRadio()
@@ -4051,7 +4078,7 @@ def test_handle_packet_from_radio_toid_warning_and_response_handler_paths(
         setattr(packet_for_toid, "from", 1)
         packet_for_toid.to = 2
         with patch.object(
-            iface,
+            iface._receive_pipeline,
             "_node_num_to_id",
             side_effect=["!00000001", RuntimeError("toId failure")],
         ):
@@ -4083,7 +4110,7 @@ def test_handle_packet_from_radio_toid_warning_and_response_handler_paths(
             onReceive=_on_receive,
         )
         monkeypatch.setattr(
-            mesh_interface_module,
+            receive_pipeline_module,
             "protocols",
             {portnums_pb2.PortNum.ROUTING_APP: fake_protocol},
         )
@@ -4614,3 +4641,133 @@ class TestUnscopedWaitForAckNakOverlappingCommands:
                 "Request B should timeout (not receive A's ACK). "
                 "Scoped waits properly isolate requests."
             )
+
+
+class _FakeSendPipeline:
+    """Test double capturing send pipeline call patterns."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def sendText(self, *args: object, **kwargs: object) -> str:
+        self.calls.append(("sendText", args, kwargs))
+        return "sent-text"
+
+    def sendAlert(self, *args: object, **kwargs: object) -> str:
+        self.calls.append(("sendAlert", args, kwargs))
+        return "sent-alert"
+
+    def sendMqttClientProxyMessage(self, *args: object, **kwargs: object) -> None:
+        self.calls.append(("sendMqttClientProxyMessage", args, kwargs))
+
+
+class _FakeReceivePipeline:
+    """Test double capturing receive pipeline call patterns."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def _handle_from_radio(self, *args: object, **kwargs: object) -> None:
+        self.calls.append(("_handle_from_radio", args, kwargs))
+
+    def _handle_packet_from_radio(
+        self, *args: object, **kwargs: object
+    ) -> list[object]:
+        self.calls.append(("_handle_packet_from_radio", args, kwargs))
+        return ["handled-packet"]
+
+
+@pytest.mark.unit
+def test_mesh_interface_handle_from_radio_delegates_to_receive_pipeline() -> None:
+    """_handle_from_radio should route through ReceivePipeline, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeReceivePipeline()
+    interface._receive_pipeline = cast(Any, fake)
+
+    interface._handle_from_radio(b"payload")
+
+    assert fake.calls == [("_handle_from_radio", (b"payload",), {})]
+
+
+@pytest.mark.unit
+def test_mesh_interface_handle_packet_delegates_to_receive_pipeline() -> None:
+    """_handle_packet_from_radio should route through ReceivePipeline."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake = _FakeReceivePipeline()
+    interface._receive_pipeline = cast(Any, fake)
+    packet = mesh_pb2.MeshPacket()
+
+    result = interface._handle_packet_from_radio(
+        packet,
+        hack=True,
+        emit_publication=False,
+    )
+
+    assert result == ["handled-packet"]
+    assert fake.calls == [
+        (
+            "_handle_packet_from_radio",
+            (packet,),
+            {"allow_zero_source": True, "emit_publication": False},
+        )
+    ]
+
+
+@pytest.mark.unit
+def test_mesh_interface_send_text_delegates_to_send_pipeline() -> None:
+    """SendText should route through _send_pipeline.sendText, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake: Any = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    result = interface.sendText("hello", destinationId="!12345678", wantAck=True)
+
+    assert result == "sent-text"
+    assert len(fake.calls) == 1
+    name, args, kwargs = fake.calls[0]
+    assert name == "sendText"
+    assert args == ("hello",)
+    assert kwargs["destinationId"] == "!12345678"
+    assert kwargs["wantAck"] is True
+    assert kwargs["wantResponse"] is False
+    assert kwargs["onResponse"] is None
+    assert kwargs["channelIndex"] == 0
+    assert kwargs["hopLimit"] is None
+
+
+@pytest.mark.unit
+def test_mesh_interface_send_alert_delegates_to_send_pipeline() -> None:
+    """SendAlert should route through _send_pipeline.sendAlert, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake: Any = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    result = interface.sendAlert("wake", destinationId="!12345678")
+
+    assert result == "sent-alert"
+    assert len(fake.calls) == 1
+    name, args, kwargs = fake.calls[0]
+    assert name == "sendAlert"
+    assert args == ("wake",)
+    assert kwargs["destinationId"] == "!12345678"
+    assert kwargs["onResponse"] is None
+    assert kwargs["channelIndex"] == 0
+    assert kwargs["hopLimit"] is None
+
+
+@pytest.mark.unit
+def test_mesh_interface_mqtt_proxy_delegates_to_send_pipeline() -> None:
+    """SendMqttClientProxyMessage should route through _send_pipeline, not local impl."""
+    interface = MeshInterface.__new__(MeshInterface)
+    fake: Any = _FakeSendPipeline()
+    interface._send_pipeline = fake
+
+    interface.sendMqttClientProxyMessage("topic", b"payload")
+
+    assert fake.calls == [
+        (
+            "sendMqttClientProxyMessage",
+            ("topic", b"payload"),
+            {},
+        )
+    ]

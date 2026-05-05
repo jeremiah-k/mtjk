@@ -861,7 +861,7 @@ class SendPipeline:
             )
             return
 
-        self._queue_send_runtime.send_to_radio(
+        self._queue_send_runtime._send_to_radio(
             toRadio,
             send_impl=self._send_to_radio_impl,
             pop_for_send=self._interface._queue_pop_for_send,
