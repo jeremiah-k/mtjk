@@ -47,6 +47,10 @@ class _QueueSendRuntime:
                 return True
             return queue_status.free > 0
 
+    def has_free_space(self) -> bool:
+        """Return whether queue status indicates free TX slots."""
+        return self._has_free_space()
+
     def _claim(self) -> None:
         """Claim one queue slot when queue status is available."""
         with self._lock:
@@ -57,6 +61,10 @@ class _QueueSendRuntime:
                 return
             queue_status.free -= 1
 
+    def claim(self) -> None:
+        """Claim one queue slot when queue status is available."""
+        self._claim()
+
     def _pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
         """Pop the next sendable queue entry while honoring queue free-space state."""
         with self._lock:
@@ -65,6 +73,10 @@ class _QueueSendRuntime:
                 return None
             queue_status = self._get_queue_status()
             if queue_status is not None and queue_status.free <= 0:
+                packet_id, packet = next(iter(queue.items()))
+                if not isinstance(packet, mesh_pb2.ToRadio):
+                    queue.pop(packet_id, None)
+                    return packet_id, packet
                 return None
             to_resend = queue.popitem(last=False)
             if queue_status is not None and isinstance(
@@ -72,6 +84,10 @@ class _QueueSendRuntime:
             ):
                 queue_status.free -= 1
             return to_resend
+
+    def pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
+        """Pop the next sendable queue entry while honoring queue free-space state."""
+        return self._pop_for_send()
 
     def _send_to_radio(
         self,
@@ -119,6 +135,22 @@ class _QueueSendRuntime:
                 sent_packet_ids=sent_packet_ids,
             )
 
+    def send_to_radio(
+        self,
+        to_radio: mesh_pb2.ToRadio,
+        *,
+        send_impl: Callable[[mesh_pb2.ToRadio], None],
+        pop_for_send: Callable[[], tuple[int, mesh_pb2.ToRadio | bool] | None],
+        sleep_fn: Callable[[float], None],
+    ) -> None:
+        """Run outbound send/resend loop using queue ownership semantics."""
+        self._send_to_radio(
+            to_radio,
+            send_impl=send_impl,
+            pop_for_send=pop_for_send,
+            sleep_fn=sleep_fn,
+        )
+
     def _reconcile_resent_queue(
         self,
         *,
@@ -126,18 +158,19 @@ class _QueueSendRuntime:
         sent_packet_ids: set[int],
     ) -> None:
         """Reconcile resent packets against ACK-under-us and requeue semantics."""
+        missing = object()
         for packet_id, packet in resent_queue.items():
             restore_queue_slot = False
             with self._lock:
-                queued_value: mesh_pb2.ToRadio | bool | None = self._get_queue().pop(
+                queued_value: mesh_pb2.ToRadio | bool | object = self._get_queue().pop(
                     packet_id,
-                    None,
+                    missing,
                 )
                 acked = queued_value is False
             if acked:
                 logger.debug("packet %08x got acked under us", packet_id)
                 continue
-            if queued_value is None and packet_id in sent_packet_ids:
+            if queued_value is missing and packet_id in sent_packet_ids:
                 with self._lock:
                     self._prune_awaiting_queue_status_ids_locked(time.monotonic())
                     if self._queue_status_seen:
@@ -153,7 +186,7 @@ class _QueueSendRuntime:
             elif isinstance(packet, mesh_pb2.ToRadio):
                 packet_to_requeue = packet
                 restore_queue_slot = packet_id not in sent_packet_ids
-            elif queued_value is not None and isinstance(queued_value, bool):
+            elif queued_value is not missing and isinstance(queued_value, bool):
                 packet_to_requeue = queued_value
             if packet_to_requeue is not None:
                 with self._lock:
@@ -165,6 +198,18 @@ class _QueueSendRuntime:
                                 queue_status.free + 1,
                             )
                     self._get_queue()[packet_id] = packet_to_requeue
+
+    def reconcile_resent_queue(
+        self,
+        *,
+        resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool],
+        sent_packet_ids: set[int],
+    ) -> None:
+        """Reconcile resent packets against ACK-under-us and requeue semantics."""
+        self._reconcile_resent_queue(
+            resent_queue=resent_queue,
+            sent_packet_ids=sent_packet_ids,
+        )
 
     def _record_queue_status(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Persist latest queue status update."""
@@ -178,6 +223,10 @@ class _QueueSendRuntime:
             queue_status.res,
             queue_status.mesh_packet_id,
         )
+
+    def record_queue_status(self, queue_status: mesh_pb2.QueueStatus) -> None:
+        """Persist latest queue status update."""
+        self._record_queue_status(queue_status)
 
     def _correlate_queue_status_reply(
         self, queue_status: mesh_pb2.QueueStatus
@@ -212,6 +261,12 @@ class _QueueSendRuntime:
                 packet_id,
             )
 
+    def correlate_queue_status_reply(
+        self, queue_status: mesh_pb2.QueueStatus
+    ) -> None:
+        """Correlate queue status mesh_packet_id replies to pending entries."""
+        self._correlate_queue_status_reply(queue_status)
+
     def _handle_queue_status_from_radio(
         self, queue_status: mesh_pb2.QueueStatus
     ) -> None:
@@ -224,6 +279,12 @@ class _QueueSendRuntime:
                     self._awaiting_queue_status_ids.pop(packet_id, None)
             return
         self._correlate_queue_status_reply(queue_status)
+
+    def handle_queue_status_from_radio(
+        self, queue_status: mesh_pb2.QueueStatus
+    ) -> None:
+        """Apply queue status updates and queue reply correlation."""
+        self._handle_queue_status_from_radio(queue_status)
 
     def _prune_awaiting_queue_status_ids_locked(self, now: float) -> None:
         """Drop stale queue-status correlation IDs. Caller must hold _lock."""

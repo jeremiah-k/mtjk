@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from meshtastic.mesh_interface_runtime import queue_send as queue_send_module
 from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
 from meshtastic.protobuf import mesh_pb2
 
@@ -131,6 +132,29 @@ def test_pop_for_send_obeys_free_space_limit() -> None:
 
 
 @pytest.mark.unit
+def test_pop_for_send_consumes_marker_when_queue_full() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    status = mesh_pb2.QueueStatus()
+    status.free = 0
+    status.maxlen = 10
+    harness.set_queue_status(status)
+    harness.queue[123] = False
+
+    popped = runtime._pop_for_send()
+
+    assert popped == (123, False)
+    assert harness.queue == collections.OrderedDict()
+    assert status.free == 0
+
+
+@pytest.mark.unit
 def test_correlate_queue_status_reply_removes_matching_packet() -> None:
     harness = _QueueHarness()
     runtime = _QueueSendRuntime(
@@ -242,6 +266,96 @@ def test_sent_packet_without_queue_status_does_not_track_awaiting_correlation() 
     )
 
     assert runtime._awaiting_queue_status_ids == {}
+
+
+@pytest.mark.unit
+def test_sent_packet_after_queue_status_tracks_awaiting_correlation() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    status = mesh_pb2.QueueStatus()
+    status.free = 1
+    status.maxlen = 10
+    runtime._handle_queue_status_from_radio(status)
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 654
+
+    runtime._send_to_radio(
+        packet,
+        send_impl=lambda _: None,
+        pop_for_send=runtime._pop_for_send,
+        sleep_fn=lambda _: None,
+    )
+
+    assert 654 in runtime._awaiting_queue_status_ids
+
+
+@pytest.mark.unit
+def test_expired_awaiting_queue_status_id_is_treated_as_unexpected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    status = mesh_pb2.QueueStatus()
+    status.free = 1
+    status.maxlen = 10
+    runtime._handle_queue_status_from_radio(status)
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 777
+
+    monotonic_values = iter(
+        [
+            1000.0,
+            1000.0,
+            1000.0 + queue_send_module.AWAITING_QUEUE_STATUS_TTL_SECONDS + 1.0,
+        ]
+    )
+    monkeypatch.setattr(
+        queue_send_module.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    runtime._send_to_radio(
+        packet,
+        send_impl=lambda _: None,
+        pop_for_send=runtime._pop_for_send,
+        sleep_fn=lambda _: None,
+    )
+    queue_status_reply = mesh_pb2.QueueStatus()
+    queue_status_reply.mesh_packet_id = 777
+
+    runtime._correlate_queue_status_reply(queue_status_reply)
+
+    assert 777 not in runtime._awaiting_queue_status_ids
+    assert harness.queue[777] is False
+
+
+@pytest.mark.unit
+def test_non_underscored_aliases_delegate_to_runtime_methods() -> None:
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+
+    assert runtime.has_free_space() is True
+    runtime.claim()
+    assert runtime.pop_for_send() is None
 
 
 @pytest.mark.unit
