@@ -4512,6 +4512,96 @@ def test_main_ch_set_psk_with_ch_index(capsys: pytest.CaptureFixture[str]) -> No
     mo.assert_called()
 
 
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_ch_set_psk_with_base64_raw(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --ch-set psk with a raw base64 string."""
+    sys.argv = [
+        "",
+        "--ch-set",
+        "psk",
+        "HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0=",
+        "--host",
+        "meshtastic.local",
+        "--ch-index",
+        "1",
+    ]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=TCPInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=iface) as mo:
+        main()
+    out, err = capsys.readouterr()
+    assert re.search(r"Connected to radio", out, re.MULTILINE)
+    assert re.search(r"Writing modified channels to device", out, re.MULTILINE)
+    assert err == ""
+    mo.assert_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_ch_set_psk_with_base64_prefix(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --ch-set psk with base64: prefix."""
+    sys.argv = [
+        "",
+        "--ch-set",
+        "psk",
+        "base64:HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0=",
+        "--host",
+        "meshtastic.local",
+        "--ch-index",
+        "1",
+    ]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=TCPInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=iface) as mo:
+        main()
+    out, err = capsys.readouterr()
+    assert re.search(r"Connected to radio", out, re.MULTILINE)
+    assert re.search(r"Writing modified channels to device", out, re.MULTILINE)
+    assert err == ""
+    mo.assert_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_ch_set_psk_with_hex(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --ch-set psk with hex value."""
+    sys.argv = [
+        "",
+        "--ch-set",
+        "psk",
+        "0x1a1a",
+        "--host",
+        "meshtastic.local",
+        "--ch-index",
+        "1",
+    ]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=TCPInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=iface) as mo:
+        main()
+    out, err = capsys.readouterr()
+    assert re.search(r"Connected to radio", out, re.MULTILINE)
+    assert re.search(r"Writing modified channels to device", out, re.MULTILINE)
+    assert err == ""
+    mo.assert_called()
+
+
 # TODO
 # doesn't work properly with nested/module config stuff
 # @pytest.mark.unit

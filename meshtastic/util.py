@@ -118,8 +118,10 @@ def fromPSK(valstr: str) -> Any:
     - "default": return a single byte with value 1 to indicate the default channel PSK.
     - "simpleN": where N is an integer in 0..254; return a single byte with value (N + 1).
 
-    For any other input, parse using general string-to-value rules (e.g., hex, base64,
-    numeric, boolean, or plain string) and return the corresponding value.
+    For any other input, parse using general string-to-value rules (e.g., hex, base64:,
+    numeric, boolean, or plain string).  If the result is still a plain string (not
+    recognized as any of the above), base64 decoding is attempted as a fallback so that
+    raw base64-encoded PSK values (without the ``base64:`` prefix) are accepted.
 
     Parameters
     ----------
@@ -148,7 +150,13 @@ def fromPSK(valstr: str) -> Any:
         # Use one of the single byte encodings
         return bytes([n + 1])
     else:
-        return fromStr(valstr)
+        val = fromStr(valstr)
+        if isinstance(val, str):
+            try:
+                val = base64.b64decode(valstr)
+            except Exception:
+                pass
+        return val
 
 
 def fromStr(valstr: str) -> Any:
