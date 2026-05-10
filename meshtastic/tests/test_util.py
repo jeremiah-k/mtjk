@@ -158,13 +158,15 @@ def test_fromPSK() -> None:
     assert fromPSK("simple22") == b"\x17"
     # "trash" is NOT valid base64 (bad padding length), falls back to string
     assert fromPSK("trash") == "trash"
-    # Raw base64 auto-detection: 32-byte PSK
-    raw_b64_key = "HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0="
-    expected_bytes = base64.b64decode(raw_b64_key)
-    assert fromPSK(raw_b64_key) == expected_bytes
-    # Raw base64: short key same as default
-    assert fromPSK("AQ==") == b"\x01"
-    # base64: prefix still works
+    # Raw base64 auto-detection: deterministic standard AES key lengths
+    for key_length in (16, 24, 32):
+        expected_bytes = bytes(range(key_length))
+        raw_b64_key = base64.b64encode(expected_bytes).decode("ascii")
+        assert fromPSK(raw_b64_key) == expected_bytes
+    # Raw base64: short (1-byte) key is NOT an allowed PSK length, stays string
+    assert fromPSK("AQ==") == "AQ=="
+    # Explicit base64: prefix still works for any length (including 1-byte default)
+    assert fromPSK("base64:AQ==") == b"\x01"
     assert fromPSK(f"base64:{raw_b64_key}") == expected_bytes
     # Hex still works
     assert fromPSK("0x1a") == b"\x1a"

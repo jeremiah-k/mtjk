@@ -1,6 +1,7 @@
 """Utility functions."""
 
 import base64
+import binascii
 import glob  # noqa: F401
 import logging
 import os
@@ -74,6 +75,7 @@ DISTRIBUTION_NAME_CANDIDATES: tuple[str, ...] = ("mtjk", "meshtastic")
 
 
 _PSK_SIMPLE_MSG = 'Invalid PSK format: expected "simpleN" with N in 0..254'
+_ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS = (16, 24, 32)
 
 
 def quoteBooleans(a_string: str) -> str:
@@ -119,9 +121,10 @@ def fromPSK(valstr: str) -> Any:
     - "simpleN": where N is an integer in 0..254; return a single byte with value (N + 1).
 
     For any other input, parse using general string-to-value rules (e.g., hex, base64:,
-    numeric, boolean, or plain string).  If the result is still a plain string (not
-    recognized as any of the above), base64 decoding is attempted as a fallback so that
-    raw base64-encoded PSK values (without the ``base64:`` prefix) are accepted.
+    numeric, boolean, or plain string). If the result is still a plain string (not
+    recognized as any of the above), strict base64 decoding is attempted as a fallback.
+    Raw base64-encoded PSK values (without the ``base64:`` prefix) are accepted only
+    when they decode to a standard AES key length (16, 24, or 32 bytes).
 
     Parameters
     ----------
@@ -153,8 +156,10 @@ def fromPSK(valstr: str) -> Any:
         val = fromStr(valstr)
         if isinstance(val, str):
             try:
-                val = base64.b64decode(valstr)
-            except Exception:
+                decoded = base64.b64decode(valstr, validate=True)
+                if len(decoded) in _ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS:
+                    val = decoded
+            except (binascii.Error, ValueError):
                 pass
         return val
 
