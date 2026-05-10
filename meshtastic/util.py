@@ -75,7 +75,7 @@ DISTRIBUTION_NAME_CANDIDATES: tuple[str, ...] = ("mtjk", "meshtastic")
 
 
 _PSK_SIMPLE_MSG = 'Invalid PSK format: expected "simpleN" with N in 0..254'
-_ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS = (16, 24, 32)
+_ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS: tuple[int, ...] = (16, 24, 32)
 
 
 def quoteBooleans(a_string: str) -> str:
