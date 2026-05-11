@@ -111,7 +111,7 @@ def genPSK256() -> bytes:
     return os.urandom(32)
 
 
-def fromPSK(valstr: str) -> Any:
+def fromPSK(valstr: str) -> bytes:
     """Parse a user-provided PSK specification into the internal PSK byte representation.
 
     Recognizes these special forms:
@@ -120,9 +120,7 @@ def fromPSK(valstr: str) -> Any:
     - "default": return a single byte with value 1 to indicate the default channel PSK.
     - "simpleN": where N is an integer in 0..254; return a single byte with value (N + 1).
 
-    For any other input, parse using general string-to-value rules (e.g., hex, base64:,
-    numeric, boolean, or plain string). If the result is still a plain string (not
-    recognized as any of the above), strict base64 decoding is attempted as a fallback.
+    For any other input, parse using strict byte-oriented rules (hex, base64:, or raw base64).
     Raw base64-encoded PSK values (without the ``base64:`` prefix) are accepted only
     when they decode to a standard AES key length (16, 24, or 32 bytes).
 
@@ -133,17 +131,21 @@ def fromPSK(valstr: str) -> Any:
 
     Returns
     -------
-    Any
-        The PSK as bytes for recognized PSK forms; otherwise the parsed value
-        according to general string parsing rules (hex/base64/numeric/boolean/string).
+    bytes
+        The PSK as bytes.
+
+    Raises
+    ------
+    ValueError
+        If the input is not a recognized PSK format or cannot be decoded as bytes.
     """
     if valstr == "random":
         return genPSK256()
-    elif valstr == "none":
+    if valstr == "none":
         return bytes([0])  # Use the 'no encryption' PSK
-    elif valstr == "default":
+    if valstr == "default":
         return bytes([1])  # Use default channel psk
-    elif valstr.startswith("simple"):
+    if valstr.startswith("simple"):
         digits = valstr[6:]
         if not digits or not digits.isdigit():
             raise ValueError(_PSK_SIMPLE_MSG)
@@ -152,16 +154,44 @@ def fromPSK(valstr: str) -> Any:
             raise ValueError(f"{_PSK_SIMPLE_MSG}, got {n}")
         # Use one of the single byte encodings
         return bytes([n + 1])
-    else:
-        val = fromStr(valstr)
-        if isinstance(val, str):
-            try:
-                decoded = base64.b64decode(valstr, validate=True)
-                if len(decoded) in _ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS:
-                    val = decoded
-            except (binascii.Error, ValueError):
-                pass
-        return val
+
+    # For everything else, it MUST result in bytes.
+    # We no longer fall back to fromStr() because it returns non-byte types (int/float/bool/str)
+    # which are not valid for a PSK and could lead to accidental plaintext password use.
+
+    if len(valstr) == 0:
+        return bytes()
+
+    if valstr.startswith("0x"):
+        # Parse hex and preserve compatibility with "0x"/single-nibble forms.
+        hex_value = valstr[2:]
+        if len(hex_value) == 0:
+            hex_value = "00"
+        elif len(hex_value) % 2 == 1:
+            hex_value = "0" + hex_value
+        try:
+            return bytes.fromhex(hex_value)
+        except ValueError as e:
+            raise ValueError(f"Invalid hex PSK: {valstr!r}") from e
+
+    if valstr.startswith("base64:"):
+        try:
+            return base64.b64decode(valstr[7:], validate=True)
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"Invalid base64 PSK: {valstr!r}") from e
+
+    # Auto-detection of raw base64 (only for standard AES key lengths)
+    try:
+        decoded = base64.b64decode(valstr, validate=True)
+        if len(decoded) in _ALLOWED_RAW_BASE64_PSK_BYTE_LENGTHS:
+            return decoded
+    except (binascii.Error, ValueError):
+        pass
+
+    raise ValueError(
+        f"Invalid PSK format: {valstr!r}. Expected a keyword (none, default, random, simpleN), "
+        "hex (0x...), explicit base64 (base64:...), or raw base64 (16, 24, or 32 bytes)."
+    )
 
 
 def fromStr(valstr: str) -> Any:

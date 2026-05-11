@@ -156,22 +156,25 @@ def test_fromPSK() -> None:
     assert fromPSK("none") == b"\x00"
     assert fromPSK("default") == b"\x01"
     assert fromPSK("simple22") == b"\x17"
-    # "trash" is NOT valid base64 (bad padding length), falls back to string
-    assert fromPSK("trash") == "trash"
+    # "trash" is NOT valid base64, now raises ValueError
+    with pytest.raises(ValueError, match="Invalid PSK format"):
+        fromPSK("trash")
     # Raw base64 auto-detection: deterministic standard AES key lengths
     for key_length in (16, 24, 32):
         expected_bytes = bytes(range(key_length))
         raw_b64_key = base64.b64encode(expected_bytes).decode("ascii")
         assert fromPSK(raw_b64_key) == expected_bytes
-    # Raw base64: short (1-byte) key is NOT an allowed PSK length, stays string
-    assert fromPSK("AQ==") == "AQ=="
+    # Raw base64: short (1-byte) key is NOT an allowed PSK length, now raises ValueError
+    with pytest.raises(ValueError, match="Invalid PSK format"):
+        fromPSK("AQ==")
     # Explicit base64: prefix still works for any length (including 1-byte default)
     assert fromPSK("base64:AQ==") == b"\x01"
     assert fromPSK(f"base64:{raw_b64_key}") == expected_bytes
     # Hex still works
     assert fromPSK("0x1a") == b"\x1a"
-    # Invalid base64 (spaces/special chars) falls back to string
-    assert fromPSK("not valid base64!") == "not valid base64!"
+    # Invalid base64 (spaces/special chars) now raises ValueError
+    with pytest.raises(ValueError, match="Invalid PSK format"):
+        fromPSK("not valid base64!")
     with pytest.raises(ValueError, match=r"simpleN"):
         fromPSK("simple")
     with pytest.raises(ValueError, match=r"simpleN"):
