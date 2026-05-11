@@ -233,6 +233,14 @@ class _TelemetrySensorTypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_T
     """
     DS248X Bridge for one-wire temperature sensors
     """
+    MMC5983MA: _TelemetrySensorType.ValueType  # 52
+    """
+    MMC5983MA 3-Axis Digital Magnetic Sensor
+    """
+    ICM42607P: _TelemetrySensorType.ValueType  # 53
+    """
+    ICM-42607-P 6‑Axis IMU
+    """
 
 class TelemetrySensorType(_TelemetrySensorType, metaclass=_TelemetrySensorTypeEnumTypeWrapper):
     """
@@ -446,6 +454,14 @@ SHT family of sensors for temperature and humidity
 DS248X: TelemetrySensorType.ValueType  # 51
 """
 DS248X Bridge for one-wire temperature sensors
+"""
+MMC5983MA: TelemetrySensorType.ValueType  # 52
+"""
+MMC5983MA 3-Axis Digital Magnetic Sensor
+"""
+ICM42607P: TelemetrySensorType.ValueType  # 53
+"""
+ICM-42607-P 6‑Axis IMU
 """
 Global___TelemetrySensorType: _TypeAlias = TelemetrySensorType  # noqa: Y015
 
