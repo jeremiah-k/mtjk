@@ -46,7 +46,9 @@ def test_psk_rejects_invalid_base64_lengths() -> None:
 @pytest.mark.unit
 def test_psk_accepts_valid_formats() -> None:
     """Ensure valid formats are still accepted."""
-    assert fromPSK("random")
+    random_key = fromPSK("random")
+    assert isinstance(random_key, bytes)
+    assert len(random_key) == 32
     assert fromPSK("none") == b"\x00"
     assert fromPSK("default") == b"\x01"
     assert fromPSK("simple1") == b"\x02"
