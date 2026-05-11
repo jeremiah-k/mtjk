@@ -4492,7 +4492,7 @@ def test_main_ch_set_psk_with_ch_index(capsys: pytest.CaptureFixture[str]) -> No
         "",
         "--ch-set",
         "psk",
-        "foo",
+        "none",
         "--host",
         "meshtastic.local",
         "--ch-index",
