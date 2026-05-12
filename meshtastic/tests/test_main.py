@@ -4492,11 +4492,59 @@ def test_main_ch_set_psk_with_ch_index(capsys: pytest.CaptureFixture[str]) -> No
         "",
         "--ch-set",
         "psk",
-        "foo",
+        "none",
         "--host",
         "meshtastic.local",
         "--ch-index",
         "0",
+    ]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=TCPInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=iface) as mo:
+        main()
+    out, err = capsys.readouterr()
+    assert re.search(r"Connected to radio", out, re.MULTILINE)
+    assert re.search(r"Writing modified channels to device", out, re.MULTILINE)
+    assert err == ""
+    mo.assert_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize(
+    "psk_value",
+    [
+        pytest.param(
+            "HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0=",
+            id="base64_raw",
+        ),
+        pytest.param(
+            "base64:HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0=",
+            id="base64_prefix",
+        ),
+        pytest.param(
+            "0x1a1a",
+            id="hex",
+        ),
+    ],
+)
+def test_main_ch_set_psk_with_supported_encodings(
+    psk_value: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --ch-set psk with raw base64, base64: prefix, and hex encodings."""
+    sys.argv = [
+        "",
+        "--ch-set",
+        "psk",
+        psk_value,
+        "--host",
+        "meshtastic.local",
+        "--ch-index",
+        "1",
     ]
     mt_config.args = sys.argv  # type: ignore[assignment]
 

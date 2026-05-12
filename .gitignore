@@ -23,7 +23,7 @@ junit.xml
 .codex
 meshtastic/tests/api_baselines/*_test.json
 .worktrees/
-
+.sisyphus/
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md

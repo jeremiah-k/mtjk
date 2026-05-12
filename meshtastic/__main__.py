@@ -3527,7 +3527,8 @@ def addChannelConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
             "Can set the 'psk' using this command. To disable encryption on primary channel:'--ch-set psk none --ch-index 0'. "
             "To set encryption with a new random key on second channel:'--ch-set psk random --ch-index 1'. "
             "To set encryption back to the default:'--ch-set psk default --ch-index 0'. To set encryption with your "
-            "own key: '--ch-set psk 0x1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b --ch-index 0'."
+            "own key: '--ch-set psk 0x1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b1a1a1a1a2b2b2b2b --ch-index 0'. "
+            "Base64-encoded keys are also accepted: '--ch-set psk HR8D2KziD3IfvpHlwHAfCAh4JP/I7dsHwKdVllfKoD0= --ch-index 1'."
         ),
         nargs=2,
         action="append",
