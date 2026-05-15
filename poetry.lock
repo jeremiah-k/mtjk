@@ -3365,16 +3365,19 @@ pyserial = "*"
 
 [[package]]
 name = "print-color"
-version = "0.4.6"
+version = "0.4.7"
 description = "A simple package to print in color to the terminal"
 optional = true
-python-versions = ">=3.7,<4.0"
+python-versions = ">=3.7"
 groups = ["main"]
 markers = "extra == \"cli\""
 files = [
-    {file = "print_color-0.4.6-py3-none-any.whl", hash = "sha256:494bd1cdb84daf481f0e63bd22b3c32f7d52827d8f5d9138a96bb01ca8ba9299"},
-    {file = "print_color-0.4.6.tar.gz", hash = "sha256:d3aafc1666c8d31a85fffa6ee8e4f269f5d5e338d685b4e6179915c71867c585"},
+    {file = "print_color-0.4.7-py3-none-any.whl", hash = "sha256:1ec1706f9cec1b0e79d3c8a4da51d4c880080b0864c0966281d8be7b8207c093"},
+    {file = "print_color-0.4.7.tar.gz", hash = "sha256:5f07ab99f45d1439c7b88a0930a775affcade40ad04259e2f77d18fd643d5328"},
 ]
+
+[package.extras]
+dev = ["pytest"]
 
 [[package]]
 name = "prometheus-client"
