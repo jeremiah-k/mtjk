@@ -591,6 +591,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     B&Q Consulting Station G3: TBD
     """
+    T_IMPULSE_PLUS: _HardwareModel.ValueType  # 135
+    """
+    Lilygo T-Impulse-Plus
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1159,6 +1163,10 @@ The HELTEC_MESH_NODE_T1 uses an NRF52840 chip, plus an SX1262.
 STATION_G3: HardwareModel.ValueType  # 134
 """
 B&Q Consulting Station G3: TBD
+"""
+T_IMPULSE_PLUS: HardwareModel.ValueType  # 135
+"""
+Lilygo T-Impulse-Plus
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
