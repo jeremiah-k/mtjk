@@ -116,10 +116,20 @@ class ModuleConfig(_message.Message):
         (the default official mqtt.meshtastic.org server can handle encrypted packets)
         Decrypted packets may be useful for external systems that want to consume meshtastic packets
         """
-        json_enabled: _builtins.bool
-        """
-        Whether to send / consume json packets on MQTT
-        """
+        @_builtins.property
+        @_deprecated("""This field has been marked as deprecated using proto field options.""")
+        def json_enabled(self) -> _builtins.bool:
+            """
+            Deprecated: JSON packet support on MQTT was removed, and this field is ignored.
+            """
+
+        @json_enabled.setter
+        @_deprecated("""This field has been marked as deprecated using proto field options.""")
+        def json_enabled(self, value: _builtins.bool) -> None:
+            """
+            Deprecated: JSON packet support on MQTT was removed, and this field is ignored.
+            """
+
         tls_enabled: _builtins.bool
         """
         If true, we attempt to establish a secure connection using TLS
