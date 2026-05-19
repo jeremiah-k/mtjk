@@ -595,6 +595,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Lilygo T-Impulse-Plus
     """
+    T_ECHO_CARD: _HardwareModel.ValueType  # 136
+    """
+    Lilygo T-Echo Card
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1167,6 +1171,10 @@ B&Q Consulting Station G3: TBD
 T_IMPULSE_PLUS: HardwareModel.ValueType  # 135
 """
 Lilygo T-Impulse-Plus
+"""
+T_ECHO_CARD: HardwareModel.ValueType  # 136
+"""
+Lilygo T-Echo Card
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
