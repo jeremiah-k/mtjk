@@ -176,7 +176,7 @@ jobs:
     env:
       PYTHON_VERSION: "3.13"
       POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
-      MESHTASTICD_IMAGE: meshtastic/meshtasticd:2.7.23-alpha-debian@sha256:6ed5069979f2301d6863a3fc13360c2b59e9722f9d11f4673637d8cc337acf89
+      MESHTASTICD_IMAGE: meshtastic/meshtasticd:2.7.24-alpha-debian@sha256:e60738a774dc14d2d4d55c423e952e679065550a4a2441e041b138bd902a9faf
       MESHTASTICD_HOST: localhost:4401
       MESHTASTICD_PORT: "4401"
       MESHTASTICD_READY_TIMEOUT_SECONDS: "180"
@@ -212,7 +212,7 @@ jobs:
     env:
       PYTHON_VERSION: "3.13"
       POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
-      MESHTASTICD_IMAGE: meshtastic/meshtasticd:2.7.23-alpha-debian@sha256:6ed5069979f2301d6863a3fc13360c2b59e9722f9d11f4673637d8cc337acf89
+      MESHTASTICD_IMAGE: meshtastic/meshtasticd:2.7.24-alpha-debian@sha256:e60738a774dc14d2d4d55c423e952e679065550a4a2441e041b138bd902a9faf
       MESHTASTICD_READY_TIMEOUT_SECONDS: "180"
       MESHTASTICD_HOST_A: localhost:4401
       MESHTASTICD_HOST_B: localhost:4402
