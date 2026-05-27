@@ -24,6 +24,7 @@ junit.xml
 meshtastic/tests/api_baselines/*_test.json
 .worktrees/
 .sisyphus/
+.omo/
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
