@@ -1478,9 +1478,9 @@ class Config(_message.Message):
             """
             ITU Region 1 Amateur Radio 2m band (144-146 MHz)
             """
-            ITU23_2M: Config.LoRaConfig._RegionCode.ValueType  # 28
+            ITU2_2M: Config.LoRaConfig._RegionCode.ValueType  # 28
             """
-            ITU Region 2 / 3 Amateur Radio 2m band (144-148 MHz)
+            ITU Region 2 Amateur Radio 2m band (144-148 MHz)
             """
             EU_866: Config.LoRaConfig._RegionCode.ValueType  # 29
             """
@@ -1494,6 +1494,10 @@ class Config(_message.Message):
             EU_N_868: Config.LoRaConfig._RegionCode.ValueType  # 32
             """
             EU 868MHz band, with narrow presets
+            """
+            ITU3_2M: Config.LoRaConfig._RegionCode.ValueType  # 33
+            """
+            ITU Region 3 Amateur Radio 2m band (144-148 MHz)
             """
 
         class RegionCode(_RegionCode, metaclass=_RegionCodeEnumTypeWrapper): ...
@@ -1609,9 +1613,9 @@ class Config(_message.Message):
         """
         ITU Region 1 Amateur Radio 2m band (144-146 MHz)
         """
-        ITU23_2M: Config.LoRaConfig.RegionCode.ValueType  # 28
+        ITU2_2M: Config.LoRaConfig.RegionCode.ValueType  # 28
         """
-        ITU Region 2 / 3 Amateur Radio 2m band (144-148 MHz)
+        ITU Region 2 Amateur Radio 2m band (144-148 MHz)
         """
         EU_866: Config.LoRaConfig.RegionCode.ValueType  # 29
         """
@@ -1625,6 +1629,10 @@ class Config(_message.Message):
         EU_N_868: Config.LoRaConfig.RegionCode.ValueType  # 32
         """
         EU 868MHz band, with narrow presets
+        """
+        ITU3_2M: Config.LoRaConfig.RegionCode.ValueType  # 33
+        """
+        ITU Region 3 Amateur Radio 2m band (144-148 MHz)
         """
 
         class _ModemPreset:
