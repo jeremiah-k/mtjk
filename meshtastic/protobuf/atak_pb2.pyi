@@ -807,6 +807,25 @@ class _CotTypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_CotType.Value
     t-s: Task / engage request. Structured payload carried via the new
     TaskRequest typed variant.
     """
+    CotType_m_t_t: _CotType.ValueType  # 125
+    """-- TAKTALK plugin shapes --
+    CoT types unique to the TAKTALK ATAK plugin. Note `y-` has a literal
+    trailing dash and no second atom — that's the wire format ATAK emits
+    for TAKTALK room broadcasts. The CotType enum encodes the literal
+    string verbatim (CotType_y -> "y-") so receivers reconstruct the
+    original event type byte-for-byte without consulting cot_type_str.
+
+
+    m-t-t: TAKTALK voice/text chat message. Payload carried via the
+    TakTalkMessage typed variant (text, chatroom_id, lang, from_voice).
+    """
+    CotType_y: _CotType.ValueType  # 126
+    """
+    y-: TAKTALK room/membership broadcast. Payload carried via the
+    TakTalkRoomData typed variant (sender_callsign, room_id, room_name,
+    participants). The CoT type literally has a trailing dash and no
+    second atom — not a typo.
+    """
 
 class CotType(_CotType, metaclass=_CotTypeEnumTypeWrapper):
     """
@@ -1301,6 +1320,25 @@ CotType_t_s: CotType.ValueType  # 124
 t-s: Task / engage request. Structured payload carried via the new
 TaskRequest typed variant.
 """
+CotType_m_t_t: CotType.ValueType  # 125
+"""-- TAKTALK plugin shapes --
+CoT types unique to the TAKTALK ATAK plugin. Note `y-` has a literal
+trailing dash and no second atom — that's the wire format ATAK emits
+for TAKTALK room broadcasts. The CotType enum encodes the literal
+string verbatim (CotType_y -> "y-") so receivers reconstruct the
+original event type byte-for-byte without consulting cot_type_str.
+
+
+m-t-t: TAKTALK voice/text chat message. Payload carried via the
+TakTalkMessage typed variant (text, chatroom_id, lang, from_voice).
+"""
+CotType_y: CotType.ValueType  # 126
+"""
+y-: TAKTALK room/membership broadcast. Payload carried via the
+TakTalkRoomData typed variant (sender_callsign, room_id, room_name,
+participants). The CoT type literally has a trailing dash and no
+second atom — not a typo.
+"""
 Global___CotType: _TypeAlias = CotType  # noqa: Y015
 
 class _GeoPointSource:
@@ -1467,6 +1505,9 @@ class GeoChat(_message.Message):
     TO_CALLSIGN_FIELD_NUMBER: _builtins.int
     RECEIPT_FOR_UID_FIELD_NUMBER: _builtins.int
     RECEIPT_TYPE_FIELD_NUMBER: _builtins.int
+    LANG_FIELD_NUMBER: _builtins.int
+    ROOM_ID_FIELD_NUMBER: _builtins.int
+    VOICE_PROFILE_ID_FIELD_NUMBER: _builtins.int
     message: _builtins.str
     """
     The text message. Empty for receipts.
@@ -1491,6 +1532,39 @@ class GeoChat(_message.Message):
     Receipt kind discriminator. See ReceiptType doc. Default ReceiptType_None
     means this is a regular chat message, not a receipt.
     """
+    lang: _builtins.str
+    """
+    --- TAKTALK-flavored b-t-f extensions ---
+
+    Set when the ATAK TAKTALK plugin originates the chat, so the message
+    carries the room/language metadata TAKTALK uses to thread its UI.
+    These fields are absent / empty for non-TAKTALK CoT chat, so the wire
+    cost is paid only when TAKTALK is actually involved.
+
+    Wire shape in source XML (inside <event type="b-t-f">/<detail>):
+      <Ea>English</Ea>                          - lang
+      <roomId>UUID</roomId>                     - room_id
+      <voice_profile_id>X</voice_profile_id>    - voice_profile_id
+      <voice_profile_id/>                       - empty marker; encoded as
+                                                  present-but-empty string
+
+
+    BCP-47-ish language tag or human-readable name (e.g. "en", "English")
+    that the originator's TAKTALK plugin recorded for the message.
+    """
+    room_id: _builtins.str
+    """
+    TAKTALK chatroom UUID (e.g. "30b2755c-c547-44ef-a0cc-cdbd8a15616f") that
+    the receiver's TAKTALK plugin uses to thread the message under the
+    right room. Resolved to a friendly name via TakTalkRoomData broadcasts.
+    """
+    voice_profile_id: _builtins.str
+    """
+    TAKTALK voice profile pointer. Often empty in practice (the empty
+    marker `<voice_profile_id/>` still signals TAKTALK origination), so
+    receivers should treat empty-but-present as the equivalent of the
+    marker rather than a missing field.
+    """
     def __init__(
         self,
         *,
@@ -1499,19 +1573,34 @@ class GeoChat(_message.Message):
         to_callsign: _builtins.str | None = ...,
         receipt_for_uid: _builtins.str = ...,
         receipt_type: Global___GeoChat.ReceiptType.ValueType = ...,
+        lang: _builtins.str | None = ...,
+        room_id: _builtins.str | None = ...,
+        voice_profile_id: _builtins.str | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_to", b"_to", "_to_callsign", b"_to_callsign", "to", b"to", "to_callsign", b"to_callsign"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_lang", b"_lang", "_room_id", b"_room_id", "_to", b"_to", "_to_callsign", b"_to_callsign", "_voice_profile_id", b"_voice_profile_id", "lang", b"lang", "room_id", b"room_id", "to", b"to", "to_callsign", b"to_callsign", "voice_profile_id", b"voice_profile_id"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_to", b"_to", "_to_callsign", b"_to_callsign", "message", b"message", "receipt_for_uid", b"receipt_for_uid", "receipt_type", b"receipt_type", "to", b"to", "to_callsign", b"to_callsign"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_lang", b"_lang", "_room_id", b"_room_id", "_to", b"_to", "_to_callsign", b"_to_callsign", "_voice_profile_id", b"_voice_profile_id", "lang", b"lang", "message", b"message", "receipt_for_uid", b"receipt_for_uid", "receipt_type", b"receipt_type", "room_id", b"room_id", "to", b"to", "to_callsign", b"to_callsign", "voice_profile_id", b"voice_profile_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__lang: _TypeAlias = _typing.Literal["lang"]  # noqa: Y015
+    _WhichOneofArgType__lang: _TypeAlias = _typing.Literal["_lang", b"_lang"]  # noqa: Y015
+    _WhichOneofReturnType__room_id: _TypeAlias = _typing.Literal["room_id"]  # noqa: Y015
+    _WhichOneofArgType__room_id: _TypeAlias = _typing.Literal["_room_id", b"_room_id"]  # noqa: Y015
     _WhichOneofReturnType__to: _TypeAlias = _typing.Literal["to"]  # noqa: Y015
     _WhichOneofArgType__to: _TypeAlias = _typing.Literal["_to", b"_to"]  # noqa: Y015
     _WhichOneofReturnType__to_callsign: _TypeAlias = _typing.Literal["to_callsign"]  # noqa: Y015
     _WhichOneofArgType__to_callsign: _TypeAlias = _typing.Literal["_to_callsign", b"_to_callsign"]  # noqa: Y015
+    _WhichOneofReturnType__voice_profile_id: _TypeAlias = _typing.Literal["voice_profile_id"]  # noqa: Y015
+    _WhichOneofArgType__voice_profile_id: _TypeAlias = _typing.Literal["_voice_profile_id", b"_voice_profile_id"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__lang) -> _WhichOneofReturnType__lang | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__room_id) -> _WhichOneofReturnType__room_id | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__to) -> _WhichOneofReturnType__to | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__to_callsign) -> _WhichOneofReturnType__to_callsign | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__voice_profile_id) -> _WhichOneofReturnType__voice_profile_id | None: ...
 
 Global___GeoChat: _TypeAlias = GeoChat  # noqa: Y015
 
@@ -3364,6 +3453,126 @@ class SensorFov(_message.Message):
 Global___SensorFov: _TypeAlias = SensorFov  # noqa: Y015
 
 @_typing.final
+class TakTalkMessage(_message.Message):
+    """
+    TAKTALK chat message payload (CoT type m-t-t).
+
+    TAKTALK is an ATAK plugin for voice + text team messaging. The voice
+    audio stream goes over UDP/RTP and is NOT carried by the mesh — only
+    the text envelope (this message) is. `from_voice` marks messages sent
+    via push-to-talk speech-to-text so receivers can render a mic icon
+    next to the text.
+
+    Wire shape inside <event type="m-t-t">/<detail>:
+      <callsign>...</callsign>        - mapped to TAKPacketV2.callsign
+      <lang>English</lang>            - lang
+      <text>...</text>                - text
+      <chatroom-id>1</chatroom-id>    - chatroom_id
+      <voice/>                        - presence sets from_voice = true
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    TEXT_FIELD_NUMBER: _builtins.int
+    CHATROOM_ID_FIELD_NUMBER: _builtins.int
+    LANG_FIELD_NUMBER: _builtins.int
+    FROM_VOICE_FIELD_NUMBER: _builtins.int
+    text: _builtins.str
+    """
+    The text body of the TAKTALK message (speech-to-text transcript when
+    from_voice = true, typed message otherwise).
+    """
+    chatroom_id: _builtins.str
+    """
+    TAKTALK chatroom identifier. May be a short id like "1" for the
+    default room or a UUID like "30b2755c-c547-44ef-a0cc-cdbd8a15616f"
+    for custom rooms (resolved by TakTalkRoomData broadcasts).
+    Empty = broadcast room.
+    """
+    lang: _builtins.str
+    """
+    BCP-47-ish language tag or human-readable name (e.g. "en", "English").
+    Empty = unspecified.
+    """
+    from_voice: _builtins.bool
+    """
+    True when the source CoT carried a <voice/> marker, i.e. the message
+    originated as push-to-talk speech-to-text. Lets receivers show a mic
+    icon. Proto3 only encodes when true so empty payload cost is 0 bytes.
+    """
+    def __init__(
+        self,
+        *,
+        text: _builtins.str = ...,
+        chatroom_id: _builtins.str = ...,
+        lang: _builtins.str = ...,
+        from_voice: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["chatroom_id", b"chatroom_id", "from_voice", b"from_voice", "lang", b"lang", "text", b"text"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___TakTalkMessage: _TypeAlias = TakTalkMessage  # noqa: Y015
+
+@_typing.final
+class TakTalkRoomData(_message.Message):
+    """
+    TAKTALK room/membership broadcast (CoT type y-).
+
+    Announces a TAKTALK chatroom's friendly name and roster so peers can
+    resolve room UUIDs (used in TakTalkMessage.chatroom_id and
+    GeoChat.room_id) to a display name and participant list. Not a chat
+    message itself — these events are emitted by TAKTALK when rooms are
+    created or memberships change.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SENDER_CALLSIGN_FIELD_NUMBER: _builtins.int
+    ROOM_ID_FIELD_NUMBER: _builtins.int
+    ROOM_NAME_FIELD_NUMBER: _builtins.int
+    PARTICIPANTS_FIELD_NUMBER: _builtins.int
+    sender_callsign: _builtins.str
+    """
+    Callsign of the device broadcasting the room state (typically the
+    room owner / latest writer).
+    """
+    room_id: _builtins.str
+    """
+    Room UUID, matches TakTalkMessage.chatroom_id / GeoChat.room_id on
+    messages routed into this room.
+    """
+    room_name: _builtins.str
+    """
+    Friendly display name for the room (e.g. "test", "Alpha Team").
+    """
+    @_builtins.property
+    def participants(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]:
+        """
+        Member callsigns. Wire-encoded as repeated strings; the underlying
+        CoT carries them as a single <chatroom-participants>A,B,C</> element
+        which parsers split / builders join on ','.
+        """
+
+    def __init__(
+        self,
+        *,
+        sender_callsign: _builtins.str = ...,
+        room_id: _builtins.str = ...,
+        room_name: _builtins.str = ...,
+        participants: _abc.Iterable[_builtins.str] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["participants", b"participants", "room_id", b"room_id", "room_name", b"room_name", "sender_callsign", b"sender_callsign"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___TakTalkRoomData: _TypeAlias = TakTalkRoomData  # noqa: Y015
+
+@_typing.final
 class TAKPacketV2(_message.Message):
     """
     ATAK v2 packet with expanded CoT field support and zstd dictionary compression.
@@ -3411,6 +3620,8 @@ class TAKPacketV2(_message.Message):
     CASEVAC_FIELD_NUMBER: _builtins.int
     EMERGENCY_FIELD_NUMBER: _builtins.int
     TASK_FIELD_NUMBER: _builtins.int
+    TAKTALK_FIELD_NUMBER: _builtins.int
+    TAKTALK_ROOM_FIELD_NUMBER: _builtins.int
     cot_type_id: Global___CotType.ValueType
     """
     Well-known CoT event type enum.
@@ -3599,6 +3810,22 @@ class TAKPacketV2(_message.Message):
         Task / engage request. See TaskRequest.
         """
 
+    @_builtins.property
+    def taktalk(self) -> Global___TakTalkMessage:
+        """
+        TAKTALK chat message (CoT type m-t-t). See TakTalkMessage.
+        Voice audio itself rides UDP/RTP outside the mesh; this carries the
+        text envelope plus a from_voice marker for receiver UX.
+        """
+
+    @_builtins.property
+    def taktalk_room(self) -> Global___TakTalkRoomData:
+        """
+        TAKTALK room/membership broadcast (CoT type y-). See TakTalkRoomData.
+        Resolves room UUIDs (used in TakTalkMessage.chatroom_id and
+        GeoChat.room_id) to display name + roster on receivers.
+        """
+
     def __init__(
         self,
         *,
@@ -3639,16 +3866,18 @@ class TAKPacketV2(_message.Message):
         casevac: Global___CasevacReport | None = ...,
         emergency: Global___EmergencyAlert | None = ...,
         task: Global___TaskRequest | None = ...,
+        taktalk: Global___TakTalkMessage | None = ...,
+        taktalk_room: Global___TakTalkRoomData | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "payload_variant", b"payload_variant", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "task", b"task"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "payload_variant", b"payload_variant", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "payload_variant", b"payload_variant", "phone", b"phone", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "payload_variant", b"payload_variant", "phone", b"phone", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__environment: _TypeAlias = _typing.Literal["environment"]  # noqa: Y015
     _WhichOneofArgType__environment: _TypeAlias = _typing.Literal["_environment", b"_environment"]  # noqa: Y015
     _WhichOneofReturnType__sensor_fov: _TypeAlias = _typing.Literal["sensor_fov"]  # noqa: Y015
     _WhichOneofArgType__sensor_fov: _TypeAlias = _typing.Literal["_sensor_fov", b"_sensor_fov"]  # noqa: Y015
-    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["pli", "chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task"]  # noqa: Y015
+    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["pli", "chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__environment) -> _WhichOneofReturnType__environment | None: ...
