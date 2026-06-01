@@ -17,6 +17,11 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
+if sys.version_info >= (3, 13):
+    from warnings import deprecated as _deprecated
+else:
+    from typing_extensions import deprecated as _deprecated
+
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class _Team:
@@ -3534,11 +3539,32 @@ class TakTalkRoomData(_message.Message):
     ROOM_ID_FIELD_NUMBER: _builtins.int
     ROOM_NAME_FIELD_NUMBER: _builtins.int
     PARTICIPANTS_FIELD_NUMBER: _builtins.int
-    sender_callsign: _builtins.str
-    """
-    Callsign of the device broadcasting the room state (typically the
-    room owner / latest writer).
-    """
+    @_builtins.property
+    @_deprecated("""This field has been marked as deprecated using proto field options.""")
+    def sender_callsign(self) -> _builtins.str:
+        """
+        Callsign of the device broadcasting the room state (typically the
+        room owner / latest writer).
+
+        DEPRECATED in v0.3.2: always equals TAKPacketV2.callsign, so the wire
+        byte was redundant. Builders stop emitting this field in v0.3.2;
+        parsers still read it for one release so v0.3.1-encoded packets decode
+        cleanly. To be removed entirely in v0.4.x.
+        """
+
+    @sender_callsign.setter
+    @_deprecated("""This field has been marked as deprecated using proto field options.""")
+    def sender_callsign(self, value: _builtins.str) -> None:
+        """
+        Callsign of the device broadcasting the room state (typically the
+        room owner / latest writer).
+
+        DEPRECATED in v0.3.2: always equals TAKPacketV2.callsign, so the wire
+        byte was redundant. Builders stop emitting this field in v0.3.2;
+        parsers still read it for one release so v0.3.1-encoded packets decode
+        cleanly. To be removed entirely in v0.4.x.
+        """
+
     room_id: _builtins.str
     """
     Room UUID, matches TakTalkMessage.chatroom_id / GeoChat.room_id on
@@ -3571,6 +3597,50 @@ class TakTalkRoomData(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___TakTalkRoomData: _TypeAlias = TakTalkRoomData  # noqa: Y015
+
+@_typing.final
+class Marti(_message.Message):
+    """
+    ATAK directed-routing recipient list (CoT <marti><dest callsign='X'/>…</marti>).
+
+    Present when an event is addressed to specific TAK users rather than the
+    broadcast group. TAKTALK gates voice TTS on this element matching the
+    receiver's callsign; directed b-t-f chats use it for the same purpose. A
+    missing <marti> means "broadcast to all peers", which is the default for
+    PLI, alerts, drawings, and most situational-awareness events.
+
+    Carried as repeated strings (not indexes into a per-packet table) because
+    the typical event has 1-2 destinations and table overhead would erase the
+    savings. Receivers that need the original XML element rebuild it from
+    dest_callsign on emit.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    DEST_CALLSIGN_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def dest_callsign(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]:
+        """
+        Recipient callsigns. Order is preserved end-to-end so receivers can show
+        primary-vs-cc distinction the same way ATAK does.
+
+        If dest_callsign is [TAKPacketV2.callsign] (self-addressed, unusual but
+        legal — e.g. ATAK echoing back to its own room), the builder still emits
+        the element so loopback shapes round-trip cleanly.
+        """
+
+    def __init__(
+        self,
+        *,
+        dest_callsign: _abc.Iterable[_builtins.str] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["dest_callsign", b"dest_callsign"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___Marti: _TypeAlias = Marti  # noqa: Y015
 
 @_typing.final
 class TAKPacketV2(_message.Message):
@@ -3609,6 +3679,7 @@ class TAKPacketV2(_message.Message):
     REMARKS_FIELD_NUMBER: _builtins.int
     ENVIRONMENT_FIELD_NUMBER: _builtins.int
     SENSOR_FOV_FIELD_NUMBER: _builtins.int
+    MARTI_FIELD_NUMBER: _builtins.int
     PLI_FIELD_NUMBER: _builtins.int
     CHAT_FIELD_NUMBER: _builtins.int
     AIRCRAFT_FIELD_NUMBER: _builtins.int
@@ -3755,6 +3826,19 @@ class TAKPacketV2(_message.Message):
         """
 
     @_builtins.property
+    def marti(self) -> Global___Marti:
+        """
+        Directed-routing recipient list (CoT <marti><dest callsign='X'/>…</marti>).
+        Empty / unset = broadcast to all peers (the default for situational-awareness
+        events). Populated for TAKTALK m-t-t, directed b-t-f DMs, and any other CoT
+        shape that ATAK addresses to specific recipients. TAKTALK gates voice TTS
+        playback on this element matching the receiver's callsign, so dropping it
+        silently breaks voice messaging end-to-end.
+
+        See Marti.
+        """
+
+    @_builtins.property
     def chat(self) -> Global___GeoChat:
         """
         ATAK GeoChat message
@@ -3855,6 +3939,7 @@ class TAKPacketV2(_message.Message):
         remarks: _builtins.str = ...,
         environment: Global___TAKEnvironment | None = ...,
         sensor_fov: Global___SensorFov | None = ...,
+        marti: Global___Marti | None = ...,
         pli: _builtins.bool = ...,
         chat: Global___GeoChat | None = ...,
         aircraft: Global___AircraftTrack | None = ...,
@@ -3869,18 +3954,22 @@ class TAKPacketV2(_message.Message):
         taktalk: Global___TakTalkMessage | None = ...,
         taktalk_room: Global___TakTalkRoomData | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "payload_variant", b"payload_variant", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "payload_variant", b"payload_variant", "phone", b"phone", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__environment: _TypeAlias = _typing.Literal["environment"]  # noqa: Y015
     _WhichOneofArgType__environment: _TypeAlias = _typing.Literal["_environment", b"_environment"]  # noqa: Y015
+    _WhichOneofReturnType__marti: _TypeAlias = _typing.Literal["marti"]  # noqa: Y015
+    _WhichOneofArgType__marti: _TypeAlias = _typing.Literal["_marti", b"_marti"]  # noqa: Y015
     _WhichOneofReturnType__sensor_fov: _TypeAlias = _typing.Literal["sensor_fov"]  # noqa: Y015
     _WhichOneofArgType__sensor_fov: _TypeAlias = _typing.Literal["_sensor_fov", b"_sensor_fov"]  # noqa: Y015
     _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["pli", "chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__environment) -> _WhichOneofReturnType__environment | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__marti) -> _WhichOneofReturnType__marti | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__sensor_fov) -> _WhichOneofReturnType__sensor_fov | None: ...
     @_typing.overload
