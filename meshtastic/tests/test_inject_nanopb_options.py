@@ -543,6 +543,154 @@ def test_inject_noop_when_no_options():
     assert result == proto
 
 
+@pytest.mark.unit
+def test_inject_comments_with_braces_do_not_corrupt_nesting():
+    """Comments containing braces must not affect the message nesting tracker."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/mesh.proto";
+        message Outer {
+          // this comment has { braces } inside
+          string name = 1;
+          message Inner {
+            // another { brace } comment
+            string value = 2;
+          }
+        }
+    """
+    result = _inject(
+        proto,
+        specific={("Outer", "name"): {"max_size": 20}, ("Outer", "Inner", "value"): {"max_size": 30}},
+    )
+    # Both fields should get options — comments with braces must not break tracking
+    assert "name = 1 [(nanopb).max_size = 20]" in result
+    assert "value = 2 [(nanopb).max_size = 30]" in result
+
+
+@pytest.mark.unit
+def test_inject_map_fields_are_skipped():
+    """Map<> fields should NOT receive nanopb options (different syntax)."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/mesh.proto";
+        message Foo {
+          map<string, string> labels = 1;
+          string name = 2;
+        }
+    """
+    result = _inject(proto, wildcard={"labels": {"max_size": 10}, "name": {"max_size": 20}})
+    # map field should NOT have options injected
+    assert "labels" in result
+    assert "(nanopb)" not in next(
+        line for line in result.splitlines() if "labels" in line
+    )
+    # But regular field should
+    assert "name = 2 [(nanopb).max_size = 20]" in result
+
+
+@pytest.mark.unit
+def test_inject_oneof_fields_get_options():
+    """Fields inside a oneof block should receive nanopb options."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/mesh.proto";
+        message Packet {
+          oneof payload_variant {
+            string text = 1;
+            bytes data = 2;
+          }
+        }
+    """
+    result = _inject(
+        proto,
+        specific={("Packet", "text"): {"max_size": 200}, ("Packet", "data"): {"max_size": 233}},
+    )
+    assert "text = 1 [(nanopb).max_size = 200]" in result
+    assert "data = 2 [(nanopb).max_size = 233]" in result
+
+
+@pytest.mark.unit
+def test_inject_enum_values_not_modified():
+    """Enum value lines (IDENTIFIER = NUMBER) must not get nanopb options."""
+    proto = """\
+        syntax = "proto3";
+        message Foo {
+          enum Status {
+            UNKNOWN = 0;
+            ACTIVE = 1;
+          }
+          Status status = 1;
+        }
+    """
+    result = _inject(proto, wildcard={"status": {"int_size": 8}})
+    # Only the field should have options, not enum values
+    assert result.count("(nanopb)") == 1
+    status_line = next(line for line in result.splitlines() if "Status status" in line)
+    assert "(nanopb)" in status_line
+    unknown_line = next(line for line in result.splitlines() if "UNKNOWN" in line)
+    assert "(nanopb)" not in unknown_line
+
+
+@pytest.mark.unit
+def test_format_nanopb_opts_sorted_keys():
+    """format_nanopb_opts output is deterministic (keys sorted alphabetically)."""
+    opts = {"max_count": 8, "int_size": 8, "max_size": 40}
+    result = format_nanopb_opts(opts)
+    # Keys should appear in sorted order: int_size, max_count, max_size
+    int_size_pos = result.index("int_size")
+    max_count_pos = result.index("max_count")
+    max_size_pos = result.index("max_size")
+    assert int_size_pos < max_count_pos < max_size_pos
+
+
+@pytest.mark.unit
+def test_inject_duplicate_specific_merge_deterministic():
+    """When multiple specific keys match the same field, output is deterministic."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/mesh.proto";
+        message Route {
+          message Link {
+            string uid = 1;
+          }
+        }
+    """
+    # Both ('Route', 'Link', 'uid') and ('Link', 'uid') match,
+    # but the shorter key is applied first so the more-specific one overrides
+    result = _inject(
+        proto,
+        specific={
+            ("Link", "uid"): {"max_size": 20},
+            ("Route", "Link", "uid"): {"max_size": 48},
+        },
+    )
+    assert "uid = 1 [(nanopb).max_size = 48]" in result
+    # Should only have one annotation (not duplicated)
+    assert result.count("(nanopb).max_size") == 1
+
+
+@pytest.mark.unit
+def test_inject_multiple_close_braces_on_one_line():
+    """Multiple closing braces on one line should not underflow the context stack."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/mesh.proto";
+        message Outer {
+          message Inner {
+            string value = 1;
+          }
+        }
+        string top_level = 2;
+    """
+    result = _inject(
+        proto,
+        specific={
+            ("Outer", "Inner", "value"): {"max_size": 30},
+        },
+    )
+    assert "value = 1 [(nanopb).max_size = 30]" in result
+
+
 # ===========================================================================
 # Part 2 — Descriptor integration tests
 # Verify that regen-protobufs.sh produced _pb2.py files with nanopb options

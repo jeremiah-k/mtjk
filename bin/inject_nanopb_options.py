@@ -119,7 +119,8 @@ def parse_options_file(
 def format_nanopb_opts(opts: dict[str, Any]) -> str:
     """Format a dict of nanopb options as a proto field options annotation string."""
     parts = []
-    for k, v in opts.items():
+    for k in sorted(opts.keys()):
+        v = opts[k]
         if k == "int_size":
             enum_val = INT_SIZE_ENUM.get(v, f"IS_{v}")
             parts.append(f"(nanopb).int_size = {enum_val}")

@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - master
+      - develop
+    tags:
+      - '*.*.*'
+  pull_request:
+    branches:
+      - master
+      - develop
     tags:
       - "*.*.*"
   pull_request:
@@ -28,7 +35,7 @@ jobs:
             autotag: false
             suffix: -debian
           - container: Containerfile.alpine
-            autotag: ${{ github.ref == 'refs/heads/master' && 'true' || 'auto' }}
+            autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
 
     steps:
       - name: Checkout repository
@@ -70,7 +77,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
         with:
-          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7,linux/arm/v6
+          platforms: linux/amd64,linux/386,linux/arm64
           context: .
           file: ${{ matrix.container }}
           push: ${{ github.event_name != 'pull_request' }}

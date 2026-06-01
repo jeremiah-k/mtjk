@@ -10,16 +10,16 @@ Cleanup/error handling: clear connect failures and graceful Ctrl+C close.
 import argparse
 import time
 from typing import Any
-
 from pubsub import pub
-
-import meshtastic.ble_interface
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
+import meshtastic.ble_interface
 from meshtastic.mesh_interface import MeshInterface
 
+# Type alias for the union of supported interface types
+Interface = meshtastic.serial_interface.SerialInterface | meshtastic.ble_interface.BLEInterface | meshtastic.tcp_interface.TCPInterface
 
-def onReceive(packet: dict, interface: MeshInterface) -> None:
+def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
     """Reply to every received packet with some info."""
     text: str | None = packet.get("decoded", {}).get("text")
     if text:
@@ -36,9 +36,9 @@ def onReceive(packet: dict, interface: MeshInterface) -> None:
         interface.sendText(reply, channelIndex=packet.get("channel", 0))
 
 
-def onConnection(
+def onConnection(  # pylint: disable=unused-argument
     interface: MeshInterface, topic: Any = pub.AUTO_TOPIC
-) -> None:  # pylint: disable=unused-argument
+) -> None:
     """Handle a connection established event."""
     print("Connected. Will auto-reply to all messages while running.")
 
@@ -55,12 +55,7 @@ def main() -> int:
     pub.subscribe(onReceive, "meshtastic.receive")
     pub.subscribe(onConnection, "meshtastic.connection.established")
 
-    iface: (
-        meshtastic.serial_interface.SerialInterface
-        | meshtastic.ble_interface.BLEInterface
-        | meshtastic.tcp_interface.TCPInterface
-        | None
-    ) = None
+    iface: Interface | None = None
 
     # defaults to serial, use --host for TCP or --ble for Bluetooth
     try:
@@ -76,8 +71,8 @@ def main() -> int:
             iface = meshtastic.serial_interface.SerialInterface(timeout=10)
     except KeyboardInterrupt as exc:
         raise SystemExit(0) from exc
-    except Exception as e:
-        print(f"Error: Could not connect. {e}")
+    except Exception as exc:
+        print(f"Error: Could not connect. {exc}")
         return 1
 
     try:
