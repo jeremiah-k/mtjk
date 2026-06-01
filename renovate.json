@@ -3,7 +3,12 @@
   "extends": ["config:best-practices"],
   "forkProcessing": "enabled",
   "mode": "full",
-  "enabledManagers": ["poetry", "github-actions", "git-submodules", "custom.regex"],
+  "enabledManagers": [
+    "poetry",
+    "github-actions",
+    "git-submodules",
+    "custom.regex"
+  ],
   "timezone": "America/Chicago",
   "updateNotScheduled": true,
   "dependencyDashboard": true,

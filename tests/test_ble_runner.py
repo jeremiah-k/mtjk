@@ -10,12 +10,12 @@ from typing import Any, cast
 
 import pytest
 
+from meshtastic.interfaces.ble import runner as _runner_module
 from meshtastic.interfaces.ble.client import BLEClient
 from meshtastic.interfaces.ble.runner import (
     BLECoroutineRunner,
     get_zombie_runner_count,
 )
-from meshtastic.interfaces.ble import runner as _runner_module
 
 pytestmark = pytest.mark.unit
 

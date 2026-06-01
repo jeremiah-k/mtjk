@@ -17,12 +17,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from bleak.exc import BleakDBusError
 
+from meshtastic.interfaces.ble import runner as _runner_module
 from meshtastic.interfaces.ble.constants import BLECLIENT_ERROR_LOOP_NOT_AVAILABLE
 from meshtastic.interfaces.ble.runner import (
     BLECoroutineRunner,
     get_zombie_runner_count,
 )
-from meshtastic.interfaces.ble import runner as _runner_module
 
 
 @pytest.fixture(autouse=True)

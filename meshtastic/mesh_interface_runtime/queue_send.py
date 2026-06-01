@@ -79,9 +79,7 @@ class _QueueSendRuntime:
                     return packet_id, packet
                 return None
             to_resend = queue.popitem(last=False)
-            if queue_status is not None and isinstance(
-                to_resend[1], mesh_pb2.ToRadio
-            ):
+            if queue_status is not None and isinstance(to_resend[1], mesh_pb2.ToRadio):
                 queue_status.free -= 1
             return to_resend
 
@@ -123,9 +121,7 @@ class _QueueSendRuntime:
                 if not isinstance(packet, mesh_pb2.ToRadio):
                     continue
                 if packet is not to_radio:
-                    logger.debug(
-                        "Resending packet ID %08x %s", packet_id, packet
-                    )
+                    logger.debug("Resending packet ID %08x %s", packet_id, packet)
                 send_impl(packet)
                 sent_packet_ids.add(packet_id)
         finally:
@@ -225,9 +221,7 @@ class _QueueSendRuntime:
         """Persist latest queue status update."""
         self._record_queue_status(queue_status)
 
-    def _correlate_queue_status_reply(
-        self, queue_status: mesh_pb2.QueueStatus
-    ) -> None:
+    def _correlate_queue_status_reply(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Correlate queue status mesh_packet_id replies to pending entries."""
         packet_id = queue_status.mesh_packet_id
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
@@ -258,9 +252,7 @@ class _QueueSendRuntime:
                 packet_id,
             )
 
-    def correlate_queue_status_reply(
-        self, queue_status: mesh_pb2.QueueStatus
-    ) -> None:
+    def correlate_queue_status_reply(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Correlate queue status mesh_packet_id replies to pending entries."""
         self._correlate_queue_status_reply(queue_status)
 

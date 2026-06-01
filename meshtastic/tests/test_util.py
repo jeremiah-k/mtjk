@@ -489,8 +489,7 @@ def test_detect_windows_needs_driver_filters_pnp_output(
         args=["powershell.exe"],
         returncode=0,
         stdout=(
-            "DeviceID : USB\\VID_303A&PID_1001\n"
-            "Status   : CM_PROB_FAILED_INSTALL\n"
+            "DeviceID : USB\\VID_303A&PID_1001\n" "Status   : CM_PROB_FAILED_INSTALL\n"
         ),
         stderr="",
     )
