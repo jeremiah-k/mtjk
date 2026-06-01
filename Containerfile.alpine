@@ -21,4 +21,8 @@ RUN _poetry_venv_dir="$(mktemp -d -p "${TMPDIR:-/tmp}" 'poetry_venv.XXXXXX')" &&
 
 COPY "./bin/container-entrypoint.sh" "/init"
 
+RUN addgroup -S meshtastic && adduser -S -G meshtastic meshtastic && \
+    chown meshtastic:meshtastic /init
+USER meshtastic
+
 ENTRYPOINT [ "/init" ]

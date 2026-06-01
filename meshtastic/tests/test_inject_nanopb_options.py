@@ -11,7 +11,9 @@ confirm the regen pipeline embedded the expected nanopb options.
 import importlib.util
 import sys
 import textwrap
+import types
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +26,7 @@ from hypothesis import given, strategies as st
 _SCRIPT_PATH = Path(__file__).parent.parent.parent / "bin" / "inject_nanopb_options.py"
 
 
-def _load_inject_module():
+def _load_inject_module() -> types.ModuleType:
     spec = importlib.util.spec_from_file_location("inject_nanopb_options", _SCRIPT_PATH)
     mod = importlib.util.module_from_spec(spec)
     with patch.object(sys, "argv", ["inject_nanopb_options.py"]):
@@ -270,7 +272,7 @@ def test_format_bool_false():
 _NANOPB_IMPORT_PATH = "meshtastic/protobuf/nanopb.proto"
 
 
-def _inject(proto_src: str, specific=None, wildcard=None) -> str:
+def _inject(proto_src: str, specific: dict[tuple[str, ...], dict[str, Any]] | None = None, wildcard: dict[str, dict[str, Any]] | None = None) -> str:
     """Run inject_into_proto with empty dicts as defaults."""
     return inject_into_proto(
         textwrap.dedent(proto_src),
@@ -539,7 +541,7 @@ from meshtastic.protobuf import (  # noqa: E402  (after local helpers)
 )
 
 
-def _field_opts(descriptor, *path):
+def _field_opts(descriptor: Any, *path: str) -> Any:
     """Walk a descriptor by field/nested-type path and return its nanopb opts.
 
     Elements of *path that are message names are looked up in nested_types_by_name;

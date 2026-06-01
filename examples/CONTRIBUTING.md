@@ -11,6 +11,7 @@ Use this guide when adding or updating scripts in `examples/`.
 5. Argument handling is clear (`argparse` preferred).
 6. Errors are explicit (no bare `except:`).
 7. The script is not a near-duplicate of an existing example.
+8. Type hints on all new/edited code; use PEP 604 unions (`X | None`) and built-in generics (`dict[K, V]`, `list[T]`, `tuple[T, ...]`).
 
 ## Choose the right teaching goal
 

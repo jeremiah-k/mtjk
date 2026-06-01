@@ -773,10 +773,10 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
                 if msg.startswith("got msg '"):
                     return
                 rxChannel = packet.get("channel", 0)
-                targetChannel = int(args.ch_index or 0)
-                if rxChannel == targetChannel:
-                    rxSnr = packet["rxSnr"]
-                    hopLimit = packet["hopLimit"]
+                targetChannel = int(args.ch_index) if args.ch_index is not None else None
+                if targetChannel is None or rxChannel == targetChannel:
+                    rxSnr = packet.get("rxSnr", "unknown")
+                    hopLimit = packet.get("hopLimit", "unknown")
                     print(f"message: {msg}")
                     reply = f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
                     print(f"Received channel {rxChannel}. Sending reply: {reply}")
