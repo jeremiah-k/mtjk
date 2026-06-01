@@ -43,6 +43,7 @@ from meshtastic.protobuf import (
     portnums_pb2,
 )
 from meshtastic.version import get_active_version
+from meshtastic.version import INSTALL_UPGRADE_HINT, PROJECT_DISPLAY_NAME
 
 argcomplete: ModuleType | None = None
 try:
@@ -223,7 +224,7 @@ def supportInfo() -> None:
     `meshtastic --info` when filing an issue.
     """
     print("")
-    print("If having issues with meshtastic CLI / python library (mtjk fork)")
+    print(f"If having issues with {PROJECT_DISPLAY_NAME} CLI / python library")
     print("or wish to make feature requests, visit:")
     print("https://github.com/jeremiah-k/mtjk/issues")
     print("When adding an issue, be sure to include the following info:")
@@ -237,10 +238,10 @@ def supportInfo() -> None:
     pypi_version = meshtastic.util.check_if_newer_version()
     if pypi_version:
         print(
-            f" meshtastic (mtjk fork): v{the_version} (*** newer version v{pypi_version} available ***)"
+            f" {PROJECT_DISPLAY_NAME}: v{the_version} (*** newer version v{pypi_version} available ***)"
         )
     else:
-        print(f" meshtastic (mtjk fork): v{the_version}")
+        print(f" {PROJECT_DISPLAY_NAME}: v{the_version}")
     print(f" Executable: {sys.argv[0]}")
     print(
         f" Python: {platform.python_version()} {platform.python_implementation()} {platform.python_compiler()}"
@@ -767,12 +768,31 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
         if d is not None and args and args.reply:
             msg = d.get("text")
             if msg:
-                rxSnr = packet["rxSnr"]
-                hopLimit = packet["hopLimit"]
-                print(f"message: {msg}")
-                reply = f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
-                print("Sending reply: ", reply)
-                interface.sendText(reply)
+                # Prevent infinite loop: ignore own messages and auto-reply echoes
+                if (
+                    interface.myInfo
+                    and packet.get("from") == interface.myInfo.my_node_num
+                ):
+                    return
+                if msg.startswith("got msg '"):
+                    return
+                rxChannel = packet.get("channel", 0)
+                targetChannel = (
+                    int(args.ch_index) if args.ch_index is not None else None
+                )
+                if targetChannel is None or rxChannel == targetChannel:
+                    rxSnr = packet.get("rxSnr", "unknown")
+                    hopLimit = packet.get("hopLimit", "unknown")
+                    print(f"message: {msg}")
+                    reply = (
+                        f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
+                    )
+                    print(f"Received channel {rxChannel}. Sending reply: {reply}")
+                    interface.sendText(reply, channelIndex=rxChannel)
+                else:
+                    print(
+                        f"Ignored message on channel {rxChannel} (waiting for channel {targetChannel})"
+                    )
 
     except Exception as ex:
         logger.warning("Error processing received packet: %s", ex)
@@ -2369,7 +2389,7 @@ def onConnected(interface: MeshInterface) -> None:
                 if pypi_version:
                     print(
                         f"*** A newer version v{pypi_version} is available!"
-                        ' Consider running "pip install --upgrade meshtastic" ***\n'
+                        f' Consider running "{INSTALL_UPGRADE_HINT}" ***\n'
                     )
             else:
                 print("Showing info of remote node is not supported.")
@@ -3741,7 +3761,10 @@ def addRemoteActionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPar
     )
 
     group.add_argument(
-        "--reply", help="Reply to received messages", action="store_true"
+        "--reply",
+        help="Reply to received messages on the channel they were received. "
+        "If '--ch-index' is set, only messages on that channel are replied to.",
+        action="store_true",
     )
 
     return parser

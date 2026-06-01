@@ -1,0 +1,82 @@
+name: Create and publish Container image
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+    tags:
+      - '*.*.*'
+  pull_request:
+    branches:
+      - master
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - container: Containerfile.debian
+            autotag: false
+            suffix: -debian
+          - container: Containerfile.alpine
+            autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
+    # Container builds only run in the upstream repo (meshtastic/python)
+    if: github.repository == 'meshtastic/python'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2
+
+      - name: Login to Container registry
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@818d4b7b91585d195f67373fd9cb0332e31a7175 # v4
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=edge
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          flavor: |
+            latest=${{ matrix.autotag }}
+            suffix=${{ matrix.suffix }}
+
+      - name: Build and push
+        uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
+        with:
+          platforms: linux/amd64,linux/386,linux/arm64
+          context: .
+          file: ${{ matrix.container }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

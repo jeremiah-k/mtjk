@@ -10,10 +10,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 11):
-    from typing import TypeAlias as _TypeAlias, Never as _Never
+if sys.version_info >= (3, 10):
+    from typing import TypeAlias as _TypeAlias
 else:
-    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
+    from typing_extensions import TypeAlias as _TypeAlias
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -488,7 +488,6 @@ class DeviceUIConfig(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["alert_enabled", b"alert_enabled", "banner_enabled", b"banner_enabled", "calibration_data", b"calibration_data", "compass_mode", b"compass_mode", "gps_format", b"gps_format", "is_clockface_analog", b"is_clockface_analog", "language", b"language", "map_data", b"map_data", "node_filter", b"node_filter", "node_highlight", b"node_highlight", "pin_code", b"pin_code", "ring_tone_id", b"ring_tone_id", "screen_brightness", b"screen_brightness", "screen_lock", b"screen_lock", "screen_rgb_color", b"screen_rgb_color", "screen_timeout", b"screen_timeout", "settings_lock", b"settings_lock", "theme", b"theme", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeviceUIConfig: _TypeAlias = DeviceUIConfig  # noqa: Y015
 
@@ -542,11 +541,8 @@ class NodeFilter(_message.Message):
         node_name: _builtins.str = ...,
         channel: _builtins.int = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "hops_away", b"hops_away", "node_name", b"node_name", "offline_switch", b"offline_switch", "position_switch", b"position_switch", "public_key_switch", b"public_key_switch", "unknown_switch", b"unknown_switch"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NodeFilter: _TypeAlias = NodeFilter  # noqa: Y015
 
@@ -588,11 +584,8 @@ class NodeHighlight(_message.Message):
         iaq_switch: _builtins.bool = ...,
         node_name: _builtins.str = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["chat_switch", b"chat_switch", "iaq_switch", b"iaq_switch", "node_name", b"node_name", "position_switch", b"position_switch", "telemetry_switch", b"telemetry_switch"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NodeHighlight: _TypeAlias = NodeHighlight  # noqa: Y015
 
@@ -622,11 +615,8 @@ class GeoPoint(_message.Message):
         latitude: _builtins.int = ...,
         longitude: _builtins.int = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["latitude", b"latitude", "longitude", b"longitude", "zoom", b"zoom"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___GeoPoint: _TypeAlias = GeoPoint  # noqa: Y015
 
@@ -662,6 +652,5 @@ class Map(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["follow_gps", b"follow_gps", "home", b"home", "style", b"style"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___Map: _TypeAlias = Map  # noqa: Y015

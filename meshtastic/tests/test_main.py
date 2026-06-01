@@ -3082,6 +3082,8 @@ def test_main_onReceive_with_text(
     """Test onReceive with text."""
     args = MagicMock()
     args.sendtext.return_value = "foo"
+    args.reply = True
+    args.ch_index = None
     mt_config.args = args
 
     # Note: 'TEXT_MESSAGE_APP' value is 1
@@ -3111,6 +3113,142 @@ def test_main_onReceive_with_text(
         out, err = capsys.readouterr()
         assert re.search(r"Sending reply", out, re.MULTILINE)
         assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_onReceive_reply_uses_rx_channel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reply is sent on the same channel the message was received on."""
+    args = MagicMock()
+    args.sendtext.return_value = ""
+    args.reply = True
+    args.ch_index = None
+    mt_config.args = args
+
+    packet = {
+        "to": 4294967295,
+        "from": 999,
+        "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "hello"},
+        "channel": 3,
+        "rxSnr": 6.0,
+        "hopLimit": 3,
+    }
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.myInfo.my_node_num = 4294967295
+
+    onReceive(packet, iface)
+
+    iface.sendText.assert_called_once()
+    call_kwargs = iface.sendText.call_args
+    assert call_kwargs[1].get("channelIndex") == 3 or (
+        len(call_kwargs[0]) > 1 and call_kwargs[0][1] == 3
+    )
+    out, err = capsys.readouterr()
+    assert "Received channel 3" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_onReceive_ch_index_filter_mismatch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With --ch-index set, messages on a different channel are ignored."""
+    args = MagicMock()
+    args.sendtext.return_value = ""
+    args.reply = True
+    args.ch_index = 1
+    mt_config.args = args
+
+    packet = {
+        "to": 4294967295,
+        "from": 999,
+        "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "hello"},
+        "channel": 5,
+        "rxSnr": 6.0,
+        "hopLimit": 3,
+    }
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.myInfo.my_node_num = 4294967295
+
+    onReceive(packet, iface)
+
+    iface.sendText.assert_not_called()
+    out, err = capsys.readouterr()
+    assert "Ignored message on channel 5" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_onReceive_own_packet_no_reply(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Messages from our own node number are not replied to (prevent loop)."""
+    args = MagicMock()
+    args.sendtext.return_value = ""
+    args.reply = True
+    args.ch_index = None
+    mt_config.args = args
+
+    my_node = 4294967295
+    packet = {
+        "to": 4294967295,
+        "from": my_node,
+        "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "my own msg"},
+        "channel": 0,
+        "rxSnr": 6.0,
+        "hopLimit": 3,
+    }
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.myInfo.my_node_num = my_node
+
+    onReceive(packet, iface)
+
+    iface.sendText.assert_not_called()
+    out, err = capsys.readouterr()
+    assert "Sending reply" not in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_onReceive_auto_reply_echo_no_reply(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Auto-reply echoes (starting with 'got msg ') are not replied to (prevent loop)."""
+    args = MagicMock()
+    args.sendtext.return_value = ""
+    args.reply = True
+    args.ch_index = None
+    mt_config.args = args
+
+    packet = {
+        "to": 4294967295,
+        "from": 999,
+        "decoded": {
+            "portnum": "TEXT_MESSAGE_APP",
+            "text": "got msg 'hello' with rxSnr: 6.0 and hopLimit: 3",
+        },
+        "channel": 0,
+        "rxSnr": 6.0,
+        "hopLimit": 3,
+    }
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.myInfo.my_node_num = 4294967295
+
+    onReceive(packet, iface)
+
+    iface.sendText.assert_not_called()
+    out, err = capsys.readouterr()
+    assert "Sending reply" not in out
+    assert err == ""
 
 
 @pytest.mark.unit
