@@ -1,29 +1,37 @@
-README
-docs/
+# === Build & Distribution ===
 build
 dist
 *.egg-info
-log_*
 .eggs
-nanopb-*
-.*swp
-.coverage
+meshtastic.spec
+
+# === Python ===
+*.pyc
+__pycache__/
+examples/__pycache__/
 *.py-E
 venv/
-*pyc
-.DS_Store
-__pycache__
-examples/__pycache__
-meshtastic.spec
+.coverage
 .hypothesis/
 coverage.xml
 junit.xml
-.ipynb_checkpoints
+
+# === AI Tools ===
 .cursor/
 .codex
-meshtastic/tests/api_baselines/*_test.json
-.worktrees/
-.sisyphus/
-
-#Ignore vscode AI rules
+.commandcode/
+.omo/
 .github/instructions/codacy.instructions.md
+
+# === IDE & Editor ===
+.*swp
+.DS_Store
+.ipynb_checkpoints
+
+# === Project ===
+README
+docs/
+log_*
+nanopb-*
+.worktrees/
+meshtastic/tests/api_baselines/*_test.json

@@ -24,8 +24,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import meshtastic.mesh_interface as mesh_interface_module
-from meshtastic.mesh_interface_runtime import receive_pipeline as receive_pipeline_module
 from meshtastic.mesh_interface_runtime import flows as flows_module
+from meshtastic.mesh_interface_runtime import (
+    receive_pipeline as receive_pipeline_module,
+)
 from meshtastic.mesh_interface_runtime.request_wait import (
     UNSCOPED_WAIT_REQUEST_ID,
     WAIT_ATTR_NAK,
@@ -2110,7 +2112,9 @@ def test_send_alert_and_mqtt_proxy_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         assert send_args.kwargs["hopLimit"] == 3
 
         send_mqtt = MagicMock()
-        monkeypatch.setattr(iface._send_pipeline, "sendMqttClientProxyMessage", send_mqtt)
+        monkeypatch.setattr(
+            iface._send_pipeline, "sendMqttClientProxyMessage", send_mqtt
+        )
         iface.sendMqttClientProxyMessage("mesh/topic", b"payload")
 
         assert send_mqtt.call_count == 1
@@ -2165,9 +2169,7 @@ def test_on_response_position_success_and_routing_error(
         position.longitude_i = -971234567
         position.altitude = 250
         position.precision_bits = 32
-        iface._clear_wait_error(
-            WAIT_ATTR_POSITION, request_id=1001
-        )
+        iface._clear_wait_error(WAIT_ATTR_POSITION, request_id=1001)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1001)
         )
@@ -2196,9 +2198,7 @@ def test_on_response_position_success_and_routing_error(
 
         unknown_position = mesh_pb2.Position()
         unknown_position.precision_bits = 5
-        iface._clear_wait_error(
-            WAIT_ATTR_POSITION, request_id=1002
-        )
+        iface._clear_wait_error(WAIT_ATTR_POSITION, request_id=1002)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1002)
         )
@@ -2228,9 +2228,7 @@ def test_on_response_position_success_and_routing_error(
 
         disabled_position = mesh_pb2.Position()
         disabled_position.precision_bits = 0
-        iface._clear_wait_error(
-            WAIT_ATTR_POSITION, request_id=1003
-        )
+        iface._clear_wait_error(WAIT_ATTR_POSITION, request_id=1003)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1003)
         )
@@ -2258,9 +2256,7 @@ def test_on_response_position_success_and_routing_error(
         assert "position disabled" in caplog.text
 
     with MeshInterface(noProto=True) as iface:
-        iface._clear_wait_error(
-            WAIT_ATTR_POSITION, request_id=1004
-        )
+        iface._clear_wait_error(WAIT_ATTR_POSITION, request_id=1004)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForPosition(request_id=1004)
         )
@@ -2470,9 +2466,7 @@ def test_send_traceroute_and_response_rendering(
         route.snr_towards.extend([8, 12])
         route.route_back.extend([12])
         route.snr_back.extend([16, 20])
-        iface._clear_wait_error(
-            WAIT_ATTR_TRACEROUTE, request_id=88
-        )
+        iface._clear_wait_error(WAIT_ATTR_TRACEROUTE, request_id=88)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=88)
         )
@@ -2503,9 +2497,7 @@ def test_send_traceroute_and_response_rendering(
 def test_on_response_traceroute_routing_no_response_raises() -> None:
     """Traceroute routing NO_RESPONSE replies should be surfaced by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
-        iface._clear_wait_error(
-            WAIT_ATTR_TRACEROUTE, request_id=9101
-        )
+        iface._clear_wait_error(WAIT_ATTR_TRACEROUTE, request_id=9101)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9101)
         )
@@ -2537,9 +2529,7 @@ def test_on_response_traceroute_routing_no_response_raises() -> None:
 def test_on_response_traceroute_parse_failures_surface_to_waiters() -> None:
     """Traceroute parse errors should be recorded and raised by waitForTraceRoute()."""
     with MeshInterface(noProto=True) as iface:
-        iface._clear_wait_error(
-            WAIT_ATTR_TRACEROUTE, request_id=9102
-        )
+        iface._clear_wait_error(WAIT_ATTR_TRACEROUTE, request_id=9102)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTraceRoute(1.0, request_id=9102)
         )
@@ -2626,9 +2616,7 @@ def test_on_response_telemetry_paths(
         device_t = telemetry_pb2.Telemetry()
         device_t.device_metrics.battery_level = 95
         device_t.device_metrics.voltage = 4.23
-        iface._clear_wait_error(
-            WAIT_ATTR_TELEMETRY, request_id=2001
-        )
+        iface._clear_wait_error(WAIT_ATTR_TELEMETRY, request_id=2001)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2001)
         )
@@ -2657,9 +2645,7 @@ def test_on_response_telemetry_paths(
 
         env_t = telemetry_pb2.Telemetry()
         env_t.environment_metrics.temperature = 21.5
-        iface._clear_wait_error(
-            WAIT_ATTR_TELEMETRY, request_id=2002
-        )
+        iface._clear_wait_error(WAIT_ATTR_TELEMETRY, request_id=2002)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2002)
         )
@@ -2687,9 +2673,7 @@ def test_on_response_telemetry_paths(
         assert "environmentMetrics:" in caplog.text
 
     with MeshInterface(noProto=True) as iface:
-        iface._clear_wait_error(
-            WAIT_ATTR_TELEMETRY, request_id=2003
-        )
+        iface._clear_wait_error(WAIT_ATTR_TELEMETRY, request_id=2003)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2003)
         )
@@ -2715,9 +2699,7 @@ def test_on_response_telemetry_paths(
         assert isinstance(wait_errors[0], MeshInterface.MeshInterfaceError)
         assert "No response" in str(wait_errors[0])
 
-        iface._clear_wait_error(
-            WAIT_ATTR_TELEMETRY, request_id=2004
-        )
+        iface._clear_wait_error(WAIT_ATTR_TELEMETRY, request_id=2004)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForTelemetry(request_id=2004)
         )
@@ -2750,9 +2732,7 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
     """onResponseWaypoint() should log waypoint payloads and route errors to waiters."""
     with MeshInterface(noProto=True) as iface:
         waypoint = mesh_pb2.Waypoint(name="WPT", id=5)
-        iface._clear_wait_error(
-            WAIT_ATTR_WAYPOINT, request_id=3001
-        )
+        iface._clear_wait_error(WAIT_ATTR_WAYPOINT, request_id=3001)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3001)
         )
@@ -2779,9 +2759,7 @@ def test_on_response_waypoint_paths(caplog: pytest.LogCaptureFixture) -> None:
         assert "Waypoint received:" in caplog.text
 
     with MeshInterface(noProto=True) as iface:
-        iface._clear_wait_error(
-            WAIT_ATTR_WAYPOINT, request_id=3002
-        )
+        iface._clear_wait_error(WAIT_ATTR_WAYPOINT, request_id=3002)
         wait_thread, wait_errors = _start_wait_thread(
             lambda: iface.waitForWaypoint(request_id=3002)
         )
@@ -3716,6 +3694,7 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
     """A successfully-sent packet without immediate queue-status reply should not be requeued in the same cycle."""
     with MeshInterface(noProto=True) as iface:
         iface.noProto = False
+
         class _FalsyQueue(OrderedDict[int, mesh_pb2.ToRadio | bool]):
             def __bool__(self) -> bool:
                 return False

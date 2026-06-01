@@ -731,7 +731,9 @@ class ClientManager:
                     ) and not _is_unconfigured_mock_callable(is_connected_probe):
                         try:
                             is_connected = bool(is_connected_probe())
-                        except Exception:  # noqa: BLE001 - shutdown must remain best effort
+                        except (
+                            Exception
+                        ):  # noqa: BLE001 - shutdown must remain best effort
                             logger.debug(
                                 "Failed to read BLE client connected state via %s during shutdown.",
                                 probe_name,
@@ -754,7 +756,9 @@ class ClientManager:
 
                     def _disconnect_with_timeout() -> None:
                         try:
-                            client.disconnect(await_timeout=effective_disconnect_timeout)
+                            client.disconnect(
+                                await_timeout=effective_disconnect_timeout
+                            )
                         except TypeError as exc:
                             if not _is_unexpected_keyword_error(exc, "await_timeout"):
                                 raise
@@ -794,7 +798,9 @@ class ClientManager:
                 if close_error is not None:
                     raise close_error
             else:
-                logger.debug("Skipping BLE client close during interpreter finalization.")
+                logger.debug(
+                    "Skipping BLE client close during interpreter finalization."
+                )
         finally:
             if event:
                 event.set()

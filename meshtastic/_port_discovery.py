@@ -176,15 +176,15 @@ def _detect_windows_needs_driver(
         and getattr(sd, "usb_vendor_id_in_hex", None) is not None
         and getattr(sd, "usb_product_id_in_hex", None) is not None
     ):
-        usb_ids = (
-            (sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),  # type: ignore[union-attr]
-        )
+        usb_ids = ((sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),)
     if not usb_ids:
         return False
 
-    device_blocks = tuple(_iter_pnp_device_blocks(
-        _windows_pnp_device_output(present_only=False),
-    ))
+    device_blocks = tuple(
+        _iter_pnp_device_blocks(
+            _windows_pnp_device_output(present_only=False),
+        )
+    )
     matching_blocks: list[str] = []
     for vendor_id, product_id in usb_ids or ():
         normalized_vendor_id = _normalize_usb_hex_id(
@@ -290,8 +290,7 @@ def _get_devices_with_vendor_id(vid: str) -> set[SupportedDevice]:
             continue
         if (
             isinstance(device.usb_vendor_id_in_hex, str)
-            and device.usb_vendor_id_in_hex.lower().removeprefix("0x")
-            == normalized_vid
+            and device.usb_vendor_id_in_hex.lower().removeprefix("0x") == normalized_vid
         ):
             matching_devices.add(device)
     return matching_devices
@@ -308,11 +307,13 @@ def _active_ports_on_supported_devices(
     eliminate_duplicates: bool,
     detect_windows_port_fn: Callable[[SupportedDevice | None], set[str]],
     eliminate_duplicate_port_fn: Callable[[list[str]], list[str]],
-    detect_windows_port_from_output_fn: Callable[
-        [SupportedDevice | None, str],
-        set[str],
-    ]
-    | None = None,
+    detect_windows_port_from_output_fn: (
+        Callable[
+            [SupportedDevice | None, str],
+            set[str],
+        ]
+        | None
+    ) = None,
 ) -> set[str]:
     """Collect active serial ports for supported devices on the current platform."""
     ports: set[str] = set()

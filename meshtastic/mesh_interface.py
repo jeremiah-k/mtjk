@@ -211,9 +211,6 @@ def _extract_hex_node_id_body(destination_id: str) -> str | None:
     return candidate
 
 
-
-
-
 def _logger_has_visible_info_handler(target_logger: logging.Logger) -> bool:
     """Return True when INFO logs are visibly emitted to stdout."""
     if target_logger.disabled:
