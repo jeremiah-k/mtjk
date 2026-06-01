@@ -778,7 +778,7 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
                     interface.sendText(reply,channelIndex=rxChannel)
                 else:
                     print(f"Ignored message on channel {rxChannel} (waiting for channel {targetChannel})")
-                    
+
 
     except Exception as ex:
         logger.warning("Error processing received packet: %s", ex)

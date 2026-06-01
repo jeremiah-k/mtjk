@@ -3082,6 +3082,8 @@ def test_main_onReceive_with_text(
     """Test onReceive with text."""
     args = MagicMock()
     args.sendtext.return_value = "foo"
+    args.reply = True
+    args.ch_index = None
     mt_config.args = args
 
     # Note: 'TEXT_MESSAGE_APP' value is 1

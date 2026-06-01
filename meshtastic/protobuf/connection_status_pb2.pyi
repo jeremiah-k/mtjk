@@ -9,10 +9,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 11):
-    from typing import TypeAlias as _TypeAlias, Never as _Never
+if sys.version_info >= (3, 10):
+    from typing import TypeAlias as _TypeAlias
 else:
-    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
+    from typing_extensions import TypeAlias as _TypeAlias
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -115,7 +115,6 @@ class WifiConnectionStatus(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["rssi", b"rssi", "ssid", b"ssid", "status", b"status"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___WifiConnectionStatus: _TypeAlias = WifiConnectionStatus  # noqa: Y015
 
@@ -143,7 +142,6 @@ class EthernetConnectionStatus(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["status", b"status"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___EthernetConnectionStatus: _TypeAlias = EthernetConnectionStatus  # noqa: Y015
 
@@ -183,11 +181,8 @@ class NetworkConnectionStatus(_message.Message):
         is_mqtt_connected: _builtins.bool = ...,
         is_syslog_connected: _builtins.bool = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["ip_address", b"ip_address", "is_connected", b"is_connected", "is_mqtt_connected", b"is_mqtt_connected", "is_syslog_connected", b"is_syslog_connected"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NetworkConnectionStatus: _TypeAlias = NetworkConnectionStatus  # noqa: Y015
 
@@ -221,11 +216,8 @@ class BluetoothConnectionStatus(_message.Message):
         rssi: _builtins.int = ...,
         is_connected: _builtins.bool = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["is_connected", b"is_connected", "pin", b"pin", "rssi", b"rssi"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___BluetoothConnectionStatus: _TypeAlias = BluetoothConnectionStatus  # noqa: Y015
 
@@ -253,10 +245,7 @@ class SerialConnectionStatus(_message.Message):
         baud: _builtins.int = ...,
         is_connected: _builtins.bool = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["baud", b"baud", "is_connected", b"is_connected"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___SerialConnectionStatus: _TypeAlias = SerialConnectionStatus  # noqa: Y015

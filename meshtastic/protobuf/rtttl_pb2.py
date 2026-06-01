@@ -22,9 +22,10 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
+from . import nanopb_pb2 as meshtastic_dot_protobuf_dot_nanopb__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1fmeshtastic/protobuf/rtttl.proto\x12\x13meshtastic.protobuf\"\x1f\n\x0bRTTTLConfig\x12\x10\n\x08ringtone\x18\x01 \x01(\tBg\n\x14org.meshtastic.protoB\x11RTTTLConfigProtosZ\"github.com/meshtastic/go/generated\xaa\x02\x14Meshtastic.Protobufs\xba\x02\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1fmeshtastic/protobuf/rtttl.proto\x12\x13meshtastic.protobuf\x1a meshtastic/protobuf/nanopb.proto\"\'\n\x0bRTTTLConfig\x12\x18\n\x08ringtone\x18\x01 \x01(\tB\x06\x92?\x03\x08\xe7\x01\x42g\n\x14org.meshtastic.protoB\x11RTTTLConfigProtosZ\"github.com/meshtastic/go/generated\xaa\x02\x14Meshtastic.Protobufs\xba\x02\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,6 +33,8 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'meshtastic.protobuf.rtttl_p
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n\024org.meshtastic.protoB\021RTTTLConfigProtosZ\"github.com/meshtastic/go/generated\252\002\024Meshtastic.Protobufs\272\002\000'
-  _globals['_RTTTLCONFIG']._serialized_start=56
-  _globals['_RTTTLCONFIG']._serialized_end=87
+  _globals['_RTTTLCONFIG'].fields_by_name['ringtone']._loaded_options = None
+  _globals['_RTTTLCONFIG'].fields_by_name['ringtone']._serialized_options = b'\222?\003\010\347\001'
+  _globals['_RTTTLCONFIG']._serialized_start=90
+  _globals['_RTTTLCONFIG']._serialized_end=129
 # @@protoc_insertion_point(module_scope)

@@ -12,10 +12,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 11):
-    from typing import TypeAlias as _TypeAlias, Never as _Never
+if sys.version_info >= (3, 10):
+    from typing import TypeAlias as _TypeAlias
 else:
-    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
+    from typing_extensions import TypeAlias as _TypeAlias
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -1335,11 +1335,8 @@ class LocalStats(_message.Message):
         num_tx_dropped: _builtins.int = ...,
         noise_floor: _builtins.int = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["air_util_tx", b"air_util_tx", "channel_utilization", b"channel_utilization", "heap_free_bytes", b"heap_free_bytes", "heap_total_bytes", b"heap_total_bytes", "noise_floor", b"noise_floor", "num_online_nodes", b"num_online_nodes", "num_packets_rx", b"num_packets_rx", "num_packets_rx_bad", b"num_packets_rx_bad", "num_packets_tx", b"num_packets_tx", "num_rx_dupe", b"num_rx_dupe", "num_total_nodes", b"num_total_nodes", "num_tx_dropped", b"num_tx_dropped", "num_tx_relay", b"num_tx_relay", "num_tx_relay_canceled", b"num_tx_relay_canceled", "uptime_seconds", b"uptime_seconds"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___LocalStats: _TypeAlias = LocalStats  # noqa: Y015
 
@@ -1397,11 +1394,8 @@ class TrafficManagementStats(_message.Message):
         hop_exhausted_packets: _builtins.int = ...,
         router_hops_preserved: _builtins.int = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["hop_exhausted_packets", b"hop_exhausted_packets", "nodeinfo_cache_hits", b"nodeinfo_cache_hits", "packets_inspected", b"packets_inspected", "position_dedup_drops", b"position_dedup_drops", "rate_limit_drops", b"rate_limit_drops", "router_hops_preserved", b"router_hops_preserved", "unknown_packet_drops", b"unknown_packet_drops"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___TrafficManagementStats: _TypeAlias = TrafficManagementStats  # noqa: Y015
 
@@ -1656,11 +1650,8 @@ class Nau7802Config(_message.Message):
         zeroOffset: _builtins.int = ...,
         calibrationFactor: _builtins.float = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["calibrationFactor", b"calibrationFactor", "zeroOffset", b"zeroOffset"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___Nau7802Config: _TypeAlias = Nau7802Config  # noqa: Y015
 

@@ -12,7 +12,6 @@ import importlib.util
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any, Dict, Tuple
 from unittest.mock import patch
 
 import pytest
@@ -217,7 +216,7 @@ def test_message_path_matches_nested():
 
 @pytest.mark.unit
 def test_message_path_matches_with_oneof_in_stack():
-    """oneof frames in the stack are skipped when looking for messages."""
+    """Oneof frames in the stack are skipped when looking for messages."""
     stack = [("message", "MeshPacket"), ("oneof", "payload_variant")]
     assert message_path_matches(stack, ("MeshPacket",))
 
@@ -302,7 +301,7 @@ def test_inject_adds_option_to_plain_field():
 
 @pytest.mark.unit
 def test_inject_merges_with_existing_options():
-    """nanopb annotation is appended after existing field options."""
+    """Nanopb annotation is appended after existing field options."""
     proto = """\
         syntax = "proto3";
         import "meshtastic/protobuf/channel.proto";
@@ -358,9 +357,7 @@ def test_inject_specific_not_leaking_to_other_messages():
         }
     """
     result = _inject(proto, specific={("User", "id"): {"max_size": 16}})
-    lines = result.splitlines()
-    user_line = next(l for l in lines if "User" not in l and "id = 1" in l and "Other" not in l.split("message")[0] if "message" not in l)
-    # Easier: count annotations — should be exactly one
+    # Count annotations — should be exactly one
     assert result.count("(nanopb).max_size = 16") == 1
 
 
@@ -383,8 +380,8 @@ def test_inject_nested_message():
     # Only the uid inside Link should have the annotation
     assert result.count("(nanopb).max_size = 48") == 1
     # Confirm it's the inner one (it has 4 spaces more indent than outer uid)
-    annotated = next(l for l in lines if "(nanopb).max_size = 48" in l)
-    plain = next(l for l in lines if "uid = 2" in l)
+    annotated = next(line for line in lines if "(nanopb).max_size = 48" in line)
+    plain = next(line for line in lines if "uid = 2" in line)
     assert annotated.index("uid") > plain.index("uid")
 
 
@@ -404,7 +401,7 @@ def test_inject_skips_enum_body_values():
     # Wildcard for 'role' should only hit the field, not enum values
     result = _inject(proto, wildcard={"role": {"max_size": 8}})
     assert result.count("(nanopb)") == 1
-    assert "(nanopb)" not in next(l for l in result.splitlines() if "CLIENT" in l)
+    assert "(nanopb)" not in next(line for line in result.splitlines() if "CLIENT" in line)
 
 
 @pytest.mark.unit
@@ -484,7 +481,7 @@ def test_inject_no_duplicate_nanopb_import():
 
 @pytest.mark.unit
 def test_inject_import_placed_after_existing_imports():
-    """nanopb import appears after the last existing import, not at the top."""
+    """Nanopb import appears after the last existing import, not at the top."""
     proto = """\
         syntax = "proto3";
         import "meshtastic/protobuf/mesh.proto";
@@ -494,8 +491,8 @@ def test_inject_import_placed_after_existing_imports():
     """
     result = _inject(proto, wildcard={"name": {"max_size": 30}})
     lines = result.splitlines()
-    mesh_idx = next(i for i, l in enumerate(lines) if "mesh.proto" in l)
-    nanopb_idx = next(i for i, l in enumerate(lines) if "nanopb.proto" in l)
+    mesh_idx = next(i for i, line in enumerate(lines) if "mesh.proto" in line)
+    nanopb_idx = next(i for i, line in enumerate(lines) if "nanopb.proto" in line)
     assert nanopb_idx == mesh_idx + 1
 
 
@@ -511,11 +508,11 @@ def test_inject_import_after_syntax_when_no_existing_imports():
     """
     result = _inject(proto, specific={("XModem", "seq"): {"int_size": 16}})
     lines = result.splitlines()
-    syntax_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("syntax"))
-    nanopb_idx = next(i for i, l in enumerate(lines) if "nanopb.proto" in l)
+    syntax_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("syntax"))
+    nanopb_idx = next(i for i, line in enumerate(lines) if "nanopb.proto" in line)
     assert nanopb_idx > syntax_idx, "nanopb import must come after the syntax line"
     # syntax line must still be first non-blank line
-    first_non_blank = next(l.strip() for l in lines if l.strip())
+    first_non_blank = next(line.strip() for line in lines if line.strip())
     assert first_non_blank.startswith("syntax")
 
 

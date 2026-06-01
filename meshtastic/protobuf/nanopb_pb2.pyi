@@ -20,10 +20,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 11):
-    from typing import TypeAlias as _TypeAlias, Never as _Never
+if sys.version_info >= (3, 10):
+    from typing import TypeAlias as _TypeAlias
 else:
-    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
+    from typing_extensions import TypeAlias as _TypeAlias
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -313,7 +313,6 @@ class NanoPBOptions(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["anonymous_oneof", b"anonymous_oneof", "callback_datatype", b"callback_datatype", "callback_function", b"callback_function", "default_has", b"default_has", "descriptorsize", b"descriptorsize", "enum_to_string", b"enum_to_string", "exclude", b"exclude", "fallback_type", b"fallback_type", "fixed_count", b"fixed_count", "fixed_length", b"fixed_length", "include", b"include", "int_size", b"int_size", "long_names", b"long_names", "mangle_names", b"mangle_names", "max_count", b"max_count", "max_length", b"max_length", "max_size", b"max_size", "msgid", b"msgid", "no_unions", b"no_unions", "package", b"package", "packed_enum", b"packed_enum", "packed_struct", b"packed_struct", "proto3", b"proto3", "proto3_singular_msgs", b"proto3_singular_msgs", "skip_message", b"skip_message", "sort_by_tag", b"sort_by_tag", "submsg_callback", b"submsg_callback", "type", b"type", "type_override", b"type_override"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NanoPBOptions: _TypeAlias = NanoPBOptions  # noqa: Y015
 

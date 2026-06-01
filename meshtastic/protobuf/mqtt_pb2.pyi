@@ -11,10 +11,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 11):
-    from typing import TypeAlias as _TypeAlias, Never as _Never
+if sys.version_info >= (3, 10):
+    from typing import TypeAlias as _TypeAlias
 else:
-    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
+    from typing_extensions import TypeAlias as _TypeAlias
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -56,7 +56,6 @@ class ServiceEnvelope(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["channel_id", b"channel_id", "gateway_id", b"gateway_id", "packet", b"packet"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___ServiceEnvelope: _TypeAlias = ServiceEnvelope  # noqa: Y015
 
@@ -159,10 +158,7 @@ class MapReport(_message.Message):
         num_online_local_nodes: _builtins.int = ...,
         has_opted_report_location: _builtins.bool = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["altitude", b"altitude", "firmware_version", b"firmware_version", "has_default_channel", b"has_default_channel", "has_opted_report_location", b"has_opted_report_location", "hw_model", b"hw_model", "latitude_i", b"latitude_i", "long_name", b"long_name", "longitude_i", b"longitude_i", "modem_preset", b"modem_preset", "num_online_local_nodes", b"num_online_local_nodes", "position_precision", b"position_precision", "region", b"region", "role", b"role", "short_name", b"short_name"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___MapReport: _TypeAlias = MapReport  # noqa: Y015
