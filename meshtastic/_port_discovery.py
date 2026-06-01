@@ -176,9 +176,7 @@ def _detect_windows_needs_driver(
         and getattr(sd, "usb_vendor_id_in_hex", None) is not None
         and getattr(sd, "usb_product_id_in_hex", None) is not None
     ):
-        usb_ids = (
-            (sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),  # type: ignore[union-attr]
-        )
+        usb_ids = ((sd.usb_vendor_id_in_hex, sd.usb_product_id_in_hex),)
     if not usb_ids:
         return False
 

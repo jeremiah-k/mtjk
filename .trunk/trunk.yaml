@@ -29,6 +29,12 @@ lint:
         - protobufs/**
         # Keep project license text untouched by automated lint/format tools.
         - LICENSE.md
+        # Codacy managed config — do not lint/format its generated files.
+        - .codacy/**
+    - linters: [checkov]
+      paths:
+        # Test device config with non-secret MQTT credentials for local testing.
+        - test_config.yaml
     - linters: [mypy-poetry]
       paths:
         # Keep Trunk's mypy scope aligned with CI (meshtastic/ only).

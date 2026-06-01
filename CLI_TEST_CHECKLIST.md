@@ -1,7 +1,5 @@
 # CLI Testing Checklist
 
-# CLI Testing Checklist
-
 ## Test Device Info
 
 - **Port:** `/dev/serial/by-id/usb-1a86_USB_Single_Serial_5435017226-if00`
@@ -270,9 +268,7 @@ Both `run-smokevirt-with-meshtasticd.sh` and `run-multinode-with-meshtasticd.sh`
 - [x] `test_meshtasticd_tcp_interface_ci.py` - TCP interface integration ✅ 25 passed
 - [x] `test_meshtasticd_multinode_ci.py` - Multi-node integration (channel blueprint, saturation) ✅ 1 passed, 2 xfailed (expected)
 
-### Docker Wrapper Fix
-
-Both `run-smokevirt-with-meshtasticd.sh` and `run-multinode-with-meshtasticd.sh` now wrap meshtasticd in a restart loop to handle the `execv()` crash on reboot. This allows:
+### Docker Wrapper Fix (Details)
 
 - `--configure` operations that trigger reboots
 - `--reboot` commands
