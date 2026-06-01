@@ -2079,7 +2079,8 @@ class DrawnShape(_message.Message):
     FILL_COLOR_FIELD_NUMBER: _builtins.int
     FILL_ARGB_FIELD_NUMBER: _builtins.int
     LABELS_ON_FIELD_NUMBER: _builtins.int
-    VERTICES_FIELD_NUMBER: _builtins.int
+    VERTEX_LAT_DELTAS_FIELD_NUMBER: _builtins.int
+    VERTEX_LON_DELTAS_FIELD_NUMBER: _builtins.int
     TRUNCATED_FIELD_NUMBER: _builtins.int
     BULLSEYE_DISTANCE_DM_FIELD_NUMBER: _builtins.int
     BULLSEYE_BEARING_REF_FIELD_NUMBER: _builtins.int
@@ -2140,7 +2141,7 @@ class DrawnShape(_message.Message):
     """
     truncated: _builtins.bool
     """
-    True if the sender truncated `vertices` to fit the pool.
+    True if the sender truncated the vertex columns to fit the pool.
     --- Bullseye-only fields. All ignored unless kind == Kind_Bullseye. ---
     """
     bullseye_distance_dm: _builtins.int
@@ -2164,13 +2165,9 @@ class DrawnShape(_message.Message):
     Bullseye reference UID (anchor marker). Empty = anchor is self.
     """
     @_builtins.property
-    def vertices(self) -> _containers.RepeatedCompositeFieldContainer[Global___CotGeoPoint]:
-        """
-        Vertex list for polyline/polygon/rectangle shapes. Capped at 32 by
-        the nanopb pool; senders MUST truncate longer inputs and set
-        `truncated = true`.
-        """
-
+    def vertex_lat_deltas(self) -> _containers.RepeatedScalarFieldContainer[_builtins.int]: ...
+    @_builtins.property
+    def vertex_lon_deltas(self) -> _containers.RepeatedScalarFieldContainer[_builtins.int]: ...
     def __init__(
         self,
         *,
@@ -2185,7 +2182,8 @@ class DrawnShape(_message.Message):
         fill_color: Global___Team.ValueType = ...,
         fill_argb: _builtins.int = ...,
         labels_on: _builtins.bool = ...,
-        vertices: _abc.Iterable[Global___CotGeoPoint] | None = ...,
+        vertex_lat_deltas: _abc.Iterable[_builtins.int] | None = ...,
+        vertex_lon_deltas: _abc.Iterable[_builtins.int] | None = ...,
         truncated: _builtins.bool = ...,
         bullseye_distance_dm: _builtins.int = ...,
         bullseye_bearing_ref: _builtins.int = ...,
@@ -2194,7 +2192,7 @@ class DrawnShape(_message.Message):
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["angle_deg", b"angle_deg", "bullseye_bearing_ref", b"bullseye_bearing_ref", "bullseye_distance_dm", b"bullseye_distance_dm", "bullseye_flags", b"bullseye_flags", "bullseye_uid_ref", b"bullseye_uid_ref", "fill_argb", b"fill_argb", "fill_color", b"fill_color", "kind", b"kind", "labels_on", b"labels_on", "major_cm", b"major_cm", "minor_cm", b"minor_cm", "stroke_argb", b"stroke_argb", "stroke_color", b"stroke_color", "stroke_weight_x10", b"stroke_weight_x10", "style", b"style", "truncated", b"truncated", "vertices", b"vertices"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["angle_deg", b"angle_deg", "bullseye_bearing_ref", b"bullseye_bearing_ref", "bullseye_distance_dm", b"bullseye_distance_dm", "bullseye_flags", b"bullseye_flags", "bullseye_uid_ref", b"bullseye_uid_ref", "fill_argb", b"fill_argb", "fill_color", b"fill_color", "kind", b"kind", "labels_on", b"labels_on", "major_cm", b"major_cm", "minor_cm", b"minor_cm", "stroke_argb", b"stroke_argb", "stroke_color", b"stroke_color", "stroke_weight_x10", b"stroke_weight_x10", "style", b"style", "truncated", b"truncated", "vertex_lat_deltas", b"vertex_lat_deltas", "vertex_lon_deltas", b"vertex_lon_deltas"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -3680,7 +3678,6 @@ class TAKPacketV2(_message.Message):
     ENVIRONMENT_FIELD_NUMBER: _builtins.int
     SENSOR_FOV_FIELD_NUMBER: _builtins.int
     MARTI_FIELD_NUMBER: _builtins.int
-    PLI_FIELD_NUMBER: _builtins.int
     CHAT_FIELD_NUMBER: _builtins.int
     AIRCRAFT_FIELD_NUMBER: _builtins.int
     RAW_DETAIL_FIELD_NUMBER: _builtins.int
@@ -3724,7 +3721,14 @@ class TAKPacketV2(_message.Message):
     """
     altitude: _builtins.int
     """
-    Altitude in meters (HAE)
+    Altitude in meters (HAE). ATAK's "no altitude" sentinel is hae=9999999.0.
+
+    NOTE: an earlier v0.4.0 attempt made this `optional` to omit the 9999999
+    sentinel from the wire, but measurement showed it was net-negative: the
+    zstd dictionary already compresses the literal 9999999 to ~nothing, while
+    proto3 `optional` forces a genuine 0 m HAE (common on routes/drawings that
+    carry hae="0.0" or omit hae → parsed as 0) to encode explicitly (+2 bytes),
+    which REGRESSED the worst-case route fixture. Kept as a plain field.
     """
     speed: _builtins.int
     """
@@ -3793,10 +3797,6 @@ class TAKPacketV2(_message.Message):
     when the original CoT event carried non-empty remarks text.
     GeoChat messages carry their text in GeoChat.message instead.
     Empty string (proto3 default) means no remarks were present.
-    """
-    pli: _builtins.bool
-    """
-    Position report (true = PLI, no extra fields beyond the common ones above)
     """
     raw_detail: _builtins.bytes
     """
@@ -3940,7 +3940,6 @@ class TAKPacketV2(_message.Message):
         environment: Global___TAKEnvironment | None = ...,
         sensor_fov: Global___SensorFov | None = ...,
         marti: Global___Marti | None = ...,
-        pli: _builtins.bool = ...,
         chat: Global___GeoChat | None = ...,
         aircraft: Global___AircraftTrack | None = ...,
         raw_detail: _builtins.bytes = ...,
@@ -3954,9 +3953,9 @@ class TAKPacketV2(_message.Message):
         taktalk: Global___TakTalkMessage | None = ...,
         taktalk_room: Global___TakTalkRoomData | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "pli", b"pli", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__environment: _TypeAlias = _typing.Literal["environment"]  # noqa: Y015
     _WhichOneofArgType__environment: _TypeAlias = _typing.Literal["_environment", b"_environment"]  # noqa: Y015
@@ -3964,7 +3963,7 @@ class TAKPacketV2(_message.Message):
     _WhichOneofArgType__marti: _TypeAlias = _typing.Literal["_marti", b"_marti"]  # noqa: Y015
     _WhichOneofReturnType__sensor_fov: _TypeAlias = _typing.Literal["sensor_fov"]  # noqa: Y015
     _WhichOneofArgType__sensor_fov: _TypeAlias = _typing.Literal["_sensor_fov", b"_sensor_fov"]  # noqa: Y015
-    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["pli", "chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room"]  # noqa: Y015
+    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__environment) -> _WhichOneofReturnType__environment | None: ...
