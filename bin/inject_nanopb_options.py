@@ -293,6 +293,7 @@ def inject_into_proto(
 
 
 def main() -> int:
+    """CLI entry point: inject nanopb options into a proto file."""
     if len(sys.argv) != 3:
         print(
             f"Usage: {sys.argv[0]} <options_file> <proto_file>",
@@ -318,13 +319,13 @@ def main() -> int:
         print(f"  [{opts_path.name}] No injectable options found, skipping.")
         return 0
 
-    content = proto_path.read_text()
+    content = proto_path.read_text(encoding="utf-8")
 
     # After regen-protobufs.sh's sed fixup, the nanopb import path is:
     nanopb_import_path = "meshtastic/protobuf/nanopb.proto"
 
     modified = inject_into_proto(content, specific, wildcard, nanopb_import_path)
-    proto_path.write_text(modified)
+    proto_path.write_text(modified, encoding="utf-8")
 
     print(
         f"  [{opts_path.name}] Injected {len(specific)} specific + "

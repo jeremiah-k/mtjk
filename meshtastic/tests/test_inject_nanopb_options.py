@@ -28,6 +28,8 @@ _SCRIPT_PATH = Path(__file__).parent.parent.parent / "bin" / "inject_nanopb_opti
 
 def _load_inject_module() -> types.ModuleType:
     spec = importlib.util.spec_from_file_location("inject_nanopb_options", _SCRIPT_PATH)
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     with patch.object(sys, "argv", ["inject_nanopb_options.py"]):
         spec.loader.exec_module(mod)

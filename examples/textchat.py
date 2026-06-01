@@ -30,6 +30,7 @@ def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:
     print("Connected. Type a message and press Enter to send. Ctrl+C to exit.")
 
 def main() -> int:
+    """Parse args, connect to a radio, and run an interactive text chat loop."""
     parser = argparse.ArgumentParser(description="Meshtastic text chat demo")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--host", help="Connect via TCP to this hostname or IP")

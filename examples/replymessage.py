@@ -37,6 +37,7 @@ def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:
     print("Connected. Will auto-reply to all messages while running.")
 
 def main() -> int:
+    """Parse args, connect to a radio, and auto-reply to received messages."""
     parser = argparse.ArgumentParser(description="Meshtastic Auto-Reply Feature Demo")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--host", help="Connect via TCP to this hostname or IP")
