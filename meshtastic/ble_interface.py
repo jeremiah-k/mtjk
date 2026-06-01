@@ -29,7 +29,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
     raise ImportError(  # noqa: TRY003
         "BLE support requires the 'bleak' package, but it is missing. "
         "Your Meshtastic installation appears incomplete; reinstall dependencies "
-        "with `poetry install` (or `pip install --upgrade meshtastic`)."
+        "with `poetry install` (or `pipx install mtjk`)."
     ) from exc
 
 # Public API re-export: import the canonical BLE facade once and mirror its

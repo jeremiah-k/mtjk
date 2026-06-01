@@ -29,7 +29,7 @@ from google.protobuf.message import Message
 
 import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
 from meshtastic.supported_device import SupportedDevice
-from meshtastic.version import get_active_version
+from meshtastic.version import DISTRIBUTION_NAME_CANDIDATES, get_active_version
 
 # Keep these module imports available for downstream tests and integrations that
 # historically monkeypatch meshtastic.util.<module> during port discovery.
@@ -68,10 +68,6 @@ DEFAULT_KEY = base64.b64decode("1PG7OiApB1nwvP+rz05pAQ==".encode("utf-8"))
 
 # Timeout for HTTP requests (e.g., PyPI version checks)
 HTTP_REQUEST_TIMEOUT_SECONDS = 5.0
-
-# Ordered candidates for PyPI metadata checks. Fork builds can publish to an
-# alternate package while preserving upstream fallback behavior.
-DISTRIBUTION_NAME_CANDIDATES: tuple[str, ...] = ("mtjk", "meshtastic")
 
 
 _PSK_SIMPLE_MSG = 'Invalid PSK format: expected "simpleN" with N in 0..254'

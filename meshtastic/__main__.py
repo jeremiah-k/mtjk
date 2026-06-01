@@ -43,6 +43,7 @@ from meshtastic.protobuf import (
     portnums_pb2,
 )
 from meshtastic.version import get_active_version
+from meshtastic.version import INSTALL_UPGRADE_HINT, PROJECT_DISPLAY_NAME
 
 argcomplete: ModuleType | None = None
 try:
@@ -223,7 +224,7 @@ def supportInfo() -> None:
     `meshtastic --info` when filing an issue.
     """
     print("")
-    print("If having issues with meshtastic CLI / python library (mtjk fork)")
+    print(f"If having issues with {PROJECT_DISPLAY_NAME} CLI / python library")
     print("or wish to make feature requests, visit:")
     print("https://github.com/jeremiah-k/mtjk/issues")
     print("When adding an issue, be sure to include the following info:")
@@ -237,10 +238,10 @@ def supportInfo() -> None:
     pypi_version = meshtastic.util.check_if_newer_version()
     if pypi_version:
         print(
-            f" meshtastic (mtjk fork): v{the_version} (*** newer version v{pypi_version} available ***)"
+            f" {PROJECT_DISPLAY_NAME}: v{the_version} (*** newer version v{pypi_version} available ***)"
         )
     else:
-        print(f" meshtastic (mtjk fork): v{the_version}")
+        print(f" {PROJECT_DISPLAY_NAME}: v{the_version}")
     print(f" Executable: {sys.argv[0]}")
     print(
         f" Python: {platform.python_version()} {platform.python_implementation()} {platform.python_compiler()}"
@@ -2388,7 +2389,7 @@ def onConnected(interface: MeshInterface) -> None:
                 if pypi_version:
                     print(
                         f"*** A newer version v{pypi_version} is available!"
-                        ' Consider running "pip install --upgrade meshtastic" ***\n'
+                        f' Consider running "{INSTALL_UPGRADE_HINT}" ***\n'
                     )
             else:
                 print("Showing info of remote node is not supported.")
