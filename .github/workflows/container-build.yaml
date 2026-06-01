@@ -31,8 +31,8 @@ jobs:
             suffix: -debian
           - container: Containerfile.alpine
             autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
-    # Alpine build only runs in the upstream repo (meshtastic/python)
-    if: ${{ !((matrix.container == 'Containerfile.alpine') && (github.repository != 'meshtastic/python')) }}
+    # Container builds only run in the upstream repo (meshtastic/python)
+    if: github.repository == 'meshtastic/python'
 
     steps:
       - name: Checkout repository
