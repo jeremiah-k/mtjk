@@ -163,9 +163,7 @@ def inject_into_proto(
     # Check if nanopb is already imported (after sed fixup, it will be
     # 'meshtastic/protobuf/nanopb.proto')
     nanopb_already_imported = any(
-        "nanopb.proto" in line
-        for line in lines
-        if line.strip().startswith("import")
+        "nanopb.proto" in line for line in lines if line.strip().startswith("import")
     )
 
     # Track the index of the last import line so we can insert after it

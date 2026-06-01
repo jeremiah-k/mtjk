@@ -10,11 +10,14 @@ Cleanup/error handling: clear connect failures and graceful Ctrl+C close.
 import argparse
 import time
 from typing import Any
+
 from pubsub import pub
+
+import meshtastic.ble_interface
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
-import meshtastic.ble_interface
 from meshtastic.mesh_interface import MeshInterface
+
 
 def onReceive(packet: dict, interface: MeshInterface) -> None:
     """Reply to every received packet with some info."""
@@ -32,9 +35,13 @@ def onReceive(packet: dict, interface: MeshInterface) -> None:
         print("Sending reply: ", reply)
         interface.sendText(reply, channelIndex=packet.get("channel", 0))
 
-def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:  # pylint: disable=unused-argument
+
+def onConnection(
+    interface: MeshInterface, topic: Any = pub.AUTO_TOPIC
+) -> None:  # pylint: disable=unused-argument
     """Handle a connection established event."""
     print("Connected. Will auto-reply to all messages while running.")
+
 
 def main() -> int:
     """Parse args, connect to a radio, and auto-reply to received messages."""
@@ -48,14 +55,21 @@ def main() -> int:
     pub.subscribe(onReceive, "meshtastic.receive")
     pub.subscribe(onConnection, "meshtastic.connection.established")
 
-    iface: meshtastic.serial_interface.SerialInterface | meshtastic.ble_interface.BLEInterface | meshtastic.tcp_interface.TCPInterface | None = None
+    iface: (
+        meshtastic.serial_interface.SerialInterface
+        | meshtastic.ble_interface.BLEInterface
+        | meshtastic.tcp_interface.TCPInterface
+        | None
+    ) = None
 
     # defaults to serial, use --host for TCP or --ble for Bluetooth
     try:
         if args.host:
             # note: timeout only applies after connection, not during the initial connect attempt
             # TCPInterface.myConnect() calls socket.create_connection() without a timeout
-            iface = meshtastic.tcp_interface.TCPInterface(hostname=args.host, timeout=10)
+            iface = meshtastic.tcp_interface.TCPInterface(
+                hostname=args.host, timeout=10
+            )
         elif args.ble:
             iface = meshtastic.ble_interface.BLEInterface(address=args.ble, timeout=10)
         else:

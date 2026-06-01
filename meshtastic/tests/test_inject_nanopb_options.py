@@ -17,7 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------
 # Load bin/inject_nanopb_options.py as a module without adding it to the
@@ -98,7 +99,11 @@ def test_parse_value_never_crashes(s):
 
 
 @pytest.mark.unit
-@given(st.text().filter(lambda s: not s.lstrip("-").isdigit() and s.lower() not in ("true", "false")))
+@given(
+    st.text().filter(
+        lambda s: not s.lstrip("-").isdigit() and s.lower() not in ("true", "false")
+    )
+)
 def test_parse_value_non_numeric_non_bool_returns_str(s):
     """parse_value returns the original string when it is neither an integer nor a boolean."""
     assert parse_value(s) == s
@@ -264,7 +269,9 @@ def test_format_bool_true():
 
 @pytest.mark.unit
 def test_format_bool_false():
-    assert format_nanopb_opts({"fixed_length": False}) == "(nanopb).fixed_length = false"
+    assert (
+        format_nanopb_opts({"fixed_length": False}) == "(nanopb).fixed_length = false"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +281,11 @@ def test_format_bool_false():
 _NANOPB_IMPORT_PATH = "meshtastic/protobuf/nanopb.proto"
 
 
-def _inject(proto_src: str, specific: dict[tuple[str, ...], dict[str, Any]] | None = None, wildcard: dict[str, dict[str, Any]] | None = None) -> str:
+def _inject(
+    proto_src: str,
+    specific: dict[tuple[str, ...], dict[str, Any]] | None = None,
+    wildcard: dict[str, dict[str, Any]] | None = None,
+) -> str:
     """Run inject_into_proto with empty dicts as defaults."""
     return inject_into_proto(
         textwrap.dedent(proto_src),
@@ -405,7 +416,9 @@ def test_inject_skips_enum_body_values():
     # Wildcard for 'role' should only hit the field, not enum values
     result = _inject(proto, wildcard={"role": {"max_size": 8}})
     assert result.count("(nanopb)") == 1
-    assert "(nanopb)" not in next(line for line in result.splitlines() if "CLIENT" in line)
+    assert "(nanopb)" not in next(
+        line for line in result.splitlines() if "CLIENT" in line
+    )
 
 
 @pytest.mark.unit
@@ -512,7 +525,9 @@ def test_inject_import_after_syntax_when_no_existing_imports():
     """
     result = _inject(proto, specific={("XModem", "seq"): {"int_size": 16}})
     lines = result.splitlines()
-    syntax_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("syntax"))
+    syntax_idx = next(
+        i for i, line in enumerate(lines) if line.strip().startswith("syntax")
+    )
     nanopb_idx = next(i for i, line in enumerate(lines) if "nanopb.proto" in line)
     assert nanopb_idx > syntax_idx, "nanopb import must come after the syntax line"
     # syntax line must still be first non-blank line
@@ -578,7 +593,9 @@ def test_descriptor_wildcard_macaddr():
 
 @pytest.mark.unit
 def test_descriptor_meshpacket_hop_limit():
-    opts = _field_opts(mesh_pb2.DESCRIPTOR.message_types_by_name["MeshPacket"], "hop_limit")
+    opts = _field_opts(
+        mesh_pb2.DESCRIPTOR.message_types_by_name["MeshPacket"], "hop_limit"
+    )
     assert opts.int_size == nanopb_pb2.IS_8
 
 

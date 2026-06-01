@@ -768,22 +768,30 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
             msg = d.get("text")
             if msg:
                 # Prevent infinite loop: ignore own messages and auto-reply echoes
-                if interface.myInfo and packet.get("from") == interface.myInfo.my_node_num:
+                if (
+                    interface.myInfo
+                    and packet.get("from") == interface.myInfo.my_node_num
+                ):
                     return
                 if msg.startswith("got msg '"):
                     return
                 rxChannel = packet.get("channel", 0)
-                targetChannel = int(args.ch_index) if args.ch_index is not None else None
+                targetChannel = (
+                    int(args.ch_index) if args.ch_index is not None else None
+                )
                 if targetChannel is None or rxChannel == targetChannel:
                     rxSnr = packet.get("rxSnr", "unknown")
                     hopLimit = packet.get("hopLimit", "unknown")
                     print(f"message: {msg}")
-                    reply = f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
+                    reply = (
+                        f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
+                    )
                     print(f"Received channel {rxChannel}. Sending reply: {reply}")
-                    interface.sendText(reply,channelIndex=rxChannel)
+                    interface.sendText(reply, channelIndex=rxChannel)
                 else:
-                    print(f"Ignored message on channel {rxChannel} (waiting for channel {targetChannel})")
-
+                    print(
+                        f"Ignored message on channel {rxChannel} (waiting for channel {targetChannel})"
+                    )
 
     except Exception as ex:
         logger.warning("Error processing received packet: %s", ex)

@@ -95,7 +95,7 @@ echo "Injecting nanopb options into proto files..."
 for OPTS_FILE in "${INDIR}"/*.options; do
 	BASENAME=$(basename "${OPTS_FILE}" .options)
 	PROTO_FILE="${INDIR}/${BASENAME}.proto"
-	if [ -f "${PROTO_FILE}" ]; then
+	if [[ -f ${PROTO_FILE} ]]; then
 		python3 ./bin/inject_nanopb_options.py "${OPTS_FILE}" "${PROTO_FILE}"
 	fi
 done
