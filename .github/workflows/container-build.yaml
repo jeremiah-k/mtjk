@@ -29,6 +29,10 @@ jobs:
           - container: Containerfile.debian
             autotag: false
             suffix: -debian
+          - container: Containerfile.alpine
+            autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
+    # Skip Alpine build outside upstream repo; remove this line when upstreaming
+    if: ${{ !((matrix.container == 'Containerfile.alpine') && (github.repository != 'meshtastic/python')) }}
 
     steps:
       - name: Checkout repository
