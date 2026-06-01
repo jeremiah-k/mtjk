@@ -71,6 +71,7 @@ PYIDIR=${TMPDIR}/out
 mkdir -p "${OUTDIR}" "${INDIR}" "${PYIDIR}"
 cp ./protobufs/meshtastic/*.proto "${INDIR}"
 cp ./protobufs/nanopb.proto "${INDIR}"
+cp ./protobufs/meshtastic/*.options "${INDIR}"
 
 # OS-X sed is apparently a little different and expects an arg for -i
 if [[ ${OSTYPE-} == darwin* ]]; then
@@ -85,6 +86,19 @@ fi
 "${SEDCMD[@]}" 's/^import "meshtastic\//import "meshtastic\/protobuf\//' "${INDIR}/"*.proto
 
 "${SEDCMD[@]}" 's/^import "nanopb.proto"/import "meshtastic\/protobuf\/nanopb.proto"/' "${INDIR}/"*.proto
+
+# Inject nanopb .options constraints as inline proto field options so that
+# protoc --python_out embeds them in the generated descriptors.  Python code
+# can then read them via:
+#   field.GetOptions().Extensions[nanopb_pb2.nanopb].max_size
+echo "Injecting nanopb options into proto files..."
+for OPTS_FILE in "${INDIR}"/*.options; do
+	BASENAME=$(basename "${OPTS_FILE}" .options)
+	PROTO_FILE="${INDIR}/${BASENAME}.proto"
+	if [ -f "${PROTO_FILE}" ]; then
+		python3 ./bin/inject_nanopb_options.py "${OPTS_FILE}" "${PROTO_FILE}"
+	fi
+done
 
 # Generate the python files
 "${PROTOC}" -I="${TMPDIR}/in" --python_out "${OUTDIR}" "--mypy_out=${PYIDIR}" "${INDIR}"/*.proto
