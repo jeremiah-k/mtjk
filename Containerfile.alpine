@@ -15,7 +15,7 @@ RUN _poetry_venv_dir="$(mktemp -d -p "${TMPDIR:-/tmp}" 'poetry_venv.XXXXXX')" &&
     python -m 'venv' "${_poetry_venv_dir}" && \
     "${_poetry_venv_dir}/bin/pip" install 'poetry' && \
     "${_poetry_venv_dir}/bin/poetry" config --local virtualenvs.create false && \
-    "${_poetry_venv_dir}/bin/poetry" install && \
+    "${_poetry_venv_dir}/bin/poetry" install --no-directory && \
     rm -f -r "${_poetry_venv_dir}" && \
     rm -f -r "/usr/local/app"
 

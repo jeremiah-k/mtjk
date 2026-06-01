@@ -767,6 +767,11 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
         if d is not None and args and args.reply:
             msg = d.get("text")
             if msg:
+                # Prevent infinite loop: ignore own messages and auto-reply echoes
+                if interface.myInfo and packet.get("from") == interface.myInfo.my_node_num:
+                    return
+                if msg.startswith("got msg '"):
+                    return
                 rxChannel = packet.get("channel", 0)
                 targetChannel = int(args.ch_index or 0)
                 if rxChannel == targetChannel:

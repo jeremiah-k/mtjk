@@ -16,14 +16,17 @@ import meshtastic.ble_interface
 from meshtastic.mesh_interface import MeshInterface
 
 def onReceive(packet: dict, interface: MeshInterface) -> None:  # pylint: disable=unused-argument
-    """called when a packet arrives"""
+    """Handle a received packet."""
     text: Optional[str] = packet.get("decoded", {}).get("text")
     if text:
+        # Filter out local echo — user already sees their own input
+        if interface.myInfo and packet.get("from") == interface.myInfo.my_node_num:
+            return
         sender: str = packet.get("fromId", "unknown")
         print(f"{sender}: {text}")
 
 def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:  # pylint: disable=unused-argument
-    """called when we (re)connect to the radio"""
+    """Handle a connection established event."""
     print("Connected. Type a message and press Enter to send. Ctrl+C to exit.")
 
 parser = argparse.ArgumentParser(description="Meshtastic text chat demo")

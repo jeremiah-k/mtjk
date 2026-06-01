@@ -17,9 +17,14 @@ import meshtastic.ble_interface
 from meshtastic.mesh_interface import MeshInterface
 
 def onReceive(packet: dict, interface: MeshInterface) -> None:
-    """Reply to every received packet with some info"""
+    """Reply to every received packet with some info."""
     text: Optional[str] = packet.get("decoded", {}).get("text")
     if text:
+        # Prevent infinite loop: ignore own messages and auto-reply echoes
+        if interface.myInfo and packet.get("from") == interface.myInfo.my_node_num:
+            return
+        if text.startswith("got msg '"):
+            return
         rx_snr: Any = packet.get("rxSnr", "unknown")
         hop_limit: Any = packet.get("hopLimit", "unknown")
         print(f"message: {text}")
@@ -28,7 +33,7 @@ def onReceive(packet: dict, interface: MeshInterface) -> None:
         interface.sendText(reply)
 
 def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:  # pylint: disable=unused-argument
-    """called when we (re)connect to the radio"""
+    """Handle a connection established event."""
     print("Connected. Will auto-reply to all messages while running.")
 
 parser = argparse.ArgumentParser(description="Meshtastic Auto-Reply Feature Demo")
