@@ -29,8 +29,6 @@ jobs:
           - container: Containerfile.debian
             autotag: false
             suffix: -debian
-          - container: Containerfile.alpine
-            autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
 
     steps:
       - name: Checkout repository
