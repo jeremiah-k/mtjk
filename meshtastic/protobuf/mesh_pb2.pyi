@@ -19,10 +19,10 @@ import builtins as _builtins
 import sys
 import typing as _typing
 
-if sys.version_info >= (3, 10):
-    from typing import TypeAlias as _TypeAlias
+if sys.version_info >= (3, 11):
+    from typing import TypeAlias as _TypeAlias, Never as _Never
 else:
-    from typing_extensions import TypeAlias as _TypeAlias
+    from typing_extensions import TypeAlias as _TypeAlias, Never as _Never
 
 if sys.version_info >= (3, 13):
     from warnings import deprecated as _deprecated
@@ -598,6 +598,14 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     T_ECHO_CARD: _HardwareModel.ValueType  # 136
     """
     Lilygo T-Echo Card
+    """
+    SEEED_WIO_TRACKER_L2: _HardwareModel.ValueType  # 137
+    """
+    Seeed Tracker L2
+    """
+    CROWPANEL_P4: _HardwareModel.ValueType  # 138
+    """
+    Elecrow CrowPanel Advance P4 models, ESP32-P4 and TFT with SX1262 radio plugin
     """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
@@ -1175,6 +1183,14 @@ Lilygo T-Impulse-Plus
 T_ECHO_CARD: HardwareModel.ValueType  # 136
 """
 Lilygo T-Echo Card
+"""
+SEEED_WIO_TRACKER_L2: HardwareModel.ValueType  # 137
+"""
+Seeed Tracker L2
+"""
+CROWPANEL_P4: HardwareModel.ValueType  # 138
+"""
+Elecrow CrowPanel Advance P4 models, ESP32-P4 and TFT with SX1262 radio plugin
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
@@ -2038,8 +2054,11 @@ class RouteDiscovery(_message.Message):
         route_back: _abc.Iterable[_builtins.int] | None = ...,
         snr_back: _abc.Iterable[_builtins.int] | None = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["route", b"route", "route_back", b"route_back", "snr_back", b"snr_back", "snr_towards", b"snr_towards"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RouteDiscovery: _TypeAlias = RouteDiscovery  # noqa: Y015
 
@@ -2373,8 +2392,11 @@ class KeyVerification(_message.Message):
         hash1: _builtins.bytes = ...,
         hash2: _builtins.bytes = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["hash1", b"hash1", "hash2", b"hash2", "nonce", b"nonce"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___KeyVerification: _TypeAlias = KeyVerification  # noqa: Y015
 
@@ -2511,8 +2533,11 @@ class StoreForwardPlusPlus(_message.Message):
         encapsulated_rxtime: _builtins.int = ...,
         chain_count: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["chain_count", b"chain_count", "commit_hash", b"commit_hash", "encapsulated_from", b"encapsulated_from", "encapsulated_id", b"encapsulated_id", "encapsulated_rxtime", b"encapsulated_rxtime", "encapsulated_to", b"encapsulated_to", "message", b"message", "message_hash", b"message_hash", "root_hash", b"root_hash", "sfpp_message_type", b"sfpp_message_type"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___StoreForwardPlusPlus: _TypeAlias = StoreForwardPlusPlus  # noqa: Y015
 
@@ -2632,8 +2657,11 @@ class RemoteShell(_message.Message):
         last_tx_seq: _builtins.int = ...,
         last_rx_seq: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["ack_seq", b"ack_seq", "cols", b"cols", "flags", b"flags", "last_rx_seq", b"last_rx_seq", "last_tx_seq", b"last_tx_seq", "op", b"op", "payload", b"payload", "rows", b"rows", "seq", b"seq", "session_id", b"session_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RemoteShell: _TypeAlias = RemoteShell  # noqa: Y015
 
@@ -2728,8 +2756,11 @@ class StatusMessage(_message.Message):
         *,
         status: _builtins.str = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["status", b"status"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___StatusMessage: _TypeAlias = StatusMessage  # noqa: Y015
 
@@ -3401,8 +3432,11 @@ class MyNodeInfo(_message.Message):
         firmware_edition: Global___FirmwareEdition.ValueType = ...,
         nodedb_count: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["device_id", b"device_id", "firmware_edition", b"firmware_edition", "min_app_version", b"min_app_version", "my_node_num", b"my_node_num", "nodedb_count", b"nodedb_count", "pio_env", b"pio_env", "reboot_count", b"reboot_count"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___MyNodeInfo: _TypeAlias = MyNodeInfo  # noqa: Y015
 
@@ -3515,8 +3549,11 @@ class LogRecord(_message.Message):
         source: _builtins.str = ...,
         level: Global___LogRecord.Level.ValueType = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["level", b"level", "message", b"message", "source", b"source", "time", b"time"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___LogRecord: _TypeAlias = LogRecord  # noqa: Y015
 
@@ -3544,8 +3581,11 @@ class QueueStatus(_message.Message):
         maxlen: _builtins.int = ...,
         mesh_packet_id: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["free", b"free", "maxlen", b"maxlen", "mesh_packet_id", b"mesh_packet_id", "res", b"res"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___QueueStatus: _TypeAlias = QueueStatus  # noqa: Y015
 
@@ -3840,8 +3880,11 @@ class LockdownStatus(_message.Message):
         valid_until_epoch: _builtins.int = ...,
         backoff_seconds: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["backoff_seconds", b"backoff_seconds", "boots_remaining", b"boots_remaining", "lock_reason", b"lock_reason", "state", b"state", "valid_until_epoch", b"valid_until_epoch"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___LockdownStatus: _TypeAlias = LockdownStatus  # noqa: Y015
 
@@ -3936,8 +3979,11 @@ class KeyVerificationNumberInform(_message.Message):
         remote_longname: _builtins.str = ...,
         security_number: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["nonce", b"nonce", "remote_longname", b"remote_longname", "security_number", b"security_number"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___KeyVerificationNumberInform: _TypeAlias = KeyVerificationNumberInform  # noqa: Y015
 
@@ -3955,8 +4001,11 @@ class KeyVerificationNumberRequest(_message.Message):
         nonce: _builtins.int = ...,
         remote_longname: _builtins.str = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["nonce", b"nonce", "remote_longname", b"remote_longname"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___KeyVerificationNumberRequest: _TypeAlias = KeyVerificationNumberRequest  # noqa: Y015
 
@@ -3980,8 +4029,11 @@ class KeyVerificationFinal(_message.Message):
         isSender: _builtins.bool = ...,
         verification_characters: _builtins.str = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["isSender", b"isSender", "nonce", b"nonce", "remote_longname", b"remote_longname", "verification_characters", b"verification_characters"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___KeyVerificationFinal: _TypeAlias = KeyVerificationFinal  # noqa: Y015
 
@@ -3992,6 +4044,11 @@ class DuplicatedPublicKey(_message.Message):
     def __init__(
         self,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DuplicatedPublicKey: _TypeAlias = DuplicatedPublicKey  # noqa: Y015
 
@@ -4002,6 +4059,11 @@ class LowEntropyKey(_message.Message):
     def __init__(
         self,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___LowEntropyKey: _TypeAlias = LowEntropyKey  # noqa: Y015
 
@@ -4029,8 +4091,11 @@ class FileInfo(_message.Message):
         file_name: _builtins.str = ...,
         size_bytes: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["file_name", b"file_name", "size_bytes", b"size_bytes"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___FileInfo: _TypeAlias = FileInfo  # noqa: Y015
 
@@ -4134,8 +4199,11 @@ class Compressed(_message.Message):
         portnum: _portnums_pb2.PortNum.ValueType = ...,
         data: _builtins.bytes = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["data", b"data", "portnum", b"portnum"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___Compressed: _TypeAlias = Compressed  # noqa: Y015
 
@@ -4177,8 +4245,11 @@ class NeighborInfo(_message.Message):
         node_broadcast_interval_secs: _builtins.int = ...,
         neighbors: _abc.Iterable[Global___Neighbor] | None = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["last_sent_by_id", b"last_sent_by_id", "neighbors", b"neighbors", "node_broadcast_interval_secs", b"node_broadcast_interval_secs", "node_id", b"node_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NeighborInfo: _TypeAlias = NeighborInfo  # noqa: Y015
 
@@ -4220,8 +4291,11 @@ class Neighbor(_message.Message):
         last_rx_time: _builtins.int = ...,
         node_broadcast_interval_secs: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["last_rx_time", b"last_rx_time", "node_broadcast_interval_secs", b"node_broadcast_interval_secs", "node_id", b"node_id", "snr", b"snr"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___Neighbor: _TypeAlias = Neighbor  # noqa: Y015
 
@@ -4310,8 +4384,11 @@ class DeviceMetadata(_message.Message):
         hasPKC: _builtins.bool = ...,
         excluded_modules: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["canShutdown", b"canShutdown", "device_state_version", b"device_state_version", "excluded_modules", b"excluded_modules", "firmware_version", b"firmware_version", "hasBluetooth", b"hasBluetooth", "hasEthernet", b"hasEthernet", "hasPKC", b"hasPKC", "hasRemoteHardware", b"hasRemoteHardware", "hasWifi", b"hasWifi", "hw_model", b"hw_model", "position_flags", b"position_flags", "role", b"role"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeviceMetadata: _TypeAlias = DeviceMetadata  # noqa: Y015
 
@@ -4334,8 +4411,11 @@ class Heartbeat(_message.Message):
         *,
         nonce: _builtins.int = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["nonce", b"nonce"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___Heartbeat: _TypeAlias = Heartbeat  # noqa: Y015
 
@@ -4369,6 +4449,7 @@ class NodeRemoteHardwarePin(_message.Message):
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["node_num", b"node_num", "pin", b"pin"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___NodeRemoteHardwarePin: _TypeAlias = NodeRemoteHardwarePin  # noqa: Y015
 
@@ -4404,8 +4485,11 @@ class ChunkedPayload(_message.Message):
         chunk_index: _builtins.int = ...,
         payload_chunk: _builtins.bytes = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["chunk_count", b"chunk_count", "chunk_index", b"chunk_index", "payload_chunk", b"payload_chunk", "payload_id", b"payload_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___ChunkedPayload: _TypeAlias = ChunkedPayload  # noqa: Y015
 
@@ -4425,8 +4509,11 @@ class resend_chunks(_message.Message):
         *,
         chunks: _abc.Iterable[_builtins.int] | None = ...,
     ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal["chunks", b"chunks"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___resend_chunks: _TypeAlias = resend_chunks  # noqa: Y015
 
