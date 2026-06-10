@@ -607,6 +607,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Elecrow CrowPanel Advance P4 models, ESP32-P4 and TFT with SX1262 radio plugin
     """
+    HELTEC_MESH_TOWER_V2: _HardwareModel.ValueType  # 139
+    """
+    Heltec Mesh Tower V2
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1191,6 +1195,10 @@ Seeed Tracker L2
 CROWPANEL_P4: HardwareModel.ValueType  # 138
 """
 Elecrow CrowPanel Advance P4 models, ESP32-P4 and TFT with SX1262 radio plugin
+"""
+HELTEC_MESH_TOWER_V2: HardwareModel.ValueType  # 139
+"""
+Heltec Mesh Tower V2
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
