@@ -42,8 +42,11 @@ from meshtastic.protobuf import (
     mesh_pb2,
     portnums_pb2,
 )
-from meshtastic.version import get_active_version
-from meshtastic.version import INSTALL_UPGRADE_HINT, PROJECT_DISPLAY_NAME
+from meshtastic.version import (
+    INSTALL_UPGRADE_HINT,
+    PROJECT_DISPLAY_NAME,
+    get_active_version,
+)
 
 argcomplete: ModuleType | None = None
 try:

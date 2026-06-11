@@ -560,7 +560,10 @@ def test_inject_comments_with_braces_do_not_corrupt_nesting():
     """
     result = _inject(
         proto,
-        specific={("Outer", "name"): {"max_size": 20}, ("Outer", "Inner", "value"): {"max_size": 30}},
+        specific={
+            ("Outer", "name"): {"max_size": 20},
+            ("Outer", "Inner", "value"): {"max_size": 30},
+        },
     )
     # Both fields should get options — comments with braces must not break tracking
     assert "name = 1 [(nanopb).max_size = 20]" in result
@@ -578,7 +581,9 @@ def test_inject_map_fields_are_skipped():
           string name = 2;
         }
     """
-    result = _inject(proto, wildcard={"labels": {"max_size": 10}, "name": {"max_size": 20}})
+    result = _inject(
+        proto, wildcard={"labels": {"max_size": 10}, "name": {"max_size": 20}}
+    )
     # map field should NOT have options injected
     assert "labels" in result
     assert "(nanopb)" not in next(
@@ -603,7 +608,10 @@ def test_inject_oneof_fields_get_options():
     """
     result = _inject(
         proto,
-        specific={("Packet", "text"): {"max_size": 200}, ("Packet", "data"): {"max_size": 233}},
+        specific={
+            ("Packet", "text"): {"max_size": 200},
+            ("Packet", "data"): {"max_size": 233},
+        },
     )
     assert "text = 1 [(nanopb).max_size = 200]" in result
     assert "data = 2 [(nanopb).max_size = 233]" in result
