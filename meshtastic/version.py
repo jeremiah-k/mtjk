@@ -16,9 +16,7 @@ PROJECT_DISPLAY_NAME: str = "Meshtastic (mtjk fork)"
 
 # Recommended one-liner for upgrading the package.
 # Uses pipx (recommended for CLI tools) with pip as fallback.
-INSTALL_UPGRADE_HINT: str = (
-    f"pipx upgrade {PACKAGE_NAME}"
-)
+INSTALL_UPGRADE_HINT: str = f"pipx upgrade {PACKAGE_NAME}"
 
 
 def getActiveVersion() -> str:

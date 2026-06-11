@@ -10,14 +10,21 @@ Cleanup/error handling: clear connect failures and graceful Ctrl+C close.
 import argparse
 import time
 from typing import Any
+
 from pubsub import pub
+
+import meshtastic.ble_interface
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
-import meshtastic.ble_interface
 from meshtastic.mesh_interface import MeshInterface
 
 # Type alias for the union of supported interface types
-Interface = meshtastic.serial_interface.SerialInterface | meshtastic.ble_interface.BLEInterface | meshtastic.tcp_interface.TCPInterface
+Interface = (
+    meshtastic.serial_interface.SerialInterface
+    | meshtastic.ble_interface.BLEInterface
+    | meshtastic.tcp_interface.TCPInterface
+)
+
 
 def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
     """Reply to every received packet with some info."""

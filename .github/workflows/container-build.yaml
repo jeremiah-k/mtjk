@@ -1,82 +1,127 @@
-name: Create and publish Container image
+name: Docker Build and Publish
 
 on:
-  push:
-    branches:
-      - master
-      - develop
-    tags:
-      - '*.*.*'
-  pull_request:
-    branches:
-      - master
-      - develop
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push images to registry"
+        required: false
+        type: boolean
+        default: true
+  release:
+    types: [published]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: jeremiah-k/mtjk
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-and-push-image:
+  docker-build:
     runs-on: ubuntu-latest
-    continue-on-error: false
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 45
+
     strategy:
       matrix:
         include:
-          - container: Containerfile.debian
-            autotag: false
-            suffix: -debian
           - container: Containerfile.alpine
-            autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
-    # Container builds only run in the upstream repo (meshtastic/python)
-    if: github.repository == 'meshtastic/python'
+            suffix: ""
+            tag_latest: true
+          - container: Containerfile.debian
+            suffix: -debian
+            tag_latest: false
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up QEMU
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Extract version and build info
+        id: get_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION=$(python3 <<'EOF'
+import tomllib
+from pathlib import Path
+
+data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+print(data["tool"]["poetry"]["version"])
+EOF
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+
+          VCS_REF=$(git rev-parse HEAD)
+          echo "vcs_ref=$VCS_REF" >> "$GITHUB_OUTPUT"
+
+          GIT_SHA=$(git rev-parse --short HEAD)
+          echo "git_sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU for multi-platform builds
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
-      - name: Login to Container registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=edge
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-          flavor: |
-            latest=${{ matrix.autotag }}
-            suffix=${{ matrix.suffix }}
+            type=semver,pattern={{version}}${{ matrix.suffix }},value=${{ steps.get_version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}}${{ matrix.suffix }},value=${{ steps.get_version.outputs.version }}
+            type=semver,pattern={{major}}${{ matrix.suffix }},value=${{ steps.get_version.outputs.version }}
+            type=raw,value=latest${{ matrix.suffix }},enable=${{ steps.get_version.outputs.is_release == 'true' && matrix.tag_latest }}
+            type=raw,value=${{ steps.get_version.outputs.version }}-dev-${{ steps.get_version.outputs.git_sha }}${{ matrix.suffix }},enable=${{ steps.get_version.outputs.is_release == 'false' }}
+          labels: |
+            org.opencontainers.image.title=mtjk
+            org.opencontainers.image.description=Python API and CLI for Meshtastic devices (mtjk fork)
+            org.opencontainers.image.url=https://github.com/jeremiah-k/mtjk
+            org.opencontainers.image.source=https://github.com/jeremiah-k/mtjk
+            org.opencontainers.image.licenses=GPL-3.0-only
+            org.opencontainers.image.version=${{ steps.get_version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.get_version.outputs.vcs_ref }}
+            org.opencontainers.image.created=${{ steps.get_version.outputs.build_date }}
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
-          platforms: linux/amd64,linux/386,linux/arm64
           context: .
           file: ${{ matrix.container }}
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'release' || inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # provenance disabled: avoids creating separate attestation manifests
+          # that complicate image pull references (e.g. ghcr.io/repo:tag
+          # returns a manifest list with both the image and attestation layers)
+          provenance: false

@@ -7,7 +7,7 @@ import time
 from contextlib import suppress
 from typing import Final
 
-from ppk2_api import ppk2_api  # type: ignore[import-untyped]
+from ppk2_api import ppk2_api  # type: ignore[import-untyped,import-not-found]
 
 from .constants import MICROAMPS_PER_MILLIAMP, MILLIVOLTS_PER_VOLT, MIN_SUPPLY_VOLTAGE_V
 from .power_supply import PowerError, PowerSupply
