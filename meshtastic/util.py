@@ -29,7 +29,7 @@ from google.protobuf.message import Message
 
 import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
 from meshtastic.supported_device import SupportedDevice
-from meshtastic.version import DISTRIBUTION_NAME_CANDIDATES, get_active_version
+from meshtastic.version import PACKAGE_NAME, get_active_version
 
 # Keep these module imports available for downstream tests and integrations that
 # historically monkeypatch meshtastic.util.<module> during port discovery.
@@ -1117,12 +1117,12 @@ _DEFAULT_DETECT_WINDOWS_PORT = detectWindowsPort
 
 
 def check_if_newer_version() -> str | None:
-    """Check PyPI for a newer Meshtastic release than the active installation.
+    """Check PyPI for a newer mtjk release than the active installation.
 
-    Attempts to fetch package metadata from PyPI for each distribution name in
-    ``DISTRIBUTION_NAME_CANDIDATES`` and compares the newest discovered version
-    to the currently active version. Returns the PyPI version string when it is
-    newer; returns ``None`` if no newer version is available or if all checks fail.
+    Fetches package metadata from PyPI for ``PACKAGE_NAME`` and compares
+    the latest published version to the currently active version. Returns the
+    PyPI version string when it is newer; returns ``None`` if no newer version
+    is available or if the check fails.
 
     Returns
     -------
@@ -1130,18 +1130,16 @@ def check_if_newer_version() -> str | None:
         The newer PyPI version string if available, `None` otherwise.
     """
     pypi_version: str | None = None
-    for distribution_name in DISTRIBUTION_NAME_CANDIDATES:
-        try:
-            url = f"https://pypi.org/pypi/{distribution_name}/json"
-            data = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT_SECONDS).json()
-            pypi_version = data["info"]["version"]
-            break
-        except Exception:
-            logger.debug(
-                "PyPI version check failed for %s",
-                distribution_name,
-                exc_info=True,
-            )
+    try:
+        url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+        data = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT_SECONDS).json()
+        pypi_version = data["info"]["version"]
+    except Exception:
+        logger.debug(
+            "PyPI version check failed for %s",
+            PACKAGE_NAME,
+            exc_info=True,
+        )
     act_version = get_active_version()
 
     if pypi_version is None:
