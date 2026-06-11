@@ -20,11 +20,13 @@ WORKDIR /build
 COPY pyproject.toml poetry.lock README.md ./
 COPY meshtastic/ meshtastic/
 
-# Build the wheel with Poetry, then install to a relocatable prefix.
-# --find-links prefers the locally built wheel; deps are fetched from PyPI.
-# The container is immutable once built, providing reproducible deployments.
-RUN pip install --no-cache-dir poetry==2.4.1 && \
-    poetry build --format wheel --no-interaction && \
+# Install poetry in an isolated venv so its dependencies (packaging, requests,
+# etc.) do not pollute the system Python.  Without isolation, pip's
+# --prefix=/install skips shared deps it considers "already installed",
+# causing missing modules in the runtime image.
+RUN python -m venv /opt/poetry && \
+    /opt/poetry/bin/pip install --no-cache-dir poetry==2.4.1 && \
+    /opt/poetry/bin/poetry build --format wheel --no-interaction && \
     pip install --no-cache-dir --prefix=/install \
     --find-links=./dist "mtjk[cli,tunnel,analysis]" && \
     pip install --no-cache-dir --prefix=/install \
