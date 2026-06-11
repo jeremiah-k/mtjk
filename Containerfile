@@ -45,7 +45,7 @@ COPY meshtastic/ meshtastic/
 # --no-deps avoids re-resolving; all transitive deps are in Layer 1.
 RUN /opt/poetry/bin/poetry build --format wheel --no-interaction && \
     pip install --no-cache-dir --no-deps --prefix=/install \
-    --find-links=./dist mtjk
+    ./dist/*.whl
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
