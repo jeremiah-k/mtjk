@@ -6,25 +6,46 @@
 # Build stage
 FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
+# git is required for pip VCS installs (e.g. riden) and poetry build metadata.
+# build-essential and libffi-dev provide gcc and ffi.h for compiling native
+# extensions (cffi, msgpack, rapidfuzz) from source when needed.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 
-# Copy dependency files first to leverage Docker layer caching.
-# README.md is required by pyproject.toml for the build.
+# Install poetry and the export plugin in an isolated venv so their
+# dependencies (packaging, requests, etc.) do not pollute the system Python.
+# Without isolation, pip's --prefix=/install skips shared deps it considers
+# "already installed", causing missing modules in the runtime image.
+RUN python -m venv /opt/poetry && \
+    /opt/poetry/bin/pip install --no-cache-dir poetry==2.4.1 poetry-plugin-export
+
+# --- Layer 1: Dependency resolution and install (cached unless lock changes) ---
 COPY pyproject.toml poetry.lock README.md ./
 
-# Export locked requirements from poetry.lock and install to prefix.
-# This ensures reproducible builds with exact dependency versions.
-RUN pip install --no-cache-dir poetry==2.4.1 && \
-    poetry export --format requirements.txt --extras cli --extras tunnel \
-    --without dev --output requirements.txt && \
+# Export all pinned deps (extras + powermon group) to requirements.txt, then
+# install them to the relocatable prefix.  This layer is only rebuilt when
+# pyproject.toml or poetry.lock changes — source edits do NOT invalidate it.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/poetry/bin/poetry export \
+    --format requirements.txt \
+    --extras cli --extras tunnel --extras analysis \
+    --with powermon \
+    --without dev \
+    --without-hashes \
+    --output requirements.txt && \
     pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Copy source code, build the wheel, install it to prefix.
-# --no-index ensures only the locally built wheel is used.
+# --- Layer 2: Source + wheel build (rebuilt on every source change) ---
 COPY meshtastic/ meshtastic/
-RUN poetry build --format wheel --no-interaction && \
-    pip install --no-cache-dir --no-index --no-deps --prefix=/install \
-    --find-links=./dist "mtjk"
+
+# Build the wheel and install it on top of the already-installed deps.
+# --no-deps avoids re-resolving; all transitive deps are in Layer 1.
+RUN /opt/poetry/bin/poetry build --format wheel --no-interaction && \
+    pip install --no-cache-dir --no-deps --prefix=/install \
+    ./dist/*.whl
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
