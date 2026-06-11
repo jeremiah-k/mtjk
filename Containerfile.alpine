@@ -28,7 +28,9 @@ RUN apk add --no-cache libffi && \
 
 COPY --from=builder /tmp/build/dist/*.whl /tmp/
 
-RUN wheel=$(echo /tmp/mtjk-*.whl) && pip install --no-cache-dir "${wheel}[cli,tunnel]" && \
+RUN wheel=$(echo /tmp/mtjk-*.whl) && \
+    [ -f "${wheel}" ] || { echo "ERROR: Wheel file not found"; exit 1; } && \
+    pip install --no-cache-dir "${wheel}[cli,tunnel]" && \
     rm -f /tmp/mtjk-*.whl
 
 COPY "./bin/container-entrypoint.sh" "/init"

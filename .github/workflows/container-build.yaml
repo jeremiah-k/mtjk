@@ -1,7 +1,13 @@
 name: Docker Build and Publish
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push images to registry"
+        required: false
+        type: boolean
+        default: true
   release:
     types: [published]
 
@@ -45,7 +51,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION="$(python3 -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['tool']['poetry']['version'])")"
+          VERSION=$(python3 <<'EOF'
+import tomllib
+from pathlib import Path
+
+data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+print(data["tool"]["poetry"]["version"])
+EOF
+          )
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -103,9 +116,12 @@ jobs:
           context: .
           file: ${{ matrix.container }}
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.event_name == 'release' || inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # provenance disabled: avoids creating separate attestation manifests
+          # that complicate image pull references (e.g. ghcr.io/repo:tag
+          # returns a manifest list with both the image and attestation layers)
           provenance: false
