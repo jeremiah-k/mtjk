@@ -7,31 +7,45 @@
 FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
 # git is required for pip VCS installs (e.g. riden) and poetry build metadata.
-# build-essential provides gcc for compiling native extensions (cffi, msgpack, etc.)
-# on platforms where pre-built wheels are not available (e.g. arm/v7 on Python 3.14).
+# build-essential and libffi-dev provide gcc and ffi.h for compiling native
+# extensions (cffi, msgpack, rapidfuzz) from source when needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git build-essential libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Copy dependency files first to leverage Docker layer caching.
-# README.md is required by pyproject.toml for the build.
+# Install poetry and the export plugin in an isolated venv so their
+# dependencies (packaging, requests, etc.) do not pollute the system Python.
+# Without isolation, pip's --prefix=/install skips shared deps it considers
+# "already installed", causing missing modules in the runtime image.
+RUN python -m venv /opt/poetry && \
+    /opt/poetry/bin/pip install --no-cache-dir poetry==2.4.1 poetry-plugin-export
+
+# --- Layer 1: Dependency resolution and install (cached unless lock changes) ---
 COPY pyproject.toml poetry.lock README.md ./
+
+# Export all pinned deps (extras + powermon group) to requirements.txt, then
+# install them to the relocatable prefix.  This layer is only rebuilt when
+# pyproject.toml or poetry.lock changes — source edits do NOT invalidate it.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/poetry/bin/poetry export \
+    --format requirements.txt \
+    --extras cli --extras tunnel --extras analysis \
+    --with powermon \
+    --without dev \
+    --without-hashes \
+    --output requirements.txt && \
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# --- Layer 2: Source + wheel build (rebuilt on every source change) ---
 COPY meshtastic/ meshtastic/
 
-# Install poetry in an isolated venv so its dependencies (packaging, requests,
-# etc.) do not pollute the system Python.  Without isolation, pip's
-# --prefix=/install skips shared deps it considers "already installed",
-# causing missing modules in the runtime image.
-RUN python -m venv /opt/poetry && \
-    /opt/poetry/bin/pip install --no-cache-dir poetry==2.4.1 && \
-    /opt/poetry/bin/poetry build --format wheel --no-interaction && \
-    pip install --no-cache-dir --prefix=/install \
-    --find-links=./dist "mtjk[cli,tunnel,analysis]" && \
-    pip install --no-cache-dir --prefix=/install \
-    riden@git+https://github.com/geeksville/riden.git@1.2.1 \
-    ppk2-api parse pyarrow platformdirs
+# Build the wheel and install it on top of the already-installed deps.
+# --no-deps avoids re-resolving; all transitive deps are in Layer 1.
+RUN /opt/poetry/bin/poetry build --format wheel --no-interaction && \
+    pip install --no-cache-dir --no-deps --prefix=/install \
+    --find-links=./dist mtjk
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
