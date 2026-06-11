@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Manual dispatch builds from develop; releases build from the release tag.
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'develop' || github.ref }}
 
       - name: Extract version and build info
         id: get_version
