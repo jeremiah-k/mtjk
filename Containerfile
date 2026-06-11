@@ -7,7 +7,10 @@
 FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
 # git is required for pip VCS installs (e.g. riden) and poetry build metadata.
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
+# build-essential provides gcc for compiling native extensions (cffi, msgpack, etc.)
+# on platforms where pre-built wheels are not available (e.g. arm/v7 on Python 3.14).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
