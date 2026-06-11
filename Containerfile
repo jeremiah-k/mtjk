@@ -26,8 +26,7 @@ RUN pip install --no-cache-dir poetry==2.4.1 && \
     --find-links=./dist "mtjk[cli,tunnel,analysis]" && \
     pip install --no-cache-dir --prefix=/install \
     riden@git+https://github.com/geeksville/riden.git@1.2.1 \
-    ppk2-api parse pyarrow platformdirs \
-    jupyterlab matplotlib ipympl ipywidgets jupyterlab-widgets
+    ppk2-api parse pyarrow platformdirs
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
