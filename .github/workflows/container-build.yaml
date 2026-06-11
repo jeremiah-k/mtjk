@@ -55,7 +55,7 @@ jobs:
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "should_tag_latest=true" >> "$GITHUB_OUTPUT"
           else
-            BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            BRANCH_NAME="$(printf '%s' "$GITHUB_REF_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')"
             echo "docker_tag=$VERSION-dev-$BRANCH_NAME-$GIT_SHA" >> "$GITHUB_OUTPUT"
             echo "is_release=false" >> "$GITHUB_OUTPUT"
             echo "should_tag_latest=false" >> "$GITHUB_OUTPUT"
@@ -101,6 +101,7 @@ jobs:
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           context: .
+          file: ./Containerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}

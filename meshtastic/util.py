@@ -1132,7 +1132,9 @@ def check_if_newer_version() -> str | None:
     pypi_version: str | None = None
     try:
         url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
-        data = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT_SECONDS).json()
+        response = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        data = response.json()
         pypi_version = data["info"]["version"]
     except Exception:
         logger.debug(

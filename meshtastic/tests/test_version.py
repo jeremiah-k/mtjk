@@ -29,6 +29,11 @@ def _make_fake_response(version: str) -> ResponseLike:
     class _FakeResponse:
         """Stub response payload for the PyPI version endpoint."""
 
+        @staticmethod
+        def raise_for_status() -> None:
+            """No-op: fake responses are always successful."""
+            return
+
         def json(self) -> dict[str, dict[str, str]]:
             """Return fake PyPI response JSON."""
             return {"info": {"version": version}}

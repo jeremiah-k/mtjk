@@ -8,17 +8,23 @@ FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
 WORKDIR /build
 
-# Copy only what is needed to build the wheel.
-# Caching: poetry.lock changes invalidate the poetry build layer.
-COPY pyproject.toml poetry.lock ./
-COPY meshtastic/ meshtastic/
+# Copy dependency files first to leverage Docker layer caching.
+# README.md is required by pyproject.toml for the build.
+COPY pyproject.toml poetry.lock README.md ./
 
-# Build the wheel with Poetry, then install to a relocatable prefix.
-# Using --prefix=/install decouples the install from pythonX.Y site-packages paths.
+# Export locked requirements from poetry.lock and install to prefix.
+# This ensures reproducible builds with exact dependency versions.
 RUN pip install --no-cache-dir poetry==2.4.1 && \
-    poetry build --format wheel --no-interaction && \
-    pip install --no-cache-dir --prefix=/install \
-    --find-links=./dist "mtjk[cli,tunnel]"
+    poetry export --format requirements.txt --extras cli --extras tunnel \
+    --without dev --output requirements.txt && \
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Copy source code, build the wheel, install it to prefix.
+# --no-index ensures only the locally built wheel is used.
+COPY meshtastic/ meshtastic/
+RUN poetry build --format wheel --no-interaction && \
+    pip install --no-cache-dir --no-index --no-deps --prefix=/install \
+    --find-links=./dist "mtjk"
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
