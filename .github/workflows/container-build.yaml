@@ -31,8 +31,8 @@ jobs:
             suffix: -debian
           - container: Containerfile.alpine
             autotag: ${{ startsWith(github.ref, 'refs/heads/') && 'auto' || 'true' }}
-    # Container builds only run in the upstream repo (meshtastic/python)
-    if: github.repository == 'meshtastic/python'
+    # Container builds run in upstream (meshtastic/python) and this fork (jeremiah-k/mtjk)
+    if: github.repository == 'meshtastic/python' || github.repository == 'jeremiah-k/mtjk'
 
     steps:
       - name: Checkout repository
@@ -80,3 +80,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

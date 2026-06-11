@@ -5,24 +5,33 @@
 ARG TARGET_VERSION="3.11"
 ARG TARGET_ARCH="library"
 
+FROM docker.io/${TARGET_ARCH}/python:${TARGET_VERSION} AS builder
+
+WORKDIR /tmp/build
+
+COPY pyproject.toml poetry.lock /tmp/build/
+
+RUN pip install --no-cache-dir 'poetry==2.4.1' && \
+    poetry config virtualenvs.create false && \
+    poetry install --without dev --extras cli --extras tunnel --no-interaction --no-ansi --no-root
+
+COPY . /tmp/build/
+
+RUN poetry build --format wheel --no-interaction
+
 FROM docker.io/${TARGET_ARCH}/python:${TARGET_VERSION}
 
-WORKDIR /usr/local/app
+RUN useradd --system --create-home --home-dir /home/meshtastic meshtastic
 
-COPY . /usr/local/app
+COPY --from=builder /tmp/build/dist/*.whl /tmp/
 
-RUN _poetry_venv_dir="$(mktemp -d -p "${TMPDIR:-/tmp}" 'poetry_venv.XXXXXX')" && \
-    python -m 'venv' "${_poetry_venv_dir}" && \
-    "${_poetry_venv_dir}/bin/pip" install 'poetry' && \
-    "${_poetry_venv_dir}/bin/poetry" config --local virtualenvs.create false && \
-    "${_poetry_venv_dir}/bin/poetry" install --no-directory && \
-    rm -f -r "${_poetry_venv_dir}" && \
-    rm -f -r "/usr/local/app"
+RUN wheel=$(echo /tmp/mtjk-*.whl) && pip install --no-cache-dir "${wheel}[cli,tunnel]" && \
+    rm -f /tmp/mtjk-*.whl
 
 COPY "./bin/container-entrypoint.sh" "/init"
+RUN chmod 0755 /init
 
-RUN groupadd --system meshtastic && useradd --system --gid meshtastic --create-home meshtastic && \
-    chown meshtastic:meshtastic /init
+WORKDIR /home/meshtastic
 USER meshtastic
 
 ENTRYPOINT [ "/init" ]
