@@ -52,12 +52,12 @@ jobs:
           set -euo pipefail
 
           VERSION=$(python3 -c "
-import tomllib
-from pathlib import Path
+            import tomllib
+            from pathlib import Path
 
-data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
-print(data['tool']['poetry']['version'])
-")
+            data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
+            print(data['tool']['poetry']['version'])
+          ")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
