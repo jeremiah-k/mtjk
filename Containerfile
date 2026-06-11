@@ -6,6 +6,10 @@
 # Build stage
 FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
+# git is required for pip VCS installs (e.g. riden) and poetry build metadata.
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 
 # Copy dependency files first to leverage Docker layer caching.
