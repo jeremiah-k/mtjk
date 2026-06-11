@@ -1,6 +1,5 @@
 *
-!Containerfile*
-!Dockerfile
+!Containerfile
 !README.md
 !LICENSE.md
 !bin/container-entrypoint.sh

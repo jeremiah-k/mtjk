@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-import parse  # type: ignore[import-untyped,import-not-found]
+import parse  # type: ignore[import-untyped]
 import platformdirs
 import pyarrow as pa
 from pubsub import pub

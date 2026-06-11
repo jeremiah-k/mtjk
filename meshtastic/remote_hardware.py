@@ -409,7 +409,7 @@ class RemoteHardwareClient:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             mesh_interface_error = _get_mesh_interface_error()
             raise mesh_interface_error(error_message)
-        return cast(int, value)
+        return value
 
     def writeGPIOs(
         self, nodeid: int | str, mask: int, vals: int
