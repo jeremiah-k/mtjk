@@ -29,6 +29,11 @@ def _make_fake_response(version: str) -> ResponseLike:
     class _FakeResponse:
         """Stub response payload for the PyPI version endpoint."""
 
+        @staticmethod
+        def raise_for_status() -> None:
+            """No-op: fake responses are always successful."""
+            return
+
         def json(self) -> dict[str, dict[str, str]]:
             """Return fake PyPI response JSON."""
             return {"info": {"version": version}}
@@ -105,33 +110,41 @@ def test_get_active_version_returns_unknown_when_not_installed(
 
 
 @pytest.mark.unit
-def test_check_if_newer_version_falls_back_to_second_distribution(
+def test_check_if_newer_version_checks_only_mtjk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """PyPI checks should fall back to the next configured distribution name."""
+    """PyPI checks should only query the fork's own package name."""
 
     calls: list[str] = []
 
     def _fake_get(url: str, timeout: float) -> object:
         _ = timeout
         calls.append(url)
-        if "/mtjk/" in url:
-            raise PackageNotPublishedError
         return _make_fake_response("2.7.9")
 
-    monkeypatch.setattr(
-        util_module,
-        "DISTRIBUTION_NAME_CANDIDATES",
-        ("mtjk", "meshtastic"),
-    )
     monkeypatch.setattr("meshtastic.util.requests.get", _fake_get)
     monkeypatch.setattr(version_module, "version", _fake_installed_mtjk_version)
 
     assert util_module.check_if_newer_version() == "2.7.9"
     assert calls == [
         "https://pypi.org/pypi/mtjk/json",
-        "https://pypi.org/pypi/meshtastic/json",
     ]
+
+
+@pytest.mark.unit
+def test_check_if_newer_version_returns_none_on_pypi_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PyPI checks should return None when the fork package is not found."""
+
+    def _fake_get(url: str, timeout: float) -> object:
+        _ = (url, timeout)
+        raise PackageNotPublishedError
+
+    monkeypatch.setattr("meshtastic.util.requests.get", _fake_get)
+    monkeypatch.setattr(version_module, "version", _fake_installed_mtjk_version)
+
+    assert util_module.check_if_newer_version() is None
 
 
 @pytest.mark.unit
@@ -144,11 +157,6 @@ def test_check_if_newer_version_returns_none_when_not_newer(
         _ = (url, timeout)
         return _make_fake_response("2.7.8")
 
-    monkeypatch.setattr(
-        util_module,
-        "DISTRIBUTION_NAME_CANDIDATES",
-        ("mtjk",),
-    )
     monkeypatch.setattr("meshtastic.util.requests.get", _fake_get)
     monkeypatch.setattr(version_module, "version", _fake_installed_mtjk_version)
 
