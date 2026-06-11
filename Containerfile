@@ -11,20 +11,19 @@ WORKDIR /build
 # Copy dependency files first to leverage Docker layer caching.
 # README.md is required by pyproject.toml for the build.
 COPY pyproject.toml poetry.lock README.md ./
-
-# Export locked requirements from poetry.lock and install to prefix.
-# This ensures reproducible builds with exact dependency versions.
-RUN pip install --no-cache-dir poetry==2.4.1 && \
-    poetry export --format requirements.txt --extras cli --extras tunnel \
-    --without dev --output requirements.txt && \
-    pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Copy source code, build the wheel, install it to prefix.
-# --no-index ensures only the locally built wheel is used.
 COPY meshtastic/ meshtastic/
-RUN poetry build --format wheel --no-interaction && \
-    pip install --no-cache-dir --no-index --no-deps --prefix=/install \
-    --find-links=./dist "mtjk"
+
+# Build the wheel with Poetry, then install to a relocatable prefix.
+# --find-links prefers the locally built wheel; deps are fetched from PyPI.
+# The container is immutable once built, providing reproducible deployments.
+RUN pip install --no-cache-dir poetry==2.4.1 && \
+    poetry build --format wheel --no-interaction && \
+    pip install --no-cache-dir --prefix=/install \
+    --find-links=./dist "mtjk[cli,tunnel,analysis]" && \
+    pip install --no-cache-dir --prefix=/install \
+    riden@git+https://github.com/geeksville/riden.git@1.2.1 \
+    ppk2-api parse pyarrow platformdirs \
+    jupyterlab matplotlib ipympl ipywidgets jupyterlab-widgets
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm
