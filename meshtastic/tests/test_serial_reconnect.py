@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ..__main__ import (
+    _is_serial_reconnect_client,
     _serial_should_reconnect,
     _serial_transport_is_live,
     _poll_serial_reconnect,
@@ -342,3 +343,44 @@ def test_close_suppresses_termios_error() -> None:
     with contextlib.suppress(OSError, ValueError, *_TERMIOS_ERRORS):
         raise termios_exc("Input/output error")
     # If we reach here, the suppress worked
+
+
+# ---------------------------------------------------------------------------
+# _is_serial_reconnect_client
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_serial_detection_for_real_serial_interface() -> None:
+    """_is_serial_reconnect_client returns True for a real SerialInterface."""
+
+    from ..serial_interface import SerialInterface
+
+    # Create a minimal SerialInterface without opening a port
+    iface = SerialInterface.__new__(SerialInterface)
+    assert _is_serial_reconnect_client(iface) is True
+
+
+@pytest.mark.unit
+def test_serial_detection_false_for_mesh_interface() -> None:
+    """_is_serial_reconnect_client returns False for a plain MeshInterface."""
+
+    with MeshInterface(noProto=True) as iface:
+        assert _is_serial_reconnect_client(iface) is False
+
+
+@pytest.mark.unit
+def test_serial_detection_false_for_mock() -> None:
+    """_is_serial_reconnect_client returns False for a MagicMock."""
+
+    mock_client = MagicMock()
+    assert _is_serial_reconnect_client(mock_client) is False
+
+
+@pytest.mark.unit
+def test_transport_dead_when_rx_thread_missing() -> None:
+    """Transport is dead when _rxThread is None (stricter check)."""
+
+    client = _make_serial_mock(stream_open=True, reader_alive=True)
+    client._rxThread = None  # simulate missing reader
+    assert _serial_transport_is_live(client) is False

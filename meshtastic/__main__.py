@@ -3231,7 +3231,7 @@ def common() -> None:
                         while True:
                             # Detect serial disconnect and attempt reconnect
                             # so --noproto/--listen survives device reboots
-                            if getattr(client, "devPath", None) is not None:
+                            if _is_serial_reconnect_client(client):
                                 needs_reconnect = _serial_should_reconnect(client)
                                 if needs_reconnect:
                                     _poll_serial_reconnect(client)
@@ -3963,6 +3963,18 @@ def addRemoteAdminArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     return parser
 
 
+def _is_serial_reconnect_client(client: MeshInterface) -> bool:
+    """Return True if *client* is a real SerialInterface that supports reconnect.
+
+    Uses a guarded isinstance check that is safe even when tests patch
+    ``SerialInterface`` with a MagicMock. Does **not** rely on
+    ``devPath`` because auto-detected devices intentionally reset
+    ``devPath = None`` during reconnect so port detection can re-run.
+    """
+    serial_cls = getattr(meshtastic.serial_interface, "SerialInterface", None)
+    return isinstance(serial_cls, type) and isinstance(client, serial_cls)
+
+
 def _serial_transport_is_live(client: MeshInterface) -> bool:
     """Check if a serial interface has a live transport (stream open, reader alive).
 
@@ -3974,7 +3986,7 @@ def _serial_transport_is_live(client: MeshInterface) -> bool:
     if stream is None or not getattr(stream, "is_open", True):
         return False
     rx_thread = getattr(client, "_rxThread", None)
-    if rx_thread is not None and not rx_thread.is_alive():
+    if rx_thread is None or not rx_thread.is_alive():
         return False
     return True
 
@@ -3998,7 +4010,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
     Catches connection-related errors and retryable MeshInterfaceError.
     Waits for the old reader thread to exit before reconnecting.
     """
-    logger.info("Serial connection lost; attempting reconnect...")
+    logger.debug("Serial reconnect poll: transport is down, attempting connect...")
 
     # Wait for the old reader thread to exit before reconnecting
     rx_thread = getattr(client, "_rxThread", None)
