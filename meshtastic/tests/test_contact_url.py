@@ -337,11 +337,11 @@ def test_addContactURL_raises_for_invalid_url() -> None:
 
 @pytest.mark.unit
 def test_addContactURL_raises_for_empty_fragment() -> None:
-    """AddContactURL should raise for a URL with an empty /# fragment."""
+    """AddContactURL should raise for a URL with an empty fragment."""
 
     anode, _ = _make_mocked_node(12345)
 
-    with pytest.raises(MeshInterface.MeshInterfaceError, match="empty fragment"):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="Invalid URL"):
         anode.addContactURL("https://meshtastic.org/v/#")
 
 
@@ -365,3 +365,106 @@ def test_addContactURL_raises_for_oversized_payload() -> None:
     huge_fragment = "A" * 5000
     with pytest.raises(MeshInterface.MeshInterfaceError, match="payload too large"):
         anode.addContactURL(f"https://meshtastic.org/v/#{huge_fragment}")
+
+
+@pytest.mark.unit
+def test_addContactURL_rejects_broadcast_node_num() -> None:
+    """AddContactURL should reject a contact with broadcast node number."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    # Craft a SharedContact with node_num = 0xFFFFFFFF (broadcast)
+    import base64 as b64mod
+
+    from ..protobuf import admin_pb2
+
+    contact = admin_pb2.SharedContact()
+    contact.node_num = 0xFFFFFFFF
+    contact.user.id = "!ffffffff"
+    data = contact.SerializeToString()
+    encoded = b64mod.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+    with pytest.raises(
+        MeshInterface.MeshInterfaceError, match="Invalid node number"
+    ):
+        anode.addContactURL(f"https://meshtastic.org/v/#{encoded}")
+
+
+@pytest.mark.unit
+def test_addContactURL_rejects_zero_node_num() -> None:
+    """AddContactURL should reject a contact with node_num=0."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    import base64 as b64mod
+
+    from ..protobuf import admin_pb2
+
+    contact = admin_pb2.SharedContact()
+    contact.node_num = 0
+    contact.user.id = "!00000000"
+    data = contact.SerializeToString()
+    encoded = b64mod.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+    with pytest.raises(
+        MeshInterface.MeshInterfaceError, match="Invalid node number"
+    ):
+        anode.addContactURL(f"https://meshtastic.org/v/#{encoded}")
+
+
+@pytest.mark.unit
+def test_addContactURL_rejects_missing_user() -> None:
+    """AddContactURL should reject a contact with no user data."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    import base64 as b64mod
+
+    from ..protobuf import admin_pb2
+
+    contact = admin_pb2.SharedContact()
+    contact.node_num = 12345
+    # No user field set
+    data = contact.SerializeToString()
+    encoded = b64mod.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="no user data"):
+        anode.addContactURL(f"https://meshtastic.org/v/#{encoded}")
+
+
+@pytest.mark.unit
+def test_addContactURL_rejects_empty_user_id() -> None:
+    """AddContactURL should reject a contact with empty user ID."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    import base64 as b64mod
+
+    from ..protobuf import admin_pb2
+
+    contact = admin_pb2.SharedContact()
+    contact.node_num = 12345
+    contact.user.id = ""
+    data = contact.SerializeToString()
+    encoded = b64mod.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="no user ID"):
+        anode.addContactURL(f"https://meshtastic.org/v/#{encoded}")
+
+
+@pytest.mark.unit
+def test_addContactURL_accepts_non_meshtastic_host() -> None:
+    """AddContactURL should extract fragment from any URL containing a fragment."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    # Generate a valid contact URL using getContactURL first
+    node_data = {
+        "num": 12345,
+        "user": {"id": "!00003039", "longName": "Test", "shortName": "T"},
+    }
+    anode2, _ = _make_mocked_node(12345, node_data)
+    url = anode2.getContactURL(12345)
+    fragment = url.split("/#")[-1]
+
+    # Use a different host — should still work (fragment is self-contained)
+    alt_url = f"https://example.com/p/#{fragment}"
+    # Should not raise
+    with patch.object(anode, "_send_admin"):
+        anode.addContactURL(alt_url)

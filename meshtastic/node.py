@@ -11,6 +11,7 @@ import logging
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, Sequence, TypeVar
+from urllib.parse import urlparse
 
 import google.protobuf.message
 from google.protobuf.descriptor import FieldDescriptor
@@ -99,6 +100,13 @@ MAX_SHORT_NAME_LEN = _MAX_SHORT_NAME_LEN
 
 # Cap for contact URL payload size (a legitimate SharedContact is <1KB).
 _MAX_CONTACT_URL_PAYLOAD = 4096
+
+
+def _decode_node_bytes_field(value: str | bytes) -> bytes:
+    """Decode a NodeDB byte field that may be stored as base64 string or raw bytes."""
+    if isinstance(value, bytes):
+        return value
+    return base64.b64decode(value, validate=True)
 
 
 class Node:  # pylint: disable=too-many-instance-attributes
@@ -919,8 +927,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
             If the node is not in the local NodeDB or has no user data.
         """
         node_num = toNodeNum(node_id)
-        nodes_by_num = self.iface.nodesByNum
-        node = nodes_by_num.get(node_num) if nodes_by_num else None
+
+        def _read_node() -> dict[str, Any] | None:
+            nodes_by_num = self.iface.nodesByNum
+            return nodes_by_num.get(node_num) if nodes_by_num else None
+
+        node = self._execute_with_node_db_lock(_read_node)
         if not node or not node.get("user"):
             self._raise_interface_error(f"Node {node_id} not found in NodeDB")
 
@@ -931,7 +943,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if u.get("id"):
             contact.user.id = u["id"]
         if u.get("macaddr"):
-            contact.user.macaddr = base64.b64decode(u["macaddr"])
+            try:
+                contact.user.macaddr = _decode_node_bytes_field(u["macaddr"])
+            except (binascii.Error, ValueError) as exc:
+                self._raise_interface_error(
+                    f"Invalid macaddr in NodeDB for {node_id}: {exc}"
+                )
         if u.get("longName"):
             contact.user.long_name = u["longName"]
         if u.get("shortName"):
@@ -955,7 +972,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
             elif isinstance(role, int):
                 contact.user.role = role  # type: ignore[assignment]
         if u.get("publicKey"):
-            contact.user.public_key = base64.b64decode(u["publicKey"])
+            try:
+                contact.user.public_key = _decode_node_bytes_field(u["publicKey"])
+            except (binascii.Error, ValueError) as exc:
+                self._raise_interface_error(
+                    f"Invalid publicKey in NodeDB for {node_id}: {exc}"
+                )
         if u.get("isLicensed"):
             contact.user.is_licensed = u["isLicensed"]
         if u.get("isUnmessagable") is not None:
@@ -986,12 +1008,14 @@ class Node:  # pylint: disable=too-many-instance-attributes
         Raises
         ------
         MeshInterfaceError
-            If the URL is malformed or cannot be parsed.
+            If the URL is malformed, cannot be parsed, or yields an invalid contact.
         """
-        split_url = url.split("/#")
-        if len(split_url) == 1:
+        parsed = urlparse(url)
+        fragment = parsed.fragment
+        if not fragment:
             self._raise_interface_error(f"Invalid URL '{url}'")
-        b64 = split_url[-1]
+
+        b64 = fragment
         if not b64:
             self._raise_interface_error("Contact URL has empty fragment")
 
@@ -1007,11 +1031,21 @@ class Node:  # pylint: disable=too-many-instance-attributes
             b64 += "=" * (4 - missing_padding)
 
         try:
-            decoded = base64.urlsafe_b64decode(b64)
+            decoded = base64.b64decode(b64, altchars=b"-_", validate=True)
             contact = admin_pb2.SharedContact()
             contact.ParseFromString(decoded)
         except (binascii.Error, google.protobuf.message.DecodeError, ValueError) as exc:
             self._raise_interface_error(f"Failed to parse contact URL: {exc}")
+
+        # Validate decoded contact before sending
+        if contact.node_num == 0 or contact.node_num >= 0xFFFFFFFF:
+            self._raise_interface_error(
+                f"Invalid node number in contact: {contact.node_num}"
+            )
+        if not contact.HasField("user"):
+            self._raise_interface_error("Contact URL contains no user data")
+        if not contact.user.id:
+            self._raise_interface_error("Contact URL contains no user ID")
 
         self.ensureSessionKey()
 

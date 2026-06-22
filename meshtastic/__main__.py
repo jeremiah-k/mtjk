@@ -2446,7 +2446,7 @@ def onConnected(interface: MeshInterface) -> None:
 
         if args.contact_qr:
             closeNow = True
-            url = interface.getNode(args.dest, False, **getNode_kwargs).getContactURL(
+            url = interface.localNode.getContactURL(
                 args.contact_qr,
                 should_ignore=args.contact_ignore,
                 manually_verified=args.contact_verified,
@@ -2984,6 +2984,10 @@ def common() -> None:
     # Validate that --quiet is not used with --debug, --listen, or --debuglib
     if args.quiet and (args.debug or args.listen or args.debuglib):
         parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
+
+    # Contact modifier flags require --contact-qr
+    if (args.contact_verified or args.contact_ignore) and not args.contact_qr:
+        parser.error("--contact-verified and --contact-ignore require --contact-qr")
 
     if args.quiet:
         log_level = logging.WARNING
