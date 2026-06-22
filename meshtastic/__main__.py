@@ -3232,16 +3232,8 @@ def common() -> None:
                 ):  # loop until someone presses ctrlc
                     try:
                         while True:
-                            # Detect serial disconnect and attempt reconnect
-                            # so --noproto/--listen survives device reboots
-                            if _is_serial_reconnect_client(client):
-                                needs_reconnect = _serial_should_reconnect(client)
-                                if needs_reconnect:
-                                    _poll_serial_reconnect(client)
-                                    continue  # skip main-loop sleep; reconnect timing is self-contained
-                                time.sleep(SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS)
-                            else:
-                                time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
+                            if _listen_loop_poll_once(client):
+                                continue
                     except KeyboardInterrupt:
                         logger.info("Exiting due to keyboard interrupt")
 
@@ -4033,17 +4025,42 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
         else:
             logger.debug("Reconnect returned but interface is not live yet.")
             time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
-    except (ConnectionError, OSError, TimeoutError) as exc:
-        logger.debug("Reconnect attempt failed: %s", exc)
-        time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
-    except MeshInterface.MeshInterfaceError as exc:
-        if hasattr(client, "_is_retryable_connect_error") and (
-            client._is_retryable_connect_error(exc)  # type: ignore[union-attr]
-        ):
+    except Exception as exc:
+        # Route all exceptions through the serial retry classifier when available.
+        # Unconditionally retry OS/connection errors; conditionally retry
+        # MeshInterfaceError based on _is_retryable_connect_error().
+        if isinstance(exc, (ConnectionError, OSError, TimeoutError)):
+            retryable = True
+        elif isinstance(exc, MeshInterface.MeshInterfaceError):
+            retryable = bool(
+                hasattr(client, "_is_retryable_connect_error")
+                and client._is_retryable_connect_error(exc)  # type: ignore[union-attr]
+            )
+        else:
+            retryable = False
+
+        if retryable:
             logger.debug("Reconnect attempt failed (retryable): %s", exc)
             time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
         else:
             raise
+
+
+def _listen_loop_poll_once(client: MeshInterface) -> bool:
+    """Execute one iteration of the persistent listen loop.
+
+    Returns True if the caller should ``continue`` immediately (reconnect
+    was attempted, timing is self-contained), False if the caller should
+    proceed to the next iteration normally (sleep already handled).
+    """
+    if _is_serial_reconnect_client(client):
+        if _serial_should_reconnect(client):
+            _poll_serial_reconnect(client)
+            return True  # reconnect timing is self-contained, skip main sleep
+        time.sleep(SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS)
+    else:
+        time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
+    return False
 
 
 # ---------------------------------------------------------------------------
