@@ -1236,6 +1236,8 @@ def _to_node_num(node_id: int | str) -> int:
     s = str(node_id).strip()
     if s.startswith("!"):
         s = s[1:]
+        if not s.lower().startswith("0x"):
+            s = "0x" + s
     if s.lower().startswith("0x"):
         return int(s, 16)
     try:
