@@ -357,13 +357,15 @@ def test_addContactURL_raises_for_malformed_b64() -> None:
 
 @pytest.mark.unit
 def test_addContactURL_raises_for_oversized_payload() -> None:
-    """AddContactURL should reject decoded payloads exceeding the size cap."""
+    """AddContactURL should reject oversized fragments before decoding."""
 
     anode, _ = _make_mocked_node(12345)
 
-    # Craft a fragment whose decoded size exceeds _MAX_CONTACT_URL_PAYLOAD
-    huge_fragment = "A" * 6000  # decodes to ~4500 bytes
-    with pytest.raises(MeshInterface.MeshInterfaceError, match="payload too large"):
+    # Craft a fragment whose encoded length exceeds the pre-decode guard
+    huge_fragment = "A" * 6000
+    with pytest.raises(
+        MeshInterface.MeshInterfaceError, match="fragment too large"
+    ):
         anode.addContactURL(f"https://meshtastic.org/v/#{huge_fragment}")
 
 
@@ -449,8 +451,12 @@ def test_addContactURL_rejects_empty_user_id() -> None:
 
 
 @pytest.mark.unit
-def test_addContactURL_accepts_non_meshtastic_host() -> None:
-    """AddContactURL should extract fragment from any URL containing a fragment."""
+def test_addContactURL_accepts_compatible_fragment_from_any_host() -> None:
+    """AddContactURL intentionally accepts any URL with a compatible contact fragment.
+
+    The base64 payload is self-contained, so the host/path does not affect parsing.
+    This preserves compatibility with alternative sharing frontends.
+    """
 
     anode, _ = _make_mocked_node(12345)
 
@@ -468,3 +474,104 @@ def test_addContactURL_accepts_non_meshtastic_host() -> None:
     # Should not raise
     with patch.object(anode, "_send_admin"):
         anode.addContactURL(alt_url)
+
+
+@pytest.mark.unit
+def test_getContactURL_rejects_user_without_id() -> None:
+    """GetContactURL should raise when node has user data but no user ID."""
+
+    anode, _ = _make_mocked_node(12345, {"num": 12345, "user": {"longName": "No ID"}})
+
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="no usable user ID"):
+        anode.getContactURL(12345)
+
+
+@pytest.mark.unit
+def test_getContactURL_silently_drops_unknown_hw_model() -> None:
+    """Unknown hwModel strings from newer firmware should not block contact generation."""
+
+    node_data = {
+        "num": 12345,
+        "user": {
+            "id": "!00003039",
+            "longName": "Future",
+            "shortName": "F",
+            "hwModel": "UNRELEASED_BOARD_2027",
+        },
+    }
+    anode, _ = _make_mocked_node(12345, node_data)
+
+    # Should not raise; URL should still be generated with core fields
+    url = anode.getContactURL(12345)
+    assert url.startswith("https://meshtastic.org/v/#")
+
+
+@pytest.mark.unit
+def test_getContactURL_silently_drops_unknown_role() -> None:
+    """Unknown role strings from newer firmware should not block contact generation."""
+
+    node_data = {
+        "num": 12345,
+        "user": {
+            "id": "!00003039",
+            "longName": "Future",
+            "shortName": "F",
+            "role": "SATELLITE_RELAY",
+        },
+    }
+    anode, _ = _make_mocked_node(12345, node_data)
+
+    url = anode.getContactURL(12345)
+    assert url.startswith("https://meshtastic.org/v/#")
+
+
+@pytest.mark.unit
+def test_addContactURL_remote_waits_for_ack() -> None:
+    """Remote addContactURL should wait for ACK/NAK after sending."""
+
+    # Generate a valid contact URL first
+    node_data = {
+        "num": 12345,
+        "user": {"id": "!00003039", "longName": "Test", "shortName": "T"},
+    }
+    gen_node, _ = _make_mocked_node(12345, node_data)
+    valid_url = gen_node.getContactURL(12345)
+
+    anode, iface = _make_mocked_node(12345)
+    iface.localNode = MagicMock(autospec=Node)  # make anode look remote
+    anode.ensureSessionKey = MagicMock()
+
+    sent_packet = MagicMock()
+    with (
+        patch.object(anode, "_send_admin", return_value=sent_packet),
+        patch.object(iface, "waitForAckNak") as mock_wait,
+    ):
+        anode.addContactURL(valid_url)
+
+    mock_wait.assert_called_once()
+
+
+@pytest.mark.unit
+def test_addContactURL_local_does_not_wait_for_ack() -> None:
+    """Local addContactURL should not wait for ACK/NAK."""
+
+    # Generate a valid contact URL first
+    node_data = {
+        "num": 12345,
+        "user": {"id": "!00003039", "longName": "Test", "shortName": "T"},
+    }
+    gen_node, _ = _make_mocked_node(12345, node_data)
+    valid_url = gen_node.getContactURL(12345)
+
+    anode, iface = _make_mocked_node(12345)
+    iface.localNode = anode  # make this the local node
+    anode.ensureSessionKey = MagicMock()
+
+    sent_packet = MagicMock()
+    with (
+        patch.object(anode, "_send_admin", return_value=sent_packet),
+        patch.object(iface, "waitForAckNak") as mock_wait,
+    ):
+        anode.addContactURL(valid_url)
+
+    mock_wait.assert_not_called()

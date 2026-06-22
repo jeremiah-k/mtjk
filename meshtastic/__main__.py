@@ -2020,6 +2020,7 @@ def onConnected(interface: MeshInterface) -> None:
         if args.add_contact:
             closeNow = True
             waitForAckNak = True
+            skip_ack_wait = True  # addContactURL() owns the remote ACK wait
             interface.getNode(args.dest, False, **getNode_kwargs).addContactURL(
                 args.add_contact
             )
@@ -3926,8 +3927,9 @@ def addRemoteAdminArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
 
     group.add_argument(
         "--add-contact",
-        help="Add a contact (User) to the NodeDB from a shareable URL. "
-        "Example: https://meshtastic.org/v/#<base64>",
+        help="Add a contact (User) to the NodeDB from a shareable contact URL. "
+        "Quote the URL in your shell because it contains '#'. "
+        "Example: --add-contact 'https://meshtastic.org/v/#<base64>'",
         metavar="URL",
     )
 

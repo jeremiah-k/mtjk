@@ -925,7 +925,9 @@ class Node:  # pylint: disable=too-many-instance-attributes
         Raises
         ------
         MeshInterfaceError
-            If the node is not in the local NodeDB or has no user data.
+            If the node is not in the local NodeDB, has no user data, or
+            has no usable user ID. Also raised for malformed macaddr or
+            publicKey fields in the NodeDB.
         """
         node_num = toNodeNum(node_id)
 
@@ -943,11 +945,16 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if not u:
             self._raise_interface_error(f"Node {node_id} not found in NodeDB")
 
+        user_id = u.get("id")
+        if not isinstance(user_id, str) or not user_id:
+            self._raise_interface_error(
+                f"Node {node_id} has no usable user ID in NodeDB"
+            )
+
         contact = admin_pb2.SharedContact()
         contact.node_num = node_num
 
-        if u.get("id"):
-            contact.user.id = u["id"]
+        contact.user.id = user_id
         if u.get("macaddr"):
             try:
                 contact.user.macaddr = _decode_node_bytes_field(u["macaddr"])
@@ -961,6 +968,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
             contact.user.short_name = u["shortName"]
         if u.get("hwModel") and u["hwModel"] != "UNSET":
             hw_model = u["hwModel"]
+            # Unknown enum names from newer firmware are silently omitted to
+            # preserve forward compatibility — core contact fields still work.
             if isinstance(hw_model, str):
                 try:
                     contact.user.hw_model = mesh_pb2.HardwareModel.Value(hw_model)
@@ -1001,10 +1010,14 @@ class Node:  # pylint: disable=too-many-instance-attributes
     def addContactURL(self, url: str) -> mesh_pb2.MeshPacket | None:
         """Add a contact (User) to the NodeDB from a shareable contact URL.
 
+        Accepts a Meshtastic contact URL or any URL containing a compatible
+        contact fragment (the base64 payload after ``#`` is self-contained).
+
         Parameters
         ----------
         url : str
-            A ``https://meshtastic.org/v/#<base64>`` contact URL.
+            A ``https://meshtastic.org/v/#<base64>`` contact URL (or any URL
+            whose fragment contains a SharedContact protobuf).
 
         Returns
         -------
@@ -1022,6 +1035,15 @@ class Node:  # pylint: disable=too-many-instance-attributes
             self._raise_interface_error(f"Invalid URL '{url}'")
 
         b64 = fragment
+
+        # Guard against oversized encoded fragments before allocating decode buffers.
+        # base64 encodes 3 bytes per 4 chars, so 4096 decoded bytes ≈ 5462 encoded chars.
+        _MAX_ENCODED_FRAGMENT = (_MAX_CONTACT_URL_PAYLOAD // 3 + 1) * 4 + 4
+        if len(b64) > _MAX_ENCODED_FRAGMENT:
+            self._raise_interface_error(
+                f"Contact URL fragment too large ({len(b64)} chars)"
+            )
+
         missing_padding = len(b64) % 4
         if missing_padding:
             b64 += "=" * (4 - missing_padding)
@@ -1059,8 +1081,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
         p = admin_pb2.AdminMessage()
         p.add_contact.CopyFrom(contact)
 
-        onResponse = self.onAckNak if self != self.iface.localNode else None
-        return self._send_admin(p, onResponse=onResponse)
+        # Align with _NodeAdminCommandRuntime._send_command: wait for ACK when
+        # sending to a remote node and a packet was actually sent.
+        on_response = self.onAckNak if self != self.iface.localNode else None
+        request = self._send_admin(p, onResponse=on_response)
+        if on_response is not None and request is not None:
+            self.iface.waitForAckNak()
+        return request
 
     def onResponseRequestRingtone(self, p: dict[str, Any]) -> None:
         """Process an admin response containing a ringtone fragment and cache it on the Node.
