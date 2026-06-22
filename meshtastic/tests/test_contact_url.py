@@ -487,6 +487,35 @@ def test_getContactURL_rejects_user_without_id() -> None:
 
 
 @pytest.mark.unit
+def test_getContactURL_rejects_zero_node_num() -> None:
+    """GetContactURL should reject reserved node number 0."""
+
+    anode, _ = _make_mocked_node(
+        0, {"num": 0, "user": {"id": "!00000000", "longName": "X", "shortName": "X"}}
+    )
+
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="Invalid node number"):
+        anode.getContactURL(0)
+
+
+@pytest.mark.unit
+def test_getContactURL_rejects_broadcast_node_num() -> None:
+    """GetContactURL should reject broadcast node number 0xFFFFFFFF."""
+
+    broadcast = 0xFFFFFFFF
+    anode, _ = _make_mocked_node(
+        broadcast,
+        {
+            "num": broadcast,
+            "user": {"id": "!ffffffff", "longName": "X", "shortName": "X"},
+        },
+    )
+
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="Invalid node number"):
+        anode.getContactURL(broadcast)
+
+
+@pytest.mark.unit
 def test_getContactURL_silently_drops_unknown_hw_model() -> None:
     """Unknown hwModel strings from newer firmware should not block contact generation."""
 

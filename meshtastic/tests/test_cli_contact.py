@@ -41,19 +41,43 @@ def _make_cli_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_add_contact_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test --add-contact with a shareable URL."""
+def test_add_contact_url_default_uses_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default --add-contact (no --dest) imports on the local node."""
 
     url = (
         "https://meshtastic.org/v/#CKqkvZgIElEKCSE4MzBmNTIyYRIQUm9hZHJ1bm5lciBSaWRnZRoE"
         "UktTTiIGAAAAAAAAKAk4AkIgRxo_Fw_ergQIhRqBbrHasLYy3gU-Ay8hrhu4OVnIPQc="
     )
     monkeypatch.setattr(sys, "argv", ["", "--add-contact", url])
-    iface, _local_node, remote_node = _make_cli_mocks()
+    iface, local_node, remote_node = _make_cli_mocks()
+    # With default --dest (^all/broadcast), real NodeView.getNode() returns
+    # localNode. Simulate that by returning local_node for this default case.
+    iface.getNode.return_value = local_node
+    with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
+        main()
+
+    local_node.addContactURL.assert_called_once_with(url)
+    remote_node.addContactURL.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_add_contact_url_with_dest_uses_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--add-contact with --dest sends to the remote destination node."""
+
+    url = (
+        "https://meshtastic.org/v/#CKqkvZgIElEKCSE4MzBmNTIyYRIQUm9hZHJ1bm5lciBSaWRnZRoE"
+        "UktTTiIGAAAAAAAAKAk4AkIgRxo_Fw_ergQIhRqBbrHasLYy3gU-Ay8hrhu4OVnIPQc="
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["", "--add-contact", url, "--dest", "!12345678"]
+    )
+    iface, local_node, remote_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
 
     remote_node.addContactURL.assert_called_once_with(url)
+    local_node.addContactURL.assert_not_called()
 
 
 @pytest.mark.unit

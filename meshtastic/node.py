@@ -104,7 +104,12 @@ _MAX_CONTACT_URL_PAYLOAD = 4096
 
 
 def _decode_node_bytes_field(value: str | bytes) -> bytes:
-    """Decode a NodeDB byte field that may be stored as base64 string or raw bytes."""
+    """Decode a NodeDB byte field that may be stored as base64 string or raw bytes.
+
+    Only base64 syntax is validated here; decoded byte lengths are not checked
+    against nanopb constraints for upstream compatibility — firmware validates
+    field sizes on receipt.
+    """
     if isinstance(value, bytes):
         return value
     return base64.b64decode(value, validate=True)
@@ -930,6 +935,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
             publicKey fields in the NodeDB.
         """
         node_num = toNodeNum(node_id)
+
+        # Reject reserved node numbers so generation/import invariants match
+        if node_num == 0 or node_num >= 0xFFFFFFFF:
+            self._raise_interface_error(
+                f"Invalid node number for contact: {node_num}"
+            )
 
         def _read_user_snapshot() -> dict[str, Any] | None:
             nodes_by_num = self.iface.nodesByNum
