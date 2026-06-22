@@ -3226,33 +3226,45 @@ def common() -> None:
                 ):  # loop until someone presses ctrlc
                     try:
                         while True:
-                            time.sleep(NOPROTO_RECONNECT_RETRY_SECONDS)
-                            # Detect serial disconnect and attempt reconnect
-                            # so --noproto/--listen survives device reboots
-                            if (
-                                not getattr(client, "_wantExit", False)
-                                and not client.isConnected.is_set()
-                                and isinstance(
-                                    client,
-                                    meshtastic.serial_interface.SerialInterface,
-                                )
+                            if isinstance(
+                                client,
+                                meshtastic.serial_interface.SerialInterface,
                             ):
-                                logger.info(
-                                    "Serial connection lost; attempting reconnect..."
-                                )
-                                while (
+                                # Detect serial disconnect and attempt reconnect
+                                # so --noproto/--listen survives device reboots
+                                if (
                                     not getattr(client, "_wantExit", False)
                                     and not client.isConnected.is_set()
                                 ):
-                                    try:
-                                        client.connect()
-                                    except Exception as exc:
-                                        logger.debug(
-                                            "Reconnect attempt failed: %s", exc
-                                        )
-                                        time.sleep(NOPROTO_RECONNECT_RETRY_SECONDS)
-                                if client.isConnected.is_set():
-                                    logger.info("Serial reconnected.")
+                                    logger.info(
+                                        "Serial connection lost; attempting reconnect..."
+                                    )
+                                    while (
+                                        not getattr(client, "_wantExit", False)
+                                        and not client.isConnected.is_set()
+                                    ):
+                                        try:
+                                            client.connect()
+                                        except (
+                                            ConnectionError,
+                                            OSError,
+                                            TimeoutError,
+                                        ) as exc:
+                                            logger.debug(
+                                                "Reconnect attempt failed: %s", exc
+                                            )
+                                            time.sleep(
+                                                NOPROTO_RECONNECT_RETRY_SECONDS
+                                            )
+                                    if client.isConnected.is_set():
+                                        logger.info("Serial reconnected.")
+                                time.sleep(
+                                    NOPROTO_RECONNECT_RETRY_SECONDS
+                                    if not client.isConnected.is_set()
+                                    else 2.0
+                                )
+                            else:
+                                time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
                     except KeyboardInterrupt:
                         logger.info("Exiting due to keyboard interrupt")
 
