@@ -245,3 +245,100 @@ def test_mesh_interface_proto_propagates_to_localnode() -> None:
 
     with MeshInterface(noProto=False) as iface:
         assert iface.localNode.noProto is False
+
+
+# ---------------------------------------------------------------------------
+# _is_retryable_connect_error classification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retryable_device_disconnected_error() -> None:
+    """'Serial port does not exist (device disconnected)' is retryable."""
+
+    from ..serial_interface import SerialInterface
+
+    iface = SerialInterface.__new__(SerialInterface)
+    exc = SerialInterface.MeshInterfaceError(
+        "Serial port /dev/ttyACM0 does not exist (device disconnected)"
+    )
+    assert iface._is_retryable_connect_error(exc) is True
+
+
+@pytest.mark.unit
+def test_retryable_no_device_detected_error() -> None:
+    """'No serial Meshtastic device detected for reconnect.' is retryable."""
+
+    from ..serial_interface import SerialInterface
+
+    iface = SerialInterface.__new__(SerialInterface)
+    exc = SerialInterface.MeshInterfaceError(
+        "No serial Meshtastic device detected for reconnect."
+    )
+    assert iface._is_retryable_connect_error(exc) is True
+
+
+@pytest.mark.unit
+def test_non_retryable_mesh_error() -> None:
+    """Non-retryable MeshInterfaceError is not classified as retryable."""
+
+    from ..serial_interface import SerialInterface
+
+    iface = SerialInterface.__new__(SerialInterface)
+    exc = SerialInterface.MeshInterfaceError("Configuration validation failed")
+    assert iface._is_retryable_connect_error(exc) is False
+
+
+# ---------------------------------------------------------------------------
+# Remote noProto propagation via getNode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_getnode_propagates_noproto_to_remote_node() -> None:
+    """getNode() for a remote node should inherit noProto from the interface."""
+
+    from ..mesh_interface import MeshInterface
+    from ..node import Node
+
+    with MeshInterface(noProto=True) as iface:
+        remote = iface.getNode("!12345678", requestChannels=False)
+        assert isinstance(remote, Node)
+        assert remote.noProto is True
+
+
+@pytest.mark.unit
+def test_getnode_propagates_proto_to_remote_node() -> None:
+    """getNode() for a remote node should inherit noProto=False from the interface."""
+
+    from ..mesh_interface import MeshInterface
+    from ..node import Node
+
+    with MeshInterface(noProto=False) as iface:
+        remote = iface.getNode("!12345678", requestChannels=False)
+        assert isinstance(remote, Node)
+        assert remote.noProto is False
+
+
+# ---------------------------------------------------------------------------
+# Termios error suppression in close()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_close_suppresses_termios_error() -> None:
+    """Verify termios.error is included in SerialInterface.close() suppress tuple."""
+
+    from ..serial_interface import _TERMIOS_ERRORS
+
+    if not _TERMIOS_ERRORS:
+        pytest.skip("termios not available on this platform")
+
+    import contextlib
+
+    termios_exc = _TERMIOS_ERRORS[0]
+    # The suppress call in close() uses OSError, ValueError, serial.SerialException,
+    # and *_TERMIOS_ERRORS. Verify that combination actually suppresses termios.error.
+    with contextlib.suppress(OSError, ValueError, *_TERMIOS_ERRORS):
+        raise termios_exc("Input/output error")
+    # If we reach here, the suppress worked

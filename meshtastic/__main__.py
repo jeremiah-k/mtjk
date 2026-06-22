@@ -4015,6 +4015,9 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
         client.connect()  # type: ignore[attr-defined]
         if client.isConnected.is_set() or _serial_transport_is_live(client):
             logger.info("Serial reconnected.")
+        else:
+            logger.debug("Reconnect returned but interface is not live yet.")
+            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
     except (ConnectionError, OSError, TimeoutError) as exc:
         logger.debug("Reconnect attempt failed: %s", exc)
         time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)

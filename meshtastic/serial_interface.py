@@ -362,6 +362,7 @@ class SerialInterface(StreamInterface):
                 "Timed out waiting for connection completion" in message
                 or "Connection lost while waiting for connection completion" in message
                 or "No serial Meshtastic device detected for reconnect." in message
+                or "does not exist (device disconnected)" in message
             )
         return False
 
