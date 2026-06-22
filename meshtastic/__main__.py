@@ -2017,6 +2017,14 @@ def onConnected(interface: MeshInterface) -> None:
             waitForAckNak = True
             interface.getNode(args.dest, False, **getNode_kwargs).resetNodeDb()
 
+        if args.add_contact:
+            closeNow = True
+            waitForAckNak = True
+            skip_ack_wait = True  # addContactURL() owns the remote ACK wait
+            interface.getNode(args.dest, False, **getNode_kwargs).addContactURL(
+                args.add_contact
+            )
+
         if args.sendtext:
             closeNow = True
             channelIndex = mt_config.channel_index or 0
@@ -2431,6 +2439,20 @@ def onConnected(interface: MeshInterface) -> None:
             else:
                 urldesc = "Primary channel URL"
             print(f"{urldesc}: {url}")
+            if pyqrcode is not None:
+                qr = pyqrcode.create(url)
+                print(qr.terminal())
+            else:
+                print("Install pyqrcode to view a QR code printed to terminal.")
+
+        if args.contact_qr:
+            closeNow = True
+            url = interface.localNode.getContactURL(
+                args.contact_qr,
+                should_ignore=args.contact_ignore,
+                manually_verified=args.contact_verified,
+            )
+            print(f"Contact URL: {url}")
             if pyqrcode is not None:
                 qr = pyqrcode.create(url)
                 print(qr.terminal())
@@ -2963,6 +2985,10 @@ def common() -> None:
     # Validate that --quiet is not used with --debug, --listen, or --debuglib
     if args.quiet and (args.debug or args.listen or args.debuglib):
         parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
+
+    # Contact modifier flags require --contact-qr
+    if (args.contact_verified or args.contact_ignore) and not args.contact_qr:
+        parser.error("--contact-verified and --contact-ignore require --contact-qr")
 
     if args.quiet:
         log_level = logging.WARNING
@@ -3584,6 +3610,24 @@ def addChannelConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     )
 
     group.add_argument(
+        "--contact-qr",
+        help="Display a QR code for a node's contact data. "
+        "Use the node ID with a '!' or '0x' prefix or the node number. "
+        "Also shows the shareable contact URL.",
+        metavar="!xxxxxxxx",
+    )
+    group.add_argument(
+        "--contact-verified",
+        help="Set the IS_KEY_MANUALLY_VERIFIED bit in the generated contact URL",
+        action="store_true",
+    )
+    group.add_argument(
+        "--contact-ignore",
+        help="Mark this contact as blocked/ignored in the generated contact URL",
+        action="store_true",
+    )
+
+    group.add_argument(
         "--ch-enable",
         help="Enable the specified channel. Use --ch-add instead whenever possible.",
         action="store_true",
@@ -3879,6 +3923,14 @@ def addRemoteAdminArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
         "--reset-nodedb",
         help="Tell the destination node to clear its list of nodes",
         action="store_true",
+    )
+
+    group.add_argument(
+        "--add-contact",
+        help="Add a contact (User) to the NodeDB from a shareable contact URL. "
+        "Quote the URL in your shell because it contains '#'. "
+        "Example: --add-contact 'https://meshtastic.org/v/#<base64>'",
+        metavar="URL",
     )
 
     group.add_argument(

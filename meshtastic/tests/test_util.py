@@ -21,7 +21,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import meshtastic.util as util_module
-from meshtastic.protobuf import mesh_pb2
+from meshtastic.protobuf import config_pb2, mesh_pb2
 from meshtastic.supported_device import (
     SupportedDevice,
     SupportedDeviceValidationError,
@@ -47,6 +47,7 @@ from meshtastic.util import (
     eliminate_duplicate_port,
     findPorts,
     fixme,
+    flags_to_list,
     flagsToList,
     fromPSK,
     fromStr,
@@ -66,6 +67,7 @@ from meshtastic.util import (
     remove_keys_from_dict,
     snake_to_camel,
     stripnl,
+    to_node_num,
     toNodeNum,
     toStr,
 )
@@ -1456,9 +1458,9 @@ def test_toNodeNum_string_hex_without_prefix() -> None:
 
 @pytest.mark.unit
 def test_toNodeNum_string_with_bang_prefix() -> None:
-    """Test toNodeNum with ! prefix (node ID format)."""
+    """Test toNodeNum with ! prefix (node ID format, always hex)."""
 
-    assert toNodeNum("!12345678") == 12345678
+    assert toNodeNum("!12345678") == 0x12345678
     assert toNodeNum("!0xabcdef") == 0xABCDEF
 
 
@@ -1837,3 +1839,186 @@ def test_dotdict_deprecated_warns() -> None:
     assert len(captured) == 1
     assert issubclass(captured[0].category, DeprecationWarning)
     assert "dotdict" in str(captured[0].message).lower()
+
+
+# ---------------------------------------------------------------------------
+# to_node_num comprehensive tests
+# ---------------------------------------------------------------------------
+
+
+_EXCLUDED_MODULES = mesh_pb2.ExcludedModules
+_POSITION_FLAGS = config_pb2.Config.PositionConfig.PositionFlags
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "input_val,expected",
+    [
+        # int passthrough
+        (0, 0),
+        (1, 1),
+        (6, 6),
+        (502009325, 502009325),
+        (2198819370, 2198819370),
+        (0xFFFFFFFF, 0xFFFFFFFF),
+        # !hex format (always treated as hex)
+        ("!00000000", 0x00000000),
+        ("!00000001", 0x00000001),
+        ("!00000010", 0x00000010),
+        ("!000000ff", 0x000000FF),
+        ("!830f522a", 0x830F522A),
+        ("!1dec0ded", 0x1DEC0DED),
+        ("!ffffffff", 0xFFFFFFFF),
+        ("!FFFFFFFF", 0xFFFFFFFF),
+        # 0xhex format
+        ("0x00000000", 0x00000000),
+        ("0x00000010", 0x00000010),
+        ("0x830f522a", 0x830F522A),
+        ("0x1dec0ded", 0x1DEC0DED),
+        ("0xFFFFFFFF", 0xFFFFFFFF),
+        # Unprefixed hex string (falls back to hex when decimal fails)
+        ("830f522a", 0x830F522A),
+        ("1dec0ded", 0x1DEC0DED),
+        # Decimal string
+        ("42", 42),
+        ("12345678", 12345678),
+        ("0", 0),
+        ("1", 1),
+        # With whitespace
+        ("  !830f522a  ", 2198819370),
+        ("  !00000010  ", 16),
+        ("  0x830f522a  ", 2198819370),
+    ],
+)
+def test_to_node_num(input_val: int | str, expected: int) -> None:
+    """Test to_node_num with various valid inputs."""
+
+    assert to_node_num(input_val) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "input_val",
+    [
+        "",
+        "!",
+        "!!",
+        "!xyz",
+    ],
+)
+def test_to_node_num_invalid(input_val: str) -> None:
+    """Test to_node_num raises ValueError for invalid inputs."""
+
+    with pytest.raises(ValueError):
+        to_node_num(input_val)
+
+
+@pytest.mark.unitslow
+@given(st.integers(min_value=0, max_value=2**32 - 1))
+def test_to_node_num_hypothesis_roundtrip(n: int) -> None:
+    """Property: all supported input formats roundtrip for any valid node number."""
+
+    assert to_node_num(n) == n
+    assert to_node_num(f"!{n:08x}") == n
+    assert to_node_num(f"0x{n:x}") == n
+    assert to_node_num(str(n)) == n
+
+
+# ---------------------------------------------------------------------------
+# flags_to_list comprehensive tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "flag_type,flags,expected",
+    [
+        (_EXCLUDED_MODULES, 0, []),
+        (_EXCLUDED_MODULES, 1, ["MQTT_CONFIG"]),
+        (
+            _EXCLUDED_MODULES,
+            3,
+            ["MQTT_CONFIG", "SERIAL_CONFIG"],
+        ),
+        (
+            _EXCLUDED_MODULES,
+            0x7FFF,
+            [
+                "MQTT_CONFIG",
+                "SERIAL_CONFIG",
+                "EXTNOTIF_CONFIG",
+                "STOREFORWARD_CONFIG",
+                "RANGETEST_CONFIG",
+                "TELEMETRY_CONFIG",
+                "CANNEDMSG_CONFIG",
+                "AUDIO_CONFIG",
+                "REMOTEHARDWARE_CONFIG",
+                "NEIGHBORINFO_CONFIG",
+                "AMBIENTLIGHTING_CONFIG",
+                "DETECTIONSENSOR_CONFIG",
+                "PAXCOUNTER_CONFIG",
+                "BLUETOOTH_CONFIG",
+                "NETWORK_CONFIG",
+            ],
+        ),
+        (_EXCLUDED_MODULES, 0x8000, ["UNKNOWN_ADDITIONAL_FLAGS(32768)"]),
+        (
+            _EXCLUDED_MODULES,
+            0x8001,
+            ["MQTT_CONFIG", "UNKNOWN_ADDITIONAL_FLAGS(32768)"],
+        ),
+        (_POSITION_FLAGS, 0, []),
+        (_POSITION_FLAGS, 0x09, ["ALTITUDE", "DOP"]),
+        (
+            _POSITION_FLAGS,
+            0x1FF,
+            [
+                "ALTITUDE",
+                "ALTITUDE_MSL",
+                "GEOIDAL_SEPARATION",
+                "DOP",
+                "HVDOP",
+                "SATINVIEW",
+                "SEQ_NO",
+                "TIMESTAMP",
+                "HEADING",
+            ],
+        ),
+    ],
+)
+def test_flags_to_list(flag_type: Any, flags: int, expected: list[str]) -> None:
+    """Test flags_to_list decodes set bits in enum order and reports unknown remainders."""
+
+    assert (
+        flags_to_list(flag_type, flags) == expected
+    )  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.unitslow
+@given(st.integers(min_value=0, max_value=0xFFFFF))
+def test_flags_to_list_conservation(flags: int) -> None:
+    """Property: flags_to_list partitions flags into known names plus an exact unknown remainder.
+
+    Every known bit that is set must appear as a name, and the leftover reported in
+    UNKNOWN_ADDITIONAL_FLAGS(...) must together with the named bits reconstruct the input.
+    """
+
+    for flag_type in (_EXCLUDED_MODULES, _POSITION_FLAGS):
+        known_union = 0
+        for key in flag_type.keys():
+            value = flag_type.Value(key)
+            if key != "EXCLUDED_NONE" and value:
+                known_union |= value
+
+        result = flags_to_list(flag_type, flags)  # pyright: ignore[reportArgumentType]
+
+        accounted = 0
+        leftover = 0
+        for name in result:
+            if name.startswith("UNKNOWN_ADDITIONAL_FLAGS("):
+                leftover = int(name[len("UNKNOWN_ADDITIONAL_FLAGS(") : -1])
+            else:
+                accounted |= flag_type.Value(name)
+
+        assert accounted == (flags & known_union)
+        assert (accounted | leftover) == flags

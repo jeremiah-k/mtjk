@@ -5,11 +5,15 @@ This module provides the Node class which represents a (local or remote) node
 in the mesh, including methods for localConfig, moduleConfig, and channels management.
 """
 
+import base64
+import binascii
 import logging
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, Sequence, TypeVar
+from urllib.parse import urlparse
 
+import google.protobuf.message
 from google.protobuf.descriptor import FieldDescriptor
 
 from meshtastic.node_runtime.channel_export_runtime import _NodeChannelExportRuntime
@@ -93,6 +97,22 @@ MAX_CHANNELS = _MAX_CHANNELS
 MAX_LONG_NAME_LEN = _MAX_LONG_NAME_LEN
 MAX_RINGTONE_LENGTH = _MAX_RINGTONE_LENGTH
 MAX_SHORT_NAME_LEN = _MAX_SHORT_NAME_LEN
+
+# Maximum allowed size (in bytes) of the decoded contact URL payload.
+# A legitimate SharedContact protobuf is expected to be <1KB.
+_MAX_CONTACT_URL_PAYLOAD = 4096
+
+
+def _decode_node_bytes_field(value: str | bytes) -> bytes:
+    """Decode a NodeDB byte field that may be stored as base64 string or raw bytes.
+
+    Only base64 syntax is validated here; decoded byte lengths are not checked
+    against nanopb constraints for upstream compatibility — firmware validates
+    field sizes on receipt.
+    """
+    if isinstance(value, bytes):
+        return value
+    return base64.b64decode(value, validate=True)
 
 
 class Node:  # pylint: disable=too-many-instance-attributes
@@ -884,6 +904,201 @@ class Node:  # pylint: disable=too-many-instance-attributes
             transaction._apply_add_only()  # noqa: SLF001
             return
         transaction._apply_replace_all()  # noqa: SLF001
+
+    def getContactURL(
+        self,
+        node_id: int | str,
+        should_ignore: bool = False,
+        manually_verified: bool = False,
+    ) -> str:
+        """Generate a shareable contact URL for the specified node.
+
+        Parameters
+        ----------
+        node_id : int | str
+            Node identifier (may be ``!hex``, ``0xhex``, decimal int/string).
+        should_ignore : bool
+            Mark the contact as blocked/ignored in the generated URL.
+        manually_verified : bool
+            Set the IS_KEY_MANUALLY_VERIFIED bit in the generated URL.
+
+        Returns
+        -------
+        str
+            A ``https://meshtastic.org/v/#…`` URL encoding a SharedContact protobuf.
+
+        Raises
+        ------
+        MeshInterfaceError
+            If the node is not in the local NodeDB, has no user data, or
+            has no usable user ID. Also raised for malformed macaddr or
+            publicKey fields in the NodeDB.
+        """
+        node_num = toNodeNum(node_id)
+
+        # Reject reserved node numbers so generation/import invariants match
+        if node_num == 0 or node_num >= 0xFFFFFFFF:
+            self._raise_interface_error(
+                f"Invalid node number for contact: {node_num}"
+            )
+
+        def _read_user_snapshot() -> dict[str, Any] | None:
+            nodes_by_num = self.iface.nodesByNum
+            node = nodes_by_num.get(node_num) if nodes_by_num else None
+            if not isinstance(node, dict):
+                return None
+            user = node.get("user")
+            if not isinstance(user, dict):
+                return None
+            return dict(user)  # shallow copy under lock
+
+        u = self._execute_with_node_db_lock(_read_user_snapshot)
+        if not u:
+            self._raise_interface_error(f"Node {node_id} not found in NodeDB")
+
+        user_id = u.get("id")
+        if not isinstance(user_id, str) or not user_id:
+            self._raise_interface_error(
+                f"Node {node_id} has no usable user ID in NodeDB"
+            )
+
+        contact = admin_pb2.SharedContact()
+        contact.node_num = node_num
+
+        contact.user.id = user_id
+        if u.get("macaddr"):
+            try:
+                contact.user.macaddr = _decode_node_bytes_field(u["macaddr"])
+            except (binascii.Error, ValueError) as exc:
+                self._raise_interface_error(
+                    f"Invalid macaddr in NodeDB for {node_id}: {exc}"
+                )
+        if u.get("longName"):
+            contact.user.long_name = u["longName"]
+        if u.get("shortName"):
+            contact.user.short_name = u["shortName"]
+        if u.get("hwModel") and u["hwModel"] != "UNSET":
+            hw_model = u["hwModel"]
+            # Unknown enum names from newer firmware are silently omitted to
+            # preserve forward compatibility — core contact fields still work.
+            if isinstance(hw_model, str):
+                try:
+                    contact.user.hw_model = mesh_pb2.HardwareModel.Value(hw_model)
+                except ValueError:
+                    pass
+            elif isinstance(hw_model, int):
+                contact.user.hw_model = hw_model  # type: ignore[assignment]
+        if u.get("role"):
+            role = u["role"]
+            if isinstance(role, str):
+                try:
+                    contact.user.role = config_pb2.Config.DeviceConfig.Role.Value(role)
+                except ValueError:
+                    pass
+            elif isinstance(role, int):
+                contact.user.role = role  # type: ignore[assignment]
+        if u.get("publicKey"):
+            try:
+                contact.user.public_key = _decode_node_bytes_field(u["publicKey"])
+            except (binascii.Error, ValueError) as exc:
+                self._raise_interface_error(
+                    f"Invalid publicKey in NodeDB for {node_id}: {exc}"
+                )
+        if u.get("isLicensed"):
+            contact.user.is_licensed = u["isLicensed"]
+        if u.get("isUnmessagable") is not None:
+            contact.user.is_unmessagable = u["isUnmessagable"]
+        if should_ignore:
+            contact.should_ignore = True
+        if manually_verified:
+            contact.manually_verified = True
+
+        data = contact.SerializeToString()
+        s = base64.urlsafe_b64encode(data).decode("ascii")
+        s = s.rstrip("=")
+        return f"https://meshtastic.org/v/#{s}"
+
+    def addContactURL(self, url: str) -> mesh_pb2.MeshPacket | None:
+        """Add a contact (User) to the NodeDB from a shareable contact URL.
+
+        Accepts a Meshtastic contact URL or any URL containing a compatible
+        contact fragment (the base64 payload after ``#`` is self-contained).
+
+        Parameters
+        ----------
+        url : str
+            A ``https://meshtastic.org/v/#<base64>`` contact URL (or any URL
+            whose fragment contains a SharedContact protobuf).
+
+        Returns
+        -------
+        mesh_pb2.MeshPacket | None
+            The sent Admin message packet if available, otherwise ``None``.
+
+        Raises
+        ------
+        MeshInterfaceError
+            If the URL is malformed, cannot be parsed, or yields an invalid contact.
+        """
+        parsed = urlparse(url)
+        fragment = parsed.fragment
+        if not fragment:
+            self._raise_interface_error(f"Invalid URL '{url}'")
+
+        b64 = fragment
+
+        # Guard against oversized encoded fragments before allocating decode buffers.
+        # base64 encodes 3 bytes per 4 chars, so 4096 decoded bytes ≈ 5462 encoded chars.
+        _MAX_ENCODED_FRAGMENT = (_MAX_CONTACT_URL_PAYLOAD // 3 + 1) * 4 + 4
+        if len(b64) > _MAX_ENCODED_FRAGMENT:
+            self._raise_interface_error(
+                f"Contact URL fragment too large ({len(b64)} chars)"
+            )
+
+        missing_padding = len(b64) % 4
+        if missing_padding:
+            b64 += "=" * (4 - missing_padding)
+
+        try:
+            decoded = base64.b64decode(b64, altchars=b"-_", validate=True)
+        except (binascii.Error, ValueError) as exc:
+            self._raise_interface_error(f"Failed to decode contact URL: {exc}")
+
+        # Cap decoded payload — a legitimate SharedContact is <1KB
+        if len(decoded) > _MAX_CONTACT_URL_PAYLOAD:
+            self._raise_interface_error(
+                f"Contact URL payload too large ({len(decoded)} bytes, "
+                f"max {_MAX_CONTACT_URL_PAYLOAD})"
+            )
+
+        try:
+            contact = admin_pb2.SharedContact()
+            contact.ParseFromString(decoded)
+        except google.protobuf.message.DecodeError as exc:
+            self._raise_interface_error(f"Failed to parse contact URL: {exc}")
+
+        # Validate decoded contact before sending
+        if contact.node_num == 0 or contact.node_num >= 0xFFFFFFFF:
+            self._raise_interface_error(
+                f"Invalid node number in contact: {contact.node_num}"
+            )
+        if not contact.HasField("user"):
+            self._raise_interface_error("Contact URL contains no user data")
+        if not contact.user.id:
+            self._raise_interface_error("Contact URL contains no user ID")
+
+        self.ensureSessionKey()
+
+        p = admin_pb2.AdminMessage()
+        p.add_contact.CopyFrom(contact)
+
+        # Align with _NodeAdminCommandRuntime._send_command: wait for ACK when
+        # sending to a remote node and a packet was actually sent.
+        on_response = self.onAckNak if self != self.iface.localNode else None
+        request = self._send_admin(p, onResponse=on_response)
+        if on_response is not None and request is not None:
+            self.iface.waitForAckNak()
+        return request
 
     def onResponseRequestRingtone(self, p: dict[str, Any]) -> None:
         """Process an admin response containing a ringtone fragment and cache it on the Node.
