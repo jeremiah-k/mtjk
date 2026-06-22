@@ -17,6 +17,22 @@ from ..node import Node
 from ..serial_interface import SerialInterface
 
 
+def _make_cli_mocks() -> tuple[MagicMock, MagicMock]:
+    """Create a consistent (iface, mocked_node) pair for CLI tests.
+
+    The iface mock is configured with ``__enter__``/``__exit__`` returning
+    itself, matching how ``common()`` uses ``stack.enter_context()``.
+    """
+
+    mocked_node = MagicMock(autospec=Node)
+    iface = MagicMock(autospec=SerialInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+    iface.getNode.return_value = mocked_node
+    mocked_node.iface = iface
+    return iface, mocked_node
+
+
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
 def test_add_contact_url() -> None:
@@ -27,12 +43,8 @@ def test_add_contact_url() -> None:
         "UktTTiIGAAAAAAAAKAk4AkIgRxo_Fw_ergQIhRqBbrHasLYy3gU-Ay8hrhu4OVnIPQc="
     )
     sys.argv = ["", "--add-contact", url]
-    mt_config.args = sys.argv
-    mocked_node = MagicMock(autospec=Node)
-    iface = MagicMock(autospec=SerialInterface)
-    iface.__enter__ = MagicMock(return_value=iface)
-    iface.__exit__ = MagicMock(return_value=None)
-    iface.getNode.return_value = mocked_node
+    mt_config.args = sys.argv  # type: ignore[assignment]  # type: ignore[assignment]
+    iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
 
@@ -45,13 +57,8 @@ def test_contact_qr() -> None:
     """Test --contact-qr with a node ID."""
 
     sys.argv = ["", "--contact-qr", "!830f522a"]
-    mt_config.args = sys.argv
-    mocked_node = MagicMock(autospec=Node)
-    iface = MagicMock(autospec=SerialInterface)
-    iface.__enter__ = MagicMock(return_value=iface)
-    iface.__exit__ = MagicMock(return_value=None)
-    iface.getNode.return_value = mocked_node
-    mocked_node.iface = iface
+    mt_config.args = sys.argv  # type: ignore[assignment]
+    iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
 
@@ -72,13 +79,8 @@ def test_contact_qr_with_flags() -> None:
         "--contact-verified",
         "--contact-ignore",
     ]
-    mt_config.args = sys.argv
-    mocked_node = MagicMock(autospec=Node)
-    iface = MagicMock(autospec=SerialInterface)
-    iface.__enter__ = MagicMock(return_value=iface)
-    iface.__exit__ = MagicMock(return_value=None)
-    iface.getNode.return_value = mocked_node
-    mocked_node.iface = iface
+    mt_config.args = sys.argv  # type: ignore[assignment]
+    iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
 

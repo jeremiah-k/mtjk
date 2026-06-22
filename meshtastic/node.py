@@ -6,11 +6,13 @@ in the mesh, including methods for localConfig, moduleConfig, and channels manag
 """
 
 import base64
+import binascii
 import logging
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, Sequence, TypeVar
 
+import google.protobuf.message
 from google.protobuf.descriptor import FieldDescriptor
 
 from meshtastic.node_runtime.channel_export_runtime import _NodeChannelExportRuntime
@@ -94,6 +96,9 @@ MAX_CHANNELS = _MAX_CHANNELS
 MAX_LONG_NAME_LEN = _MAX_LONG_NAME_LEN
 MAX_RINGTONE_LENGTH = _MAX_RINGTONE_LENGTH
 MAX_SHORT_NAME_LEN = _MAX_SHORT_NAME_LEN
+
+# Cap for contact URL payload size (a legitimate SharedContact is <1KB).
+_MAX_CONTACT_URL_PAYLOAD = 4096
 
 
 class Node:  # pylint: disable=too-many-instance-attributes
@@ -948,7 +953,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
         data = contact.SerializeToString()
         s = base64.urlsafe_b64encode(data).decode("ascii")
-        s = s.replace("=", "").replace("+", "-").replace("/", "_")
+        s = s.rstrip("=")
         return f"https://meshtastic.org/v/#{s}"
 
     def addContactURL(self, url: str) -> mesh_pb2.MeshPacket | None:
@@ -975,6 +980,15 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if len(split_url) == 1:
             self._raise_interface_error(f"Invalid URL '{url}'")
         b64 = split_url[-1]
+        if not b64:
+            self._raise_interface_error("Contact URL has empty fragment")
+
+        # Cap payload size — a legitimate SharedContact is <1KB
+        if len(b64) > _MAX_CONTACT_URL_PAYLOAD:
+            self._raise_interface_error(
+                f"Contact URL payload too large ({len(b64)} chars, "
+                f"max {_MAX_CONTACT_URL_PAYLOAD})"
+            )
 
         missing_padding = len(b64) % 4
         if missing_padding:
@@ -984,16 +998,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
             decoded = base64.urlsafe_b64decode(b64)
             contact = admin_pb2.SharedContact()
             contact.ParseFromString(decoded)
-        except Exception as exc:
+        except (binascii.Error, google.protobuf.message.DecodeError, ValueError) as exc:
             self._raise_interface_error(f"Failed to parse contact URL: {exc}")
 
         p = admin_pb2.AdminMessage()
         p.add_contact.CopyFrom(contact)
 
-        if self == self.iface.localNode:
-            onResponse = None
-        else:
-            onResponse = self.onAckNak
+        onResponse = self.onAckNak if self != self.iface.localNode else None
         return self._send_admin(p, onResponse=onResponse)
 
     def onResponseRequestRingtone(self, p: dict[str, Any]) -> None:

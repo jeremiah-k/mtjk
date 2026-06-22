@@ -45,6 +45,7 @@
     "waitForWaypoint": "(self, request_id:int | None=None)"
   },
   "node_methods": {
+    "addContactURL": "(self, url:str)",
     "beginSettingsTransaction": "(self)",
     "commitSettingsTransaction": "(self)",
     "deleteChannel": "(self, channelIndex:int)",
@@ -61,6 +62,7 @@
     "getChannelCopyByChannelIndex": "(self, channelIndex:int)",
     "getChannelCopyByName": "(self, name:str)",
     "getChannelsWithHash": "(self)",
+    "getContactURL": "(self, node_id:int | str, should_ignore:bool=False, manually_verified:bool=False)",
     "getDisabledChannel": "(self)",
     "getDisabledChannelCopy": "(self)",
     "getMetadata": "(self)",

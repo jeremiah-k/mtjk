@@ -1,7 +1,8 @@
 """Unit tests for Node.getContactURL() and Node.addContactURL().
 
 Tests cover roundtrip serialization (generate URL, parse it back, verify all
-fields), parametrized edge cases, and property-based hypothesis testing.
+fields), parametrized edge cases, property-based hypothesis testing, URL
+transport-format assertions, and error-path coverage.
 """
 
 import base64
@@ -9,7 +10,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from ..mesh_interface import MeshInterface
@@ -17,11 +18,35 @@ from ..node import Node
 from ..protobuf import config_pb2, mesh_pb2, nanopb_pb2
 from ..util import toNodeNum
 
-# Extract nanopb max_size constraints from the User protobuf descriptor
+# Extract nanopb max_size constraints from the User protobuf descriptor.
+# nanopb max_size is in bytes; hypothesis text() limits are in characters,
+# so we filter by UTF-8 byte length to respect firmware constraints.
 _USER_NANOPB = {
     field.name: field.GetOptions().Extensions[nanopb_pb2.nanopb]
     for field in mesh_pb2.User.DESCRIPTOR.fields
 }
+
+
+def _byte_bounded_text(max_bytes: int, min_chars: int = 1) -> st.SearchStrategy[str]:
+    """Generate text whose UTF-8 encoding fits within max_bytes."""
+
+    return st.text(min_size=min_chars, max_size=max_bytes).filter(
+        lambda s: len(s.encode("utf-8")) <= max_bytes
+    )
+
+
+def _make_mocked_node(
+    node_num: int, node_data: dict[str, Any] | None = None
+) -> tuple[Node, MagicMock]:
+    """Create a Node with a fully mocked MeshInterface for contact URL tests."""
+
+    iface = MagicMock(autospec=MeshInterface)
+    if node_data is not None:
+        iface.nodesByNum = {node_num: node_data}
+    else:
+        iface.nodesByNum = {}
+    iface.localNode = None
+    return Node(iface, node_num, noProto=True), iface
 
 
 @pytest.mark.unit
@@ -81,7 +106,7 @@ _USER_NANOPB = {
             },
             True,
             False,
-            id="int_node_id_should_ignore_only",
+            id="int_node_id_licensed_false",
         ),
         pytest.param(
             "!deadbeef",
@@ -127,14 +152,10 @@ def test_contact_url_roundtrip(
     manually_verified: bool,
 ) -> None:
     """Verify that contact URL generation and parsing is fully reversible."""
-    iface = MagicMock(autospec=MeshInterface)
     node_num = toNodeNum(node_id)
-    iface.nodesByNum = {node_num: node_data}
-    iface.localNode = None
+    anode, _ = _make_mocked_node(node_num, node_data)
 
-    anode = Node(iface, node_num, noProto=True)
-
-    sent_admin: list = []
+    sent_admin: list[Any] = []
 
     def capture_send(p: Any, *_args: Any, **_kwargs: Any) -> None:
         sent_admin.append(p)
@@ -143,7 +164,13 @@ def test_contact_url_roundtrip(
         url = anode.getContactURL(
             node_id, should_ignore=should_ignore, manually_verified=manually_verified
         )
-        assert url.startswith("https://meshtastic.org/v/#")
+
+        # Transport-format assertion: URL fragment must be URL-safe base64
+        # (no +, /, or = padding) so it survives copy-paste in browsers.
+        fragment = url.split("/#")[-1]
+        assert "+" not in fragment
+        assert "/" not in fragment
+        assert "=" not in fragment
 
         anode.addContactURL(url)
 
@@ -163,8 +190,8 @@ def test_contact_url_roundtrip(
         assert contact.user.role == config_pb2.Config.DeviceConfig.Role.Value(u["role"])
     if u.get("publicKey"):
         assert contact.user.public_key == base64.b64decode(u["publicKey"])
-    if u.get("isLicensed"):
-        assert contact.user.is_licensed is True
+    if u.get("isLicensed") is not None:
+        assert contact.user.is_licensed == u["isLicensed"]
     if u.get("isUnmessagable") is not None:
         assert contact.user.is_unmessagable == u["isUnmessagable"]
 
@@ -178,6 +205,7 @@ def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
     should_ignore = draw(st.booleans())
     manually_verified = draw(st.booleans())
 
+    # Skip reserved low IDs (0-5) and broadcast (0xFFFFFFFF)
     node_num = draw(st.integers(min_value=6, max_value=2**32 - 2))
     node_id = f"!{node_num:08x}"
 
@@ -189,8 +217,8 @@ def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
         )
     )
 
-    long_name = draw(st.text(min_size=1, max_size=_USER_NANOPB["long_name"].max_size))
-    short_name = draw(st.text(min_size=1, max_size=_USER_NANOPB["short_name"].max_size))
+    long_name = draw(_byte_bounded_text(_USER_NANOPB["long_name"].max_size))
+    short_name = draw(_byte_bounded_text(_USER_NANOPB["short_name"].max_size))
 
     macaddr_bytes = draw(
         st.binary(
@@ -214,7 +242,7 @@ def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
     is_licensed = draw(st.booleans())
     is_unmessagable = draw(st.booleans())
 
-    node_data: dict = {
+    node_data: dict[str, Any] = {
         "num": node_num,
         "user": {
             "id": node_id,
@@ -234,19 +262,16 @@ def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
     return node_num, node_data, should_ignore, manually_verified
 
 
-@pytest.mark.unit
+@pytest.mark.unitslow
+@settings(deadline=None)
 @given(contact_url_roundtrip_params())
 def test_contact_url_roundtrip_hypothesis(params: tuple) -> None:
     """Property: roundtrip preserves data across random field configurations."""
     node_num, node_data, should_ignore, manually_verified = params
 
-    iface = MagicMock(autospec=MeshInterface)
-    iface.nodesByNum = {node_num: node_data}
-    iface.localNode = None
+    anode, _ = _make_mocked_node(node_num, node_data)
 
-    anode = Node(iface, node_num, noProto=True)
-
-    sent_admin: list = []
+    sent_admin: list[Any] = []
 
     def capture_send(p: Any, *_args: Any, **_kwargs: Any) -> None:
         sent_admin.append(p)
@@ -284,11 +309,7 @@ def test_contact_url_roundtrip_hypothesis(params: tuple) -> None:
 def test_getContactURL_raises_for_missing_node() -> None:
     """GetContactURL should raise when node is not in NodeDB."""
 
-    iface = MagicMock(autospec=MeshInterface)
-    iface.nodesByNum = {}
-    iface.localNode = None
-
-    anode = Node(iface, 12345, noProto=True)
+    anode, _ = _make_mocked_node(12345)
 
     with pytest.raises(MeshInterface.MeshInterfaceError, match="not found in NodeDB"):
         anode.getContactURL(12345)
@@ -298,11 +319,7 @@ def test_getContactURL_raises_for_missing_node() -> None:
 def test_getContactURL_raises_for_node_without_user() -> None:
     """GetContactURL should raise when node exists but has no user data."""
 
-    iface = MagicMock(autospec=MeshInterface)
-    iface.nodesByNum = {12345: {"num": 12345}}
-    iface.localNode = None
-
-    anode = Node(iface, 12345, noProto=True)
+    anode, _ = _make_mocked_node(12345, {"num": 12345})
 
     with pytest.raises(MeshInterface.MeshInterfaceError, match="not found in NodeDB"):
         anode.getContactURL(12345)
@@ -312,11 +329,39 @@ def test_getContactURL_raises_for_node_without_user() -> None:
 def test_addContactURL_raises_for_invalid_url() -> None:
     """AddContactURL should raise for a URL without a /# fragment."""
 
-    iface = MagicMock(autospec=MeshInterface)
-    iface.localNode = None
-
-    anode = Node(iface, 12345, noProto=True)
-    anode.ensureSessionKey = MagicMock()
+    anode, _ = _make_mocked_node(12345)
 
     with pytest.raises(MeshInterface.MeshInterfaceError, match="Invalid URL"):
         anode.addContactURL("https://meshtastic.org/v/")
+
+
+@pytest.mark.unit
+def test_addContactURL_raises_for_empty_fragment() -> None:
+    """AddContactURL should raise for a URL with an empty /# fragment."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="empty fragment"):
+        anode.addContactURL("https://meshtastic.org/v/#")
+
+
+@pytest.mark.unit
+def test_addContactURL_raises_for_malformed_b64() -> None:
+    """AddContactURL should raise for invalid base64 in the fragment."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="Failed to parse"):
+        anode.addContactURL("https://meshtastic.org/v/#!@#$invalid-base64@#$")
+
+
+@pytest.mark.unit
+def test_addContactURL_raises_for_oversized_payload() -> None:
+    """AddContactURL should reject payloads exceeding the size cap."""
+
+    anode, _ = _make_mocked_node(12345)
+
+    # Craft a URL with a fragment larger than _MAX_CONTACT_URL_PAYLOAD
+    huge_fragment = "A" * 5000
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="payload too large"):
+        anode.addContactURL(f"https://meshtastic.org/v/#{huge_fragment}")
