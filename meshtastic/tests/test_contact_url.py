@@ -147,7 +147,7 @@ def _make_mocked_node(
 )
 def test_contact_url_roundtrip(
     node_id: int | str,
-    node_data: dict,
+    node_data: dict[str, Any],
     should_ignore: bool,
     manually_verified: bool,
 ) -> None:
@@ -200,7 +200,7 @@ def test_contact_url_roundtrip(
 
 
 @st.composite
-def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
+def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple[int, dict[str, Any], bool, bool]:
     """Hypothesis strategy: generate a full node config and roundtrip flags."""
     should_ignore = draw(st.booleans())
     manually_verified = draw(st.booleans())
@@ -265,7 +265,7 @@ def contact_url_roundtrip_params(draw: st.DrawFn) -> tuple:
 @pytest.mark.unitslow
 @settings(deadline=None)
 @given(contact_url_roundtrip_params())
-def test_contact_url_roundtrip_hypothesis(params: tuple) -> None:
+def test_contact_url_roundtrip_hypothesis(params: tuple[int, dict[str, Any], bool, bool]) -> None:
     """Property: roundtrip preserves data across random field configurations."""
     node_num, node_data, should_ignore, manually_verified = params
 

@@ -2446,7 +2446,7 @@ def onConnected(interface: MeshInterface) -> None:
 
         if args.contact_qr:
             closeNow = True
-            url = interface.getNode(args.dest, True, **getNode_kwargs).getContactURL(
+            url = interface.getNode(args.dest, False, **getNode_kwargs).getContactURL(
                 args.contact_qr,
                 should_ignore=args.contact_ignore,
                 manually_verified=args.contact_verified,

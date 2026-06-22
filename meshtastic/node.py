@@ -937,9 +937,23 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if u.get("shortName"):
             contact.user.short_name = u["shortName"]
         if u.get("hwModel") and u["hwModel"] != "UNSET":
-            contact.user.hw_model = mesh_pb2.HardwareModel.Value(u["hwModel"])
+            hw_model = u["hwModel"]
+            if isinstance(hw_model, str):
+                try:
+                    contact.user.hw_model = mesh_pb2.HardwareModel.Value(hw_model)
+                except ValueError:
+                    pass
+            elif isinstance(hw_model, int):
+                contact.user.hw_model = hw_model  # type: ignore[assignment]
         if u.get("role"):
-            contact.user.role = config_pb2.Config.DeviceConfig.Role.Value(u["role"])
+            role = u["role"]
+            if isinstance(role, str):
+                try:
+                    contact.user.role = config_pb2.Config.DeviceConfig.Role.Value(role)
+                except ValueError:
+                    pass
+            elif isinstance(role, int):
+                contact.user.role = role  # type: ignore[assignment]
         if u.get("publicKey"):
             contact.user.public_key = base64.b64decode(u["publicKey"])
         if u.get("isLicensed"):
@@ -974,8 +988,6 @@ class Node:  # pylint: disable=too-many-instance-attributes
         MeshInterfaceError
             If the URL is malformed or cannot be parsed.
         """
-        self.ensureSessionKey()
-
         split_url = url.split("/#")
         if len(split_url) == 1:
             self._raise_interface_error(f"Invalid URL '{url}'")
@@ -1000,6 +1012,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
             contact.ParseFromString(decoded)
         except (binascii.Error, google.protobuf.message.DecodeError, ValueError) as exc:
             self._raise_interface_error(f"Failed to parse contact URL: {exc}")
+
+        self.ensureSessionKey()
 
         p = admin_pb2.AdminMessage()
         p.add_contact.CopyFrom(contact)

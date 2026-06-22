@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .. import mt_config
 from ..__main__ import main
 from ..node import Node
 from ..serial_interface import SerialInterface
@@ -35,15 +34,14 @@ def _make_cli_mocks() -> tuple[MagicMock, MagicMock]:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_add_contact_url() -> None:
+def test_add_contact_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test --add-contact with a shareable URL."""
 
     url = (
         "https://meshtastic.org/v/#CKqkvZgIElEKCSE4MzBmNTIyYRIQUm9hZHJ1bm5lciBSaWRnZRoE"
         "UktTTiIGAAAAAAAAKAk4AkIgRxo_Fw_ergQIhRqBbrHasLYy3gU-Ay8hrhu4OVnIPQc="
     )
-    sys.argv = ["", "--add-contact", url]
-    mt_config.args = sys.argv  # type: ignore[assignment]  # type: ignore[assignment]
+    monkeypatch.setattr(sys, "argv", ["", "--add-contact", url])
     iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
@@ -53,11 +51,10 @@ def test_add_contact_url() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_contact_qr() -> None:
+def test_contact_qr(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test --contact-qr with a node ID."""
 
-    sys.argv = ["", "--contact-qr", "!830f522a"]
-    mt_config.args = sys.argv  # type: ignore[assignment]
+    monkeypatch.setattr(sys, "argv", ["", "--contact-qr", "!830f522a"])
     iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
@@ -69,17 +66,14 @@ def test_contact_qr() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_contact_qr_with_flags() -> None:
+def test_contact_qr_with_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test --contact-qr with --contact-verified and --contact-ignore."""
 
-    sys.argv = [
-        "",
-        "--contact-qr",
-        "!830f522a",
-        "--contact-verified",
-        "--contact-ignore",
-    ]
-    mt_config.args = sys.argv  # type: ignore[assignment]
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["", "--contact-qr", "!830f522a", "--contact-verified", "--contact-ignore"],
+    )
     iface, mocked_node = _make_cli_mocks()
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
         main()
