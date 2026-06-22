@@ -8,6 +8,7 @@ import contextlib
 import logging
 import os
 import sys
+import termios
 import time
 import types
 from typing import IO, Any, BinaryIO, Callable
@@ -401,7 +402,9 @@ class SerialInterface(StreamInterface):
             # is an empirically chosen compromise that gives common USB serial
             # stacks time to drain host-side buffers; running the cycle twice has
             # proven more reliable for delivering trailing bytes before close().
-            with contextlib.suppress(OSError, ValueError, serial.SerialException):
+            with contextlib.suppress(
+                OSError, ValueError, serial.SerialException, termios.error
+            ):
                 stream.flush()
                 time.sleep(SERIAL_SETTLING_DELAY)
                 stream.flush()
