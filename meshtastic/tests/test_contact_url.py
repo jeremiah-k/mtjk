@@ -539,10 +539,10 @@ def test_addContactURL_remote_waits_for_ack() -> None:
 
     anode, iface = _make_mocked_node(12345)
     iface.localNode = MagicMock(autospec=Node)  # make anode look remote
-    anode.ensureSessionKey = MagicMock()
 
     sent_packet = MagicMock()
     with (
+        patch.object(anode, "ensureSessionKey"),
         patch.object(anode, "_send_admin", return_value=sent_packet),
         patch.object(iface, "waitForAckNak") as mock_wait,
     ):
@@ -565,10 +565,10 @@ def test_addContactURL_local_does_not_wait_for_ack() -> None:
 
     anode, iface = _make_mocked_node(12345)
     iface.localNode = anode  # make this the local node
-    anode.ensureSessionKey = MagicMock()
 
     sent_packet = MagicMock()
     with (
+        patch.object(anode, "ensureSessionKey"),
         patch.object(anode, "_send_admin", return_value=sent_packet),
         patch.object(iface, "waitForAckNak") as mock_wait,
     ):
