@@ -3230,7 +3230,7 @@ def common() -> None:
                             # Detect serial disconnect and attempt reconnect
                             # so --noproto/--listen survives device reboots
                             if (
-                                not client._wantExit
+                                not getattr(client, "_wantExit", False)
                                 and not client.isConnected.is_set()
                                 and isinstance(
                                     client,
@@ -3241,7 +3241,7 @@ def common() -> None:
                                     "Serial connection lost; attempting reconnect..."
                                 )
                                 while (
-                                    not client._wantExit
+                                    not getattr(client, "_wantExit", False)
                                     and not client.isConnected.is_set()
                                 ):
                                     try:

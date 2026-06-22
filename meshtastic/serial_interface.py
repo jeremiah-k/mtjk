@@ -127,8 +127,6 @@ class SerialInterface(StreamInterface):
         This prevents the kernel from de-asserting DTR on last close, which
         would reboot many Meshtastic devices (nRF52, RAK4631, etc.).
         """
-        import termios  # pylint: disable=C0415,E0401
-
         attrs = termios.tcgetattr(fd)
         attrs[2] = attrs[2] & ~termios.HUPCL
         termios.tcsetattr(fd, termios.TCSAFLUSH, attrs)
