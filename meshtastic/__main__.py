@@ -172,6 +172,10 @@ OTA_MAX_RETRIES: int = 5
 
 # Keep-alive sleep interval for main loop (effectively infinite wait)
 MAIN_LOOP_IDLE_SLEEP_SECONDS = 1000
+"""Sleep duration for the CLI main loop when listening."""
+
+NOPROTO_RECONNECT_RETRY_SECONDS = 0.5
+"""Polling interval for serial reconnect attempts after device reboot/disconnect."""
 
 
 # COMPAT_STABLE_SHIM: accept historical config field spellings.
@@ -3222,7 +3226,33 @@ def common() -> None:
                 ):  # loop until someone presses ctrlc
                     try:
                         while True:
-                            time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
+                            time.sleep(NOPROTO_RECONNECT_RETRY_SECONDS)
+                            # Detect serial disconnect and attempt reconnect
+                            # so --noproto/--listen survives device reboots
+                            if (
+                                not client._wantExit
+                                and not client.isConnected.is_set()
+                                and isinstance(
+                                    client,
+                                    meshtastic.serial_interface.SerialInterface,
+                                )
+                            ):
+                                logger.info(
+                                    "Serial connection lost; attempting reconnect..."
+                                )
+                                while (
+                                    not client._wantExit
+                                    and not client.isConnected.is_set()
+                                ):
+                                    try:
+                                        client.connect()
+                                    except Exception as exc:
+                                        logger.debug(
+                                            "Reconnect attempt failed: %s", exc
+                                        )
+                                        time.sleep(NOPROTO_RECONNECT_RETRY_SECONDS)
+                                if client.isConnected.is_set():
+                                    logger.info("Serial reconnected.")
                     except KeyboardInterrupt:
                         logger.info("Exiting due to keyboard interrupt")
 

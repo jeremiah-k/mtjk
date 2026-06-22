@@ -415,7 +415,9 @@ class NodeView:
         MeshInterface = self._interface.__class__
         if nodeId in (LOCAL_ADDR, BROADCAST_ADDR):
             return self.localNode
-        n = meshtastic.node.Node(self._interface, nodeId, timeout=timeout)
+        n = meshtastic.node.Node(
+            self._interface, nodeId, timeout=timeout, noProto=self._interface.noProto
+        )
         if requestChannels:
             logger.debug("About to requestChannels")
             n.requestChannels()
