@@ -293,7 +293,7 @@ class MeshInterface:  # pylint: disable=R0902
         self.isConnected: threading.Event = threading.Event()
         self.noProto: bool = noProto
         self.localNode: meshtastic.node.Node = meshtastic.node.Node(
-            self, -1, timeout=timeout
+            self, -1, timeout=timeout, noProto=noProto
         )  # We fixup nodenum later
         self.myInfo: mesh_pb2.MyNodeInfo | None = None  # We don't have device info yet
         self.metadata: mesh_pb2.DeviceMetadata | None = (

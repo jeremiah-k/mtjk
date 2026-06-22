@@ -12,6 +12,14 @@ import time
 import types
 from typing import IO, Any, BinaryIO, Callable
 
+try:
+    import termios
+
+    _TERMIOS_ERRORS: tuple[type[Exception], ...] = (termios.error,)
+except ImportError:
+    # termios is Unix-only; on Windows the error is never raised.
+    _TERMIOS_ERRORS = ()
+
 import serial  # type: ignore[import-untyped]
 
 import meshtastic.util
@@ -126,7 +134,7 @@ class SerialInterface(StreamInterface):
         This prevents the kernel from de-asserting DTR on last close, which
         would reboot many Meshtastic devices (nRF52, RAK4631, etc.).
         """
-        import termios  # pylint: disable=C0415,E0401
+        import termios  # pylint: disable=C0415,W0621  # Unix-only; callers guard with platform check
 
         attrs = termios.tcgetattr(fd)
         attrs[2] = attrs[2] & ~termios.HUPCL
@@ -354,6 +362,7 @@ class SerialInterface(StreamInterface):
                 "Timed out waiting for connection completion" in message
                 or "Connection lost while waiting for connection completion" in message
                 or "No serial Meshtastic device detected for reconnect." in message
+                or "does not exist (device disconnected)" in message
             )
         return False
 
@@ -401,7 +410,9 @@ class SerialInterface(StreamInterface):
             # is an empirically chosen compromise that gives common USB serial
             # stacks time to drain host-side buffers; running the cycle twice has
             # proven more reliable for delivering trailing bytes before close().
-            with contextlib.suppress(OSError, ValueError, serial.SerialException):
+            with contextlib.suppress(
+                OSError, ValueError, serial.SerialException, *_TERMIOS_ERRORS
+            ):
                 stream.flush()
                 time.sleep(SERIAL_SETTLING_DELAY)
                 stream.flush()
