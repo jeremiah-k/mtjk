@@ -3231,18 +3231,12 @@ def common() -> None:
                         while True:
                             # Detect serial disconnect and attempt reconnect
                             # so --noproto/--listen survives device reboots
-                            if (
-                                getattr(client, "devPath", None) is not None
-                                and _serial_should_reconnect(client)
-                            ):
-                                _poll_serial_reconnect(client)
-
                             if getattr(client, "devPath", None) is not None:
-                                time.sleep(
-                                    SERIAL_RECONNECT_RETRY_SECONDS
-                                    if _serial_should_reconnect(client)
-                                    else SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS
-                                )
+                                needs_reconnect = _serial_should_reconnect(client)
+                                if needs_reconnect:
+                                    _poll_serial_reconnect(client)
+                                    continue  # skip main-loop sleep; reconnect timing is self-contained
+                                time.sleep(SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS)
                             else:
                                 time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
                     except KeyboardInterrupt:
@@ -4010,6 +4004,12 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
     rx_thread = getattr(client, "_rxThread", None)
     if rx_thread is not None and rx_thread.is_alive():
         rx_thread.join(timeout=5.0)
+        if rx_thread.is_alive():
+            logger.warning(
+                "Reader thread is still alive after join timeout; delaying reconnect."
+            )
+            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+            return
 
     try:
         client.connect()  # type: ignore[attr-defined]

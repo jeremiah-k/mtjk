@@ -24,7 +24,7 @@ def _make_serial_mock(
 ) -> MagicMock:
     """Build a MagicMock simulating a SerialInterface for reconnect tests."""
 
-    client = MagicMock(spec=MeshInterface)
+    client = MagicMock(autospec=MeshInterface)
     client.noProto = no_proto
     client._wantExit = want_exit
 
@@ -49,6 +49,15 @@ def _make_serial_mock(
     client.connect = MagicMock()
     client._is_retryable_connect_error = MagicMock(return_value=False)
     return client
+
+
+def _simulate_reader_exit(client: MagicMock) -> None:
+    """Configure mock so reader thread reports dead after join()."""
+
+    def _join_kills(**kw: object) -> None:
+        client._rxThread.is_alive.return_value = False
+
+    client._rxThread.join.side_effect = _join_kills
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +156,11 @@ def test_poll_reconnect_waits_for_dead_reader_thread() -> None:
     client.connect.return_value = None
     # After connect, mark as connected
     client.connect.side_effect = lambda: client.isConnected.set()
+    # Simulate thread dying after join
+    def _simulate_join_exit(**kw: object) -> None:
+        client._rxThread.is_alive.return_value = False
+
+    client._rxThread.join.side_effect = _simulate_join_exit
 
     with patch("meshtastic.__main__.time"):
         _poll_serial_reconnect(client)
@@ -156,11 +170,27 @@ def test_poll_reconnect_waits_for_dead_reader_thread() -> None:
 
 
 @pytest.mark.unit
+def test_poll_reconnect_returns_if_reader_still_alive() -> None:
+    """Reconnect defers if reader thread is still alive after join timeout."""
+
+    client = _make_serial_mock(is_connected=False)
+    client._rxThread.is_alive.return_value = True  # stays alive
+
+    with patch("meshtastic.__main__.time") as mock_time:
+        _poll_serial_reconnect(client)
+
+    client._rxThread.join.assert_called_once_with(timeout=5.0)
+    client.connect.assert_not_called()
+    mock_time.sleep.assert_called_once_with(SERIAL_RECONNECT_RETRY_SECONDS)
+
+
+@pytest.mark.unit
 def test_poll_reconnect_swallows_oserror() -> None:
     """Reconnect catches OSError and sleeps before returning."""
 
     client = _make_serial_mock(is_connected=False)
     client.connect.side_effect = OSError("device gone")
+    _simulate_reader_exit(client)
 
     with patch("meshtastic.__main__.time") as mock_time:
         _poll_serial_reconnect(client)
@@ -175,6 +205,7 @@ def test_poll_reconnect_swallows_retryable_mesh_error() -> None:
     client = _make_serial_mock(is_connected=False)
     client._is_retryable_connect_error = MagicMock(return_value=True)
     client.connect.side_effect = MeshInterface.MeshInterfaceError("device not found")
+    _simulate_reader_exit(client)
 
     with patch("meshtastic.__main__.time") as mock_time:
         _poll_serial_reconnect(client)
@@ -189,6 +220,7 @@ def test_poll_reconnect_reraises_non_retryable_mesh_error() -> None:
     client = _make_serial_mock(is_connected=False)
     client._is_retryable_connect_error = MagicMock(return_value=False)
     client.connect.side_effect = MeshInterface.MeshInterfaceError("config error")
+    _simulate_reader_exit(client)
 
     with pytest.raises(MeshInterface.MeshInterfaceError, match="config error"):
         _poll_serial_reconnect(client)
@@ -211,5 +243,5 @@ def test_mesh_interface_noproto_propagates_to_localnode() -> None:
 def test_mesh_interface_proto_propagates_to_localnode() -> None:
     """MeshInterface(noProto=False) should create localNode with noProto=False."""
 
-    with MeshInterface(noProto=True) as iface:
-        assert iface.localNode.noProto is True
+    with MeshInterface(noProto=False) as iface:
+        assert iface.localNode.noProto is False
