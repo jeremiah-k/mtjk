@@ -180,6 +180,9 @@ SERIAL_RECONNECT_RETRY_SECONDS = 0.5
 SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS = 2.0
 """Sleep duration when a serial listen session is connected and healthy."""
 
+SERIAL_RX_THREAD_JOIN_TIMEOUT_SECONDS = 5.0
+"""Timeout for joining the old reader thread before reconnecting."""
+
 
 # COMPAT_STABLE_SHIM: accept historical config field spellings.
 # Backward-compatible aliases for renamed config fields.
@@ -4015,7 +4018,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
     # Wait for the old reader thread to exit before reconnecting
     rx_thread = getattr(client, "_rxThread", None)
     if rx_thread is not None and rx_thread.is_alive():
-        rx_thread.join(timeout=5.0)
+        rx_thread.join(timeout=SERIAL_RX_THREAD_JOIN_TIMEOUT_SECONDS)
         if rx_thread.is_alive():
             logger.warning(
                 "Reader thread is still alive after join timeout; delaying reconnect."
