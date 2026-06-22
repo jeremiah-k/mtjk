@@ -172,10 +172,13 @@ OTA_MAX_RETRIES: int = 5
 
 # Keep-alive sleep interval for main loop (effectively infinite wait)
 MAIN_LOOP_IDLE_SLEEP_SECONDS = 1000
-"""Sleep duration for the CLI main loop when listening."""
+"""Sleep duration for the CLI main loop when listening on non-serial interfaces."""
 
-NOPROTO_RECONNECT_RETRY_SECONDS = 0.5
+SERIAL_RECONNECT_RETRY_SECONDS = 0.5
 """Polling interval for serial reconnect attempts after device reboot/disconnect."""
+
+SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS = 2.0
+"""Sleep duration when a serial listen session is connected and healthy."""
 
 
 # COMPAT_STABLE_SHIM: accept historical config field spellings.
@@ -3226,42 +3229,19 @@ def common() -> None:
                 ):  # loop until someone presses ctrlc
                     try:
                         while True:
-                            if isinstance(
-                                client,
-                                meshtastic.serial_interface.SerialInterface,
+                            # Detect serial disconnect and attempt reconnect
+                            # so --noproto/--listen survives device reboots
+                            if (
+                                getattr(client, "devPath", None) is not None
+                                and _serial_should_reconnect(client)
                             ):
-                                # Detect serial disconnect and attempt reconnect
-                                # so --noproto/--listen survives device reboots
-                                if (
-                                    not getattr(client, "_wantExit", False)
-                                    and not client.isConnected.is_set()
-                                ):
-                                    logger.info(
-                                        "Serial connection lost; attempting reconnect..."
-                                    )
-                                    while (
-                                        not getattr(client, "_wantExit", False)
-                                        and not client.isConnected.is_set()
-                                    ):
-                                        try:
-                                            client.connect()
-                                        except (
-                                            ConnectionError,
-                                            OSError,
-                                            TimeoutError,
-                                        ) as exc:
-                                            logger.debug(
-                                                "Reconnect attempt failed: %s", exc
-                                            )
-                                            time.sleep(
-                                                NOPROTO_RECONNECT_RETRY_SECONDS
-                                            )
-                                    if client.isConnected.is_set():
-                                        logger.info("Serial reconnected.")
+                                _poll_serial_reconnect(client)
+
+                            if getattr(client, "devPath", None) is not None:
                                 time.sleep(
-                                    NOPROTO_RECONNECT_RETRY_SECONDS
-                                    if not client.isConnected.is_set()
-                                    else 2.0
+                                    SERIAL_RECONNECT_RETRY_SECONDS
+                                    if _serial_should_reconnect(client)
+                                    else SERIAL_LISTEN_CONNECTED_SLEEP_SECONDS
                                 )
                             else:
                                 time.sleep(MAIN_LOOP_IDLE_SLEEP_SECONDS)
@@ -3987,6 +3967,70 @@ def addRemoteAdminArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     )
 
     return parser
+
+
+def _serial_transport_is_live(client: MeshInterface) -> bool:
+    """Check if a serial interface has a live transport (stream open, reader alive).
+
+    In noProto mode, ``isConnected`` is never set because the protocol handshake
+    is skipped. This helper checks transport-level liveness instead: the stream
+    exists and is open, and the reader thread is alive.
+    """
+    stream = getattr(client, "stream", None)
+    if stream is None or not getattr(stream, "is_open", True):
+        return False
+    rx_thread = getattr(client, "_rxThread", None)
+    if rx_thread is not None and not rx_thread.is_alive():
+        return False
+    return True
+
+
+def _serial_should_reconnect(client: MeshInterface) -> bool:
+    """Return True if a serial client needs reconnect attention.
+
+    For protocol mode: reconnect when ``isConnected`` is cleared.
+    For noProto mode: reconnect when the transport itself is dead.
+    """
+    if getattr(client, "_wantExit", False):
+        return False
+    if getattr(client, "noProto", False):
+        return not _serial_transport_is_live(client)
+    return not client.isConnected.is_set()
+
+
+def _poll_serial_reconnect(client: MeshInterface) -> None:
+    """Attempt one round of serial reconnection, sleeping on failure.
+
+    Catches connection-related errors and retryable MeshInterfaceError.
+    Waits for the old reader thread to exit before reconnecting.
+    """
+    logger.info("Serial connection lost; attempting reconnect...")
+
+    # Wait for the old reader thread to exit before reconnecting
+    rx_thread = getattr(client, "_rxThread", None)
+    if rx_thread is not None and rx_thread.is_alive():
+        rx_thread.join(timeout=5.0)
+
+    try:
+        client.connect()  # type: ignore[attr-defined]
+        if client.isConnected.is_set() or _serial_transport_is_live(client):
+            logger.info("Serial reconnected.")
+    except (ConnectionError, OSError, TimeoutError) as exc:
+        logger.debug("Reconnect attempt failed: %s", exc)
+        time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+    except MeshInterface.MeshInterfaceError as exc:
+        if hasattr(client, "_is_retryable_connect_error") and (
+            client._is_retryable_connect_error(exc)  # type: ignore[union-attr]
+        ):
+            logger.debug("Reconnect attempt failed (retryable): %s", exc)
+            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+        else:
+            raise
+
+
+# ---------------------------------------------------------------------------
+# End of reconnect helpers
+# ---------------------------------------------------------------------------
 
 
 def initParser() -> None:

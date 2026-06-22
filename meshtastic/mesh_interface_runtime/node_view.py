@@ -416,7 +416,10 @@ class NodeView:
         if nodeId in (LOCAL_ADDR, BROADCAST_ADDR):
             return self.localNode
         n = meshtastic.node.Node(
-            self._interface, nodeId, timeout=timeout, noProto=self._interface.noProto
+            self._interface,
+            nodeId,
+            timeout=timeout,
+            noProto=getattr(self._interface, "noProto", False),
         )
         if requestChannels:
             logger.debug("About to requestChannels")
