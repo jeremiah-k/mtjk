@@ -351,18 +351,18 @@ def test_addContactURL_raises_for_malformed_b64() -> None:
 
     anode, _ = _make_mocked_node(12345)
 
-    with pytest.raises(MeshInterface.MeshInterfaceError, match="Failed to parse"):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="Failed to decode"):
         anode.addContactURL("https://meshtastic.org/v/#!@#$invalid-base64@#$")
 
 
 @pytest.mark.unit
 def test_addContactURL_raises_for_oversized_payload() -> None:
-    """AddContactURL should reject payloads exceeding the size cap."""
+    """AddContactURL should reject decoded payloads exceeding the size cap."""
 
     anode, _ = _make_mocked_node(12345)
 
-    # Craft a URL with a fragment larger than _MAX_CONTACT_URL_PAYLOAD
-    huge_fragment = "A" * 5000
+    # Craft a fragment whose decoded size exceeds _MAX_CONTACT_URL_PAYLOAD
+    huge_fragment = "A" * 6000  # decodes to ~4500 bytes
     with pytest.raises(MeshInterface.MeshInterfaceError, match="payload too large"):
         anode.addContactURL(f"https://meshtastic.org/v/#{huge_fragment}")
 

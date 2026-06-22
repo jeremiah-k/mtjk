@@ -98,7 +98,8 @@ MAX_LONG_NAME_LEN = _MAX_LONG_NAME_LEN
 MAX_RINGTONE_LENGTH = _MAX_RINGTONE_LENGTH
 MAX_SHORT_NAME_LEN = _MAX_SHORT_NAME_LEN
 
-# Cap for contact URL payload size (a legitimate SharedContact is <1KB).
+# Maximum allowed size (in bytes) of the decoded contact URL payload.
+# A legitimate SharedContact protobuf is expected to be <1KB.
 _MAX_CONTACT_URL_PAYLOAD = 4096
 
 
@@ -928,18 +929,23 @@ class Node:  # pylint: disable=too-many-instance-attributes
         """
         node_num = toNodeNum(node_id)
 
-        def _read_node() -> dict[str, Any] | None:
+        def _read_user_snapshot() -> dict[str, Any] | None:
             nodes_by_num = self.iface.nodesByNum
-            return nodes_by_num.get(node_num) if nodes_by_num else None
+            node = nodes_by_num.get(node_num) if nodes_by_num else None
+            if not isinstance(node, dict):
+                return None
+            user = node.get("user")
+            if not isinstance(user, dict):
+                return None
+            return dict(user)  # shallow copy under lock
 
-        node = self._execute_with_node_db_lock(_read_node)
-        if not node or not node.get("user"):
+        u = self._execute_with_node_db_lock(_read_user_snapshot)
+        if not u:
             self._raise_interface_error(f"Node {node_id} not found in NodeDB")
 
         contact = admin_pb2.SharedContact()
         contact.node_num = node_num
 
-        u = node["user"]
         if u.get("id"):
             contact.user.id = u["id"]
         if u.get("macaddr"):
@@ -1016,25 +1022,26 @@ class Node:  # pylint: disable=too-many-instance-attributes
             self._raise_interface_error(f"Invalid URL '{url}'")
 
         b64 = fragment
-        if not b64:
-            self._raise_interface_error("Contact URL has empty fragment")
-
-        # Cap payload size — a legitimate SharedContact is <1KB
-        if len(b64) > _MAX_CONTACT_URL_PAYLOAD:
-            self._raise_interface_error(
-                f"Contact URL payload too large ({len(b64)} chars, "
-                f"max {_MAX_CONTACT_URL_PAYLOAD})"
-            )
-
         missing_padding = len(b64) % 4
         if missing_padding:
             b64 += "=" * (4 - missing_padding)
 
         try:
             decoded = base64.b64decode(b64, altchars=b"-_", validate=True)
+        except (binascii.Error, ValueError) as exc:
+            self._raise_interface_error(f"Failed to decode contact URL: {exc}")
+
+        # Cap decoded payload — a legitimate SharedContact is <1KB
+        if len(decoded) > _MAX_CONTACT_URL_PAYLOAD:
+            self._raise_interface_error(
+                f"Contact URL payload too large ({len(decoded)} bytes, "
+                f"max {_MAX_CONTACT_URL_PAYLOAD})"
+            )
+
+        try:
             contact = admin_pb2.SharedContact()
             contact.ParseFromString(decoded)
-        except (binascii.Error, google.protobuf.message.DecodeError, ValueError) as exc:
+        except google.protobuf.message.DecodeError as exc:
             self._raise_interface_error(f"Failed to parse contact URL: {exc}")
 
         # Validate decoded contact before sending
