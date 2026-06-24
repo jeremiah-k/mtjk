@@ -41,6 +41,7 @@ class PositionLite(_message.Message):
     ALTITUDE_FIELD_NUMBER: _builtins.int
     TIME_FIELD_NUMBER: _builtins.int
     LOCATION_SOURCE_FIELD_NUMBER: _builtins.int
+    PRECISION_BITS_FIELD_NUMBER: _builtins.int
     latitude_i: _builtins.int
     """
     The new preferred location encoding, multiply by 1e-7 to get degrees
@@ -66,6 +67,10 @@ class PositionLite(_message.Message):
     """
     TODO: REPLACE
     """
+    precision_bits: _builtins.int
+    """
+    Indicates the bits of precision set by the sending node
+    """
     def __init__(
         self,
         *,
@@ -74,10 +79,11 @@ class PositionLite(_message.Message):
         altitude: _builtins.int = ...,
         time: _builtins.int = ...,
         location_source: _mesh_pb2.Position.LocSource.ValueType = ...,
+        precision_bits: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["altitude", b"altitude", "latitude_i", b"latitude_i", "location_source", b"location_source", "longitude_i", b"longitude_i", "time", b"time"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["altitude", b"altitude", "latitude_i", b"latitude_i", "location_source", b"location_source", "longitude_i", b"longitude_i", "precision_bits", b"precision_bits", "time", b"time"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -171,26 +177,26 @@ class NodeInfoLite(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     NUM_FIELD_NUMBER: _builtins.int
-    USER_FIELD_NUMBER: _builtins.int
-    POSITION_FIELD_NUMBER: _builtins.int
     SNR_FIELD_NUMBER: _builtins.int
     LAST_HEARD_FIELD_NUMBER: _builtins.int
-    DEVICE_METRICS_FIELD_NUMBER: _builtins.int
     CHANNEL_FIELD_NUMBER: _builtins.int
-    VIA_MQTT_FIELD_NUMBER: _builtins.int
     HOPS_AWAY_FIELD_NUMBER: _builtins.int
-    IS_FAVORITE_FIELD_NUMBER: _builtins.int
-    IS_IGNORED_FIELD_NUMBER: _builtins.int
     NEXT_HOP_FIELD_NUMBER: _builtins.int
     BITFIELD_FIELD_NUMBER: _builtins.int
+    LONG_NAME_FIELD_NUMBER: _builtins.int
+    SHORT_NAME_FIELD_NUMBER: _builtins.int
+    HW_MODEL_FIELD_NUMBER: _builtins.int
+    ROLE_FIELD_NUMBER: _builtins.int
+    PUBLIC_KEY_FIELD_NUMBER: _builtins.int
+    SNR_Q4_FIELD_NUMBER: _builtins.int
     num: _builtins.int
     """
     The node number
     """
     snr: _builtins.float
     """
-    Returns the Signal-to-noise ratio (SNR) of the last received message,
-    as measured by the receiver. Return SNR of the last received message in dB
+    In-memory SNR of the last received message in dB. Not serialised directly:
+    always zeroed before encode; persisted as snr_q4 = 19 below.
     """
     last_heard: _builtins.int
     """
@@ -200,23 +206,9 @@ class NodeInfoLite(_message.Message):
     """
     local channel index we heard that node on. Only populated if its not the default channel.
     """
-    via_mqtt: _builtins.bool
-    """
-    True if we witnessed the node over MQTT instead of LoRA transport
-    """
     hops_away: _builtins.int
     """
     Number of hops away from us this node is (0 if direct neighbor)
-    """
-    is_favorite: _builtins.bool
-    """
-    True if node is in our favorites list
-    Persists between NodeDB internal clean ups
-    """
-    is_ignored: _builtins.bool
-    """
-    True if node is in our ignored list
-    Persists between NodeDB internal clean ups
     """
     next_hop: _builtins.int
     """
@@ -224,49 +216,57 @@ class NodeInfoLite(_message.Message):
     """
     bitfield: _builtins.int
     """
-    Bitfield for storing booleans.
-    LSB 0 is_key_manually_verified
-    LSB 1 is_muted
+    Bitfield for storing booleans. See NODEINFO_BITFIELD_* in src/mesh/NodeDB.h.
     """
-    @_builtins.property
-    def user(self) -> Global___UserLite:
-        """
-        The user info for this node
-        """
+    long_name: _builtins.str
+    """Flattened user fields (formerly UserLite). macaddr dropped (deprecated 1.2.11).
 
-    @_builtins.property
-    def position(self) -> Global___PositionLite:
-        """
-        This position data. Note: before 1.2.14 we would also store the last time we've heard from this node in position.time, that is no longer true.
-        Position.time now indicates the last time we received a POSITION from that node.
-        """
 
-    @_builtins.property
-    def device_metrics(self) -> _telemetry_pb2.DeviceMetrics:
-        """
-        The latest device metrics for the node.
-        """
-
+    A full name for this user, i.e. "Kevin Hester".
+    """
+    short_name: _builtins.str
+    """
+    A VERY short name, ideally two characters or an emoji.
+    Suitable for a tiny OLED screen.
+    """
+    hw_model: _mesh_pb2.HardwareModel.ValueType
+    """
+    Hardware model the user's device is running.
+    """
+    role: _config_pb2.Config.DeviceConfig.Role.ValueType
+    """
+    The user's role in the mesh.
+    """
+    public_key: _builtins.bytes
+    """
+    The public key of the user's device, for PKI-based encrypted DMs.
+    """
+    snr_q4: _builtins.int
+    """
+    Q4-encoded SNR: dB × 4, sint32 zigzag. Matches RouteDiscovery convention.
+    Encode: snr_q4 = (int32_t)(snr * 4.0f). Decode: snr = snr_q4 / 4.0f.
+    float snr is always zeroed on disk; this field carries all persisted SNR.
+    """
     def __init__(
         self,
         *,
         num: _builtins.int = ...,
-        user: Global___UserLite | None = ...,
-        position: Global___PositionLite | None = ...,
         snr: _builtins.float = ...,
         last_heard: _builtins.int = ...,
-        device_metrics: _telemetry_pb2.DeviceMetrics | None = ...,
         channel: _builtins.int = ...,
-        via_mqtt: _builtins.bool = ...,
         hops_away: _builtins.int | None = ...,
-        is_favorite: _builtins.bool = ...,
-        is_ignored: _builtins.bool = ...,
         next_hop: _builtins.int = ...,
         bitfield: _builtins.int = ...,
+        long_name: _builtins.str = ...,
+        short_name: _builtins.str = ...,
+        hw_model: _mesh_pb2.HardwareModel.ValueType = ...,
+        role: _config_pb2.Config.DeviceConfig.Role.ValueType = ...,
+        public_key: _builtins.bytes = ...,
+        snr_q4: _builtins.int = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "device_metrics", b"device_metrics", "hops_away", b"hops_away", "position", b"position", "user", b"user"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "hops_away", b"hops_away"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "bitfield", b"bitfield", "channel", b"channel", "device_metrics", b"device_metrics", "hops_away", b"hops_away", "is_favorite", b"is_favorite", "is_ignored", b"is_ignored", "last_heard", b"last_heard", "next_hop", b"next_hop", "num", b"num", "position", b"position", "snr", b"snr", "user", b"user", "via_mqtt", b"via_mqtt"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "bitfield", b"bitfield", "channel", b"channel", "hops_away", b"hops_away", "hw_model", b"hw_model", "last_heard", b"last_heard", "long_name", b"long_name", "next_hop", b"next_hop", "num", b"num", "public_key", b"public_key", "role", b"role", "short_name", b"short_name", "snr", b"snr", "snr_q4", b"snr_q4"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__hops_away: _TypeAlias = _typing.Literal["hops_away"]  # noqa: Y015
     _WhichOneofArgType__hops_away: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away"]  # noqa: Y015
@@ -397,11 +397,111 @@ class DeviceState(_message.Message):
 Global___DeviceState: _TypeAlias = DeviceState  # noqa: Y015
 
 @_typing.final
+class NodePositionEntry(_message.Message):
+    """Satellite per-node entries; stored alongside the slim NodeInfoLite so nodes
+    that never report don't pay the embedded cost.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NUM_FIELD_NUMBER: _builtins.int
+    POSITION_FIELD_NUMBER: _builtins.int
+    num: _builtins.int
+    @_builtins.property
+    def position(self) -> Global___PositionLite: ...
+    def __init__(
+        self,
+        *,
+        num: _builtins.int = ...,
+        position: Global___PositionLite | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["position", b"position"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["num", b"num", "position", b"position"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___NodePositionEntry: _TypeAlias = NodePositionEntry  # noqa: Y015
+
+@_typing.final
+class NodeTelemetryEntry(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NUM_FIELD_NUMBER: _builtins.int
+    DEVICE_METRICS_FIELD_NUMBER: _builtins.int
+    num: _builtins.int
+    @_builtins.property
+    def device_metrics(self) -> _telemetry_pb2.DeviceMetrics: ...
+    def __init__(
+        self,
+        *,
+        num: _builtins.int = ...,
+        device_metrics: _telemetry_pb2.DeviceMetrics | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["device_metrics", b"device_metrics"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["device_metrics", b"device_metrics", "num", b"num"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___NodeTelemetryEntry: _TypeAlias = NodeTelemetryEntry  # noqa: Y015
+
+@_typing.final
+class NodeEnvironmentEntry(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NUM_FIELD_NUMBER: _builtins.int
+    ENVIRONMENT_METRICS_FIELD_NUMBER: _builtins.int
+    num: _builtins.int
+    @_builtins.property
+    def environment_metrics(self) -> _telemetry_pb2.EnvironmentMetrics: ...
+    def __init__(
+        self,
+        *,
+        num: _builtins.int = ...,
+        environment_metrics: _telemetry_pb2.EnvironmentMetrics | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["environment_metrics", b"environment_metrics"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["environment_metrics", b"environment_metrics", "num", b"num"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___NodeEnvironmentEntry: _TypeAlias = NodeEnvironmentEntry  # noqa: Y015
+
+@_typing.final
+class NodeStatusEntry(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NUM_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    num: _builtins.int
+    @_builtins.property
+    def status(self) -> _mesh_pb2.StatusMessage: ...
+    def __init__(
+        self,
+        *,
+        num: _builtins.int = ...,
+        status: _mesh_pb2.StatusMessage | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["status", b"status"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["num", b"num", "status", b"status"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___NodeStatusEntry: _TypeAlias = NodeStatusEntry  # noqa: Y015
+
+@_typing.final
 class NodeDatabase(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     VERSION_FIELD_NUMBER: _builtins.int
     NODES_FIELD_NUMBER: _builtins.int
+    POSITIONS_FIELD_NUMBER: _builtins.int
+    TELEMETRY_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    ENVIRONMENT_FIELD_NUMBER: _builtins.int
     version: _builtins.int
     """
     A version integer used to invalidate old save files when we make
@@ -414,15 +514,31 @@ class NodeDatabase(_message.Message):
         New lite version of NodeDB to decrease memory footprint
         """
 
+    @_builtins.property
+    def positions(self) -> _containers.RepeatedCompositeFieldContainer[Global___NodePositionEntry]:
+        """Per-NodeNum satellite arrays. Constrained platforms (e.g. STM32WL) omit
+        these via MESHTASTIC_EXCLUDE_*DB build flags.
+        """
+
+    @_builtins.property
+    def telemetry(self) -> _containers.RepeatedCompositeFieldContainer[Global___NodeTelemetryEntry]: ...
+    @_builtins.property
+    def status(self) -> _containers.RepeatedCompositeFieldContainer[Global___NodeStatusEntry]: ...
+    @_builtins.property
+    def environment(self) -> _containers.RepeatedCompositeFieldContainer[Global___NodeEnvironmentEntry]: ...
     def __init__(
         self,
         *,
         version: _builtins.int = ...,
         nodes: _abc.Iterable[Global___NodeInfoLite] | None = ...,
+        positions: _abc.Iterable[Global___NodePositionEntry] | None = ...,
+        telemetry: _abc.Iterable[Global___NodeTelemetryEntry] | None = ...,
+        status: _abc.Iterable[Global___NodeStatusEntry] | None = ...,
+        environment: _abc.Iterable[Global___NodeEnvironmentEntry] | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["nodes", b"nodes", "version", b"version"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["environment", b"environment", "nodes", b"nodes", "positions", b"positions", "status", b"status", "telemetry", b"telemetry", "version", b"version"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

@@ -544,97 +544,50 @@ class ModuleConfig(_message.Message):
 
         DESCRIPTOR: _descriptor.Descriptor
 
-        ENABLED_FIELD_NUMBER: _builtins.int
-        POSITION_DEDUP_ENABLED_FIELD_NUMBER: _builtins.int
-        POSITION_PRECISION_BITS_FIELD_NUMBER: _builtins.int
         POSITION_MIN_INTERVAL_SECS_FIELD_NUMBER: _builtins.int
-        NODEINFO_DIRECT_RESPONSE_FIELD_NUMBER: _builtins.int
         NODEINFO_DIRECT_RESPONSE_MAX_HOPS_FIELD_NUMBER: _builtins.int
-        RATE_LIMIT_ENABLED_FIELD_NUMBER: _builtins.int
         RATE_LIMIT_WINDOW_SECS_FIELD_NUMBER: _builtins.int
         RATE_LIMIT_MAX_PACKETS_FIELD_NUMBER: _builtins.int
-        DROP_UNKNOWN_ENABLED_FIELD_NUMBER: _builtins.int
         UNKNOWN_PACKET_THRESHOLD_FIELD_NUMBER: _builtins.int
-        EXHAUST_HOP_TELEMETRY_FIELD_NUMBER: _builtins.int
-        EXHAUST_HOP_POSITION_FIELD_NUMBER: _builtins.int
-        ROUTER_PRESERVE_HOPS_FIELD_NUMBER: _builtins.int
-        enabled: _builtins.bool
-        """
-        Master enable for traffic management module
-        """
-        position_dedup_enabled: _builtins.bool
-        """
-        Enable position deduplication to drop redundant position broadcasts
-        """
-        position_precision_bits: _builtins.int
-        """
-        Number of bits of precision for position deduplication (0-32)
-        """
         position_min_interval_secs: _builtins.int
         """
-        Minimum interval in seconds between position updates from the same node
-        """
-        nodeinfo_direct_response: _builtins.bool
-        """
-        Enable direct response to NodeInfo requests from local cache
+        Minimum interval in seconds between position updates from the same node.
+        A non-zero value implicitly enables the suppression window; 0 disables it.
         """
         nodeinfo_direct_response_max_hops: _builtins.int
         """
-        Minimum hop distance from requestor before responding to NodeInfo requests
-        """
-        rate_limit_enabled: _builtins.bool
-        """
-        Enable per-node rate limiting to throttle chatty nodes
+        Maximum hop distance from the requestor at which direct NodeInfo responses
+        are served from the local cache. A non-zero value implicitly enables direct
+        response; 0 disables it.
         """
         rate_limit_window_secs: _builtins.int
         """
-        Time window in seconds for rate limiting calculations
+        Time window in seconds for per-node rate limiting.
+        A non-zero value implicitly enables rate limiting; 0 disables it.
         """
         rate_limit_max_packets: _builtins.int
         """
-        Maximum packets allowed per node within the rate limit window
-        """
-        drop_unknown_enabled: _builtins.bool
-        """
-        Enable dropping of unknown/undecryptable packets per rate_limit_window_secs
+        Maximum packets allowed per node within the rate limit window.
+        A non-zero value implicitly enables rate limiting; 0 disables it.
         """
         unknown_packet_threshold: _builtins.int
         """
-        Number of unknown packets before dropping from a node
-        """
-        exhaust_hop_telemetry: _builtins.bool
-        """
-        Set hop_limit to 0 for relayed telemetry broadcasts (own packets unaffected)
-        """
-        exhaust_hop_position: _builtins.bool
-        """
-        Set hop_limit to 0 for relayed position broadcasts (own packets unaffected)
-        """
-        router_preserve_hops: _builtins.bool
-        """
-        Preserve hop_limit for router-to-router traffic
+        Maximum unknown/undecryptable packets per rate window before the source
+        is dropped. A non-zero value implicitly enables unknown-packet filtering;
+        0 disables it.
         """
         def __init__(
             self,
             *,
-            enabled: _builtins.bool = ...,
-            position_dedup_enabled: _builtins.bool = ...,
-            position_precision_bits: _builtins.int = ...,
             position_min_interval_secs: _builtins.int = ...,
-            nodeinfo_direct_response: _builtins.bool = ...,
             nodeinfo_direct_response_max_hops: _builtins.int = ...,
-            rate_limit_enabled: _builtins.bool = ...,
             rate_limit_window_secs: _builtins.int = ...,
             rate_limit_max_packets: _builtins.int = ...,
-            drop_unknown_enabled: _builtins.bool = ...,
             unknown_packet_threshold: _builtins.int = ...,
-            exhaust_hop_telemetry: _builtins.bool = ...,
-            exhaust_hop_position: _builtins.bool = ...,
-            router_preserve_hops: _builtins.bool = ...,
         ) -> None: ...
         _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
         def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-        _ClearFieldArgType: _TypeAlias = _typing.Literal["drop_unknown_enabled", b"drop_unknown_enabled", "enabled", b"enabled", "exhaust_hop_position", b"exhaust_hop_position", "exhaust_hop_telemetry", b"exhaust_hop_telemetry", "nodeinfo_direct_response", b"nodeinfo_direct_response", "nodeinfo_direct_response_max_hops", b"nodeinfo_direct_response_max_hops", "position_dedup_enabled", b"position_dedup_enabled", "position_min_interval_secs", b"position_min_interval_secs", "position_precision_bits", b"position_precision_bits", "rate_limit_enabled", b"rate_limit_enabled", "rate_limit_max_packets", b"rate_limit_max_packets", "rate_limit_window_secs", b"rate_limit_window_secs", "router_preserve_hops", b"router_preserve_hops", "unknown_packet_threshold", b"unknown_packet_threshold"]  # noqa: Y015
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["nodeinfo_direct_response_max_hops", b"nodeinfo_direct_response_max_hops", "position_min_interval_secs", b"position_min_interval_secs", "rate_limit_max_packets", b"rate_limit_max_packets", "rate_limit_window_secs", b"rate_limit_window_secs", "unknown_packet_threshold", b"unknown_packet_threshold"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
         def WhichOneof(self, oneof_group: _Never) -> None: ...
 
