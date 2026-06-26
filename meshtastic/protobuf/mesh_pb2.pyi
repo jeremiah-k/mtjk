@@ -147,13 +147,13 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     RAK11310 (RP2040 + SX1262)
     """
-    SENSELORA_RP2040: _HardwareModel.ValueType  # 27
+    MAKERFABS_TRACKER: _HardwareModel.ValueType  # 27
     """
-    Makerfabs SenseLoRA Receiver (RP2040 + RFM96)
+    Makerfabs Tracker Reserved
     """
-    SENSELORA_S3: _HardwareModel.ValueType  # 28
+    MAKERFABS_RESERVED: _HardwareModel.ValueType  # 28
     """
-    Makerfabs SenseLoRA Industrial Monitor (ESP32-S3 + RFM96)
+    Makerfabs Reserved
     """
     CANARYONE: _HardwareModel.ValueType  # 29
     """
@@ -740,13 +740,13 @@ RAK11310: HardwareModel.ValueType  # 26
 """
 RAK11310 (RP2040 + SX1262)
 """
-SENSELORA_RP2040: HardwareModel.ValueType  # 27
+MAKERFABS_TRACKER: HardwareModel.ValueType  # 27
 """
-Makerfabs SenseLoRA Receiver (RP2040 + RFM96)
+Makerfabs Tracker Reserved
 """
-SENSELORA_S3: HardwareModel.ValueType  # 28
+MAKERFABS_RESERVED: HardwareModel.ValueType  # 28
 """
-Makerfabs SenseLoRA Industrial Monitor (ESP32-S3 + RFM96)
+Makerfabs Reserved
 """
 CANARYONE: HardwareModel.ValueType  # 29
 """
@@ -2691,6 +2691,55 @@ class RemoteShell(_message.Message):
 Global___RemoteShell: _TypeAlias = RemoteShell  # noqa: Y015
 
 @_typing.final
+class BoundingBox(_message.Message):
+    """
+    A rectangular, axis-aligned geographic bounding box.
+    Used to define a rectangular geofence region for a Waypoint.
+    Fields are ordered west, south, east, north to match the standard bounding box
+    convention used by GeoJSON and PMTiles (min longitude, min latitude, max longitude, max latitude),
+    so the box can drive an offline map extract directly.
+    All coordinates are in degrees scaled by 1e-7 (same convention as Position and Waypoint).
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    LONGITUDE_WEST_I_FIELD_NUMBER: _builtins.int
+    LATITUDE_SOUTH_I_FIELD_NUMBER: _builtins.int
+    LONGITUDE_EAST_I_FIELD_NUMBER: _builtins.int
+    LATITUDE_NORTH_I_FIELD_NUMBER: _builtins.int
+    longitude_west_i: _builtins.int
+    """
+    Western edge of the box - minimum longitude (south-west corner)
+    """
+    latitude_south_i: _builtins.int
+    """
+    Southern edge of the box - minimum latitude (south-west corner)
+    """
+    longitude_east_i: _builtins.int
+    """
+    Eastern edge of the box - maximum longitude (north-east corner)
+    """
+    latitude_north_i: _builtins.int
+    """
+    Northern edge of the box - maximum latitude (north-east corner)
+    """
+    def __init__(
+        self,
+        *,
+        longitude_west_i: _builtins.int = ...,
+        latitude_south_i: _builtins.int = ...,
+        longitude_east_i: _builtins.int = ...,
+        latitude_north_i: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["latitude_north_i", b"latitude_north_i", "latitude_south_i", b"latitude_south_i", "longitude_east_i", b"longitude_east_i", "longitude_west_i", b"longitude_west_i"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___BoundingBox: _TypeAlias = BoundingBox  # noqa: Y015
+
+@_typing.final
 class Waypoint(_message.Message):
     """
     Waypoint message, used to share arbitrary locations across the mesh
@@ -2706,6 +2755,10 @@ class Waypoint(_message.Message):
     NAME_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
     ICON_FIELD_NUMBER: _builtins.int
+    GEOFENCE_RADIUS_FIELD_NUMBER: _builtins.int
+    BOUNDING_BOX_FIELD_NUMBER: _builtins.int
+    NOTIFY_ON_ENTER_FIELD_NUMBER: _builtins.int
+    NOTIFY_ON_EXIT_FIELD_NUMBER: _builtins.int
     id: _builtins.int
     """
     Id of the waypoint
@@ -2739,6 +2792,29 @@ class Waypoint(_message.Message):
     """
     Designator icon for the waypoint in the form of a unicode emoji
     """
+    geofence_radius: _builtins.int
+    """
+    If greater than zero, defines a circular geofence centred on this waypoint's
+    location (latitude_i / longitude_i) with this radius in meters.
+    Zero means the waypoint has no circular geofence.
+    """
+    notify_on_enter: _builtins.bool
+    """
+    If true, a notification should be raised when a tracked node enters this
+    waypoint's geofence (the circular radius and/or the bounding box).
+    """
+    notify_on_exit: _builtins.bool
+    """
+    If true, a notification should be raised when a tracked node exits this
+    waypoint's geofence (the circular radius and/or the bounding box).
+    """
+    @_builtins.property
+    def bounding_box(self) -> Global___BoundingBox:
+        """
+        Optional rectangular geofence region for this waypoint.
+        May be used instead of, or in addition to, geofence_radius.
+        """
+
     def __init__(
         self,
         *,
@@ -2750,15 +2826,23 @@ class Waypoint(_message.Message):
         name: _builtins.str = ...,
         description: _builtins.str = ...,
         icon: _builtins.int = ...,
+        geofence_radius: _builtins.int = ...,
+        bounding_box: Global___BoundingBox | None = ...,
+        notify_on_enter: _builtins.bool = ...,
+        notify_on_exit: _builtins.bool = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box", "_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "bounding_box", b"bounding_box", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "description", b"description", "expire", b"expire", "icon", b"icon", "id", b"id", "latitude_i", b"latitude_i", "locked_to", b"locked_to", "longitude_i", b"longitude_i", "name", b"name"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box", "_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "bounding_box", b"bounding_box", "description", b"description", "expire", b"expire", "geofence_radius", b"geofence_radius", "icon", b"icon", "id", b"id", "latitude_i", b"latitude_i", "locked_to", b"locked_to", "longitude_i", b"longitude_i", "name", b"name", "notify_on_enter", b"notify_on_enter", "notify_on_exit", b"notify_on_exit"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__bounding_box: _TypeAlias = _typing.Literal["bounding_box"]  # noqa: Y015
+    _WhichOneofArgType__bounding_box: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box"]  # noqa: Y015
     _WhichOneofReturnType__latitude_i: _TypeAlias = _typing.Literal["latitude_i"]  # noqa: Y015
     _WhichOneofArgType__latitude_i: _TypeAlias = _typing.Literal["_latitude_i", b"_latitude_i"]  # noqa: Y015
     _WhichOneofReturnType__longitude_i: _TypeAlias = _typing.Literal["longitude_i"]  # noqa: Y015
     _WhichOneofArgType__longitude_i: _TypeAlias = _typing.Literal["_longitude_i", b"_longitude_i"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__bounding_box) -> _WhichOneofReturnType__bounding_box | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__latitude_i) -> _WhichOneofReturnType__latitude_i | None: ...
     @_typing.overload
