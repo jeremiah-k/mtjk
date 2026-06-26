@@ -880,6 +880,8 @@ class LockdownAuth(_message.Message):
     BOOTS_REMAINING_FIELD_NUMBER: _builtins.int
     VALID_UNTIL_EPOCH_FIELD_NUMBER: _builtins.int
     LOCK_NOW_FIELD_NUMBER: _builtins.int
+    MAX_SESSION_SECONDS_FIELD_NUMBER: _builtins.int
+    DISABLE_FIELD_NUMBER: _builtins.int
     passphrase: _builtins.bytes
     """
     Passphrase bytes (1-32). Empty when lock_now is true.
@@ -905,6 +907,67 @@ class LockdownAuth(_message.Message):
     connection-level admin authorization, and reboot the device into
     the locked state. Always honoured regardless of current lock state.
     """
+    max_session_seconds: _builtins.int
+    """
+    Optional per-boot uptime cap on the unlocked session, in seconds.
+    0 = unlimited (token-only enforcement, suitable for unattended
+    tower / infrastructure nodes).
+
+    When non-zero, the firmware arms an uptime timer at unlock. On
+    each expiry, while there is still boot-count budget, the firmware
+    decrements the on-flash boot count in place, revokes per-
+    connection admin auth (clients must re-authenticate to see
+    content), re-engages the screen lock, and re-arms the timer
+    without rebooting. Mesh routing keeps running across session
+    boundaries; only when the boot-count budget reaches zero does
+    the device hard-lock and reboot.
+
+    Total exposure ceiling = ((resolved boot count) + 1) * max_session_seconds.
+    The +1 accounts for the initial passphrase-unlocked session
+    itself, since boots_remaining is the number of subsequent
+    session rolls (each consuming one boot from the rollback ledger).
+    The resolved boot count is the value the firmware writes into the
+    token at unlock time: the client-supplied boots_remaining when
+    non-zero, otherwise the firmware default (TOKEN_DEFAULT_BOOTS).
+    Note that boots_remaining == 0 in this message means "use firmware
+    default", NOT "zero boots" — a client computing the ceiling for
+    display should mirror that resolution rather than multiplying the
+    raw request value.
+
+    The cap is persisted in the token, so it survives token-based
+    auto-unlock across reboots. Explicit operator Lock Now still
+    deletes the token and forces passphrase re-entry.
+
+    Uses millis() (CPU uptime), not wall-clock time, so the cap is
+    immune to GPS spoofing, RTC backup-battery removal, and Faraday
+    cage isolation — none of those move the uptime counter. The only
+    way to reset the session clock is a reboot, which costs a boot
+    from the on-flash, HMAC-bound counter.
+    """
+    disable: _builtins.bool
+    """
+    Disable lockdown mode. Requires a valid passphrase in the same
+    message (the device must prove the operator owns it before
+    reverting at-rest encryption). On success the firmware decrypts
+    every stored config / channel / nodedb file back to plaintext,
+    removes the wrapped DEK, unlock token, monotonic-counter, and
+    backoff files, and reboots out of lockdown.
+
+    This is the inverse of the provision/unlock path: it is how the
+    client app's "lockdown mode" toggle returns a device to normal
+    operation.
+
+    NOT reversed by this operation: APPROTECT. Once the debug port
+    lockout has been burned (on silicon where it is effective) it is
+    permanent — disabling lockdown decrypts your data and removes the
+    access gates, but the SWD/JTAG port stays locked for the life of
+    the device (recoverable only via a full chip erase over a debug
+    probe, which destroys all data). Clients should make this
+    irreversibility clear at the moment lockdown is first enabled.
+
+    When true the passphrase field is still required; boots_remaining,
+    valid_until_epoch, max_session_seconds, and lock_now are ignored.
+    """
     def __init__(
         self,
         *,
@@ -912,10 +975,12 @@ class LockdownAuth(_message.Message):
         boots_remaining: _builtins.int = ...,
         valid_until_epoch: _builtins.int = ...,
         lock_now: _builtins.bool = ...,
+        max_session_seconds: _builtins.int = ...,
+        disable: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["boots_remaining", b"boots_remaining", "lock_now", b"lock_now", "passphrase", b"passphrase", "valid_until_epoch", b"valid_until_epoch"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["boots_remaining", b"boots_remaining", "disable", b"disable", "lock_now", b"lock_now", "max_session_seconds", b"max_session_seconds", "passphrase", b"passphrase", "valid_until_epoch", b"valid_until_epoch"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -933,6 +998,7 @@ class HamParameters(_message.Message):
     TX_POWER_FIELD_NUMBER: _builtins.int
     FREQUENCY_FIELD_NUMBER: _builtins.int
     SHORT_NAME_FIELD_NUMBER: _builtins.int
+    LONG_NAME_FIELD_NUMBER: _builtins.int
     call_sign: _builtins.str
     """
     Amateur radio call sign, eg. KD2ABC
@@ -951,6 +1017,11 @@ class HamParameters(_message.Message):
     """
     Optional short name of user
     """
+    long_name: _builtins.str
+    """
+    Optional long name of user
+    Appended to callsign
+    """
     def __init__(
         self,
         *,
@@ -958,10 +1029,11 @@ class HamParameters(_message.Message):
         tx_power: _builtins.int = ...,
         frequency: _builtins.float = ...,
         short_name: _builtins.str = ...,
+        long_name: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["call_sign", b"call_sign", "frequency", b"frequency", "short_name", b"short_name", "tx_power", b"tx_power"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["call_sign", b"call_sign", "frequency", b"frequency", "long_name", b"long_name", "short_name", b"short_name", "tx_power", b"tx_power"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

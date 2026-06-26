@@ -1953,6 +1953,9 @@ class User(_message.Message):
     long_name: _builtins.str
     """
     A full name for this user, i.e. "Kevin Hester"
+    Limited to 24 bytes of UTF-8: longer names are accepted from senders
+    built against the older 39-byte limit, but devices truncate them before
+    storing or rebroadcasting. Clients should enforce 24 bytes in their UI.
     """
     short_name: _builtins.str
     """
@@ -2308,6 +2311,7 @@ class Data(_message.Message):
     REPLY_ID_FIELD_NUMBER: _builtins.int
     EMOJI_FIELD_NUMBER: _builtins.int
     BITFIELD_FIELD_NUMBER: _builtins.int
+    XEDDSA_SIGNATURE_FIELD_NUMBER: _builtins.int
     portnum: _portnums_pb2.PortNum.ValueType
     """
     Formerly named typ and of type Type
@@ -2354,6 +2358,10 @@ class Data(_message.Message):
     """
     Bitfield for extra flags. First use is to indicate that user approves the packet being uploaded to MQTT.
     """
+    xeddsa_signature: _builtins.bytes
+    """
+    XEdDSA signature for the payload
+    """
     def __init__(
         self,
         *,
@@ -2366,10 +2374,11 @@ class Data(_message.Message):
         reply_id: _builtins.int = ...,
         emoji: _builtins.int = ...,
         bitfield: _builtins.int | None = ...,
+        xeddsa_signature: _builtins.bytes = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_bitfield", b"_bitfield", "bitfield", b"bitfield"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_bitfield", b"_bitfield", "bitfield", b"bitfield", "dest", b"dest", "emoji", b"emoji", "payload", b"payload", "portnum", b"portnum", "reply_id", b"reply_id", "request_id", b"request_id", "source", b"source", "want_response", b"want_response"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_bitfield", b"_bitfield", "bitfield", b"bitfield", "dest", b"dest", "emoji", b"emoji", "payload", b"payload", "portnum", b"portnum", "reply_id", b"reply_id", "request_id", b"request_id", "source", b"source", "want_response", b"want_response", "xeddsa_signature", b"xeddsa_signature"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__bitfield: _TypeAlias = _typing.Literal["bitfield"]  # noqa: Y015
     _WhichOneofArgType__bitfield: _TypeAlias = _typing.Literal["_bitfield", b"_bitfield"]  # noqa: Y015
@@ -3029,6 +3038,10 @@ class MeshPacket(_message.Message):
         """
         Arrived via API connection
         """
+        TRANSPORT_UNICAST_UDP: MeshPacket._TransportMechanism.ValueType  # 8
+        """
+        Arrived via Unicast UDP
+        """
 
     class TransportMechanism(_TransportMechanism, metaclass=_TransportMechanismEnumTypeWrapper):
         """
@@ -3067,6 +3080,10 @@ class MeshPacket(_message.Message):
     """
     Arrived via API connection
     """
+    TRANSPORT_UNICAST_UDP: MeshPacket.TransportMechanism.ValueType  # 8
+    """
+    Arrived via Unicast UDP
+    """
 
     FROM_FIELD_NUMBER: _builtins.int
     TO_FIELD_NUMBER: _builtins.int
@@ -3089,6 +3106,7 @@ class MeshPacket(_message.Message):
     RELAY_NODE_FIELD_NUMBER: _builtins.int
     TX_AFTER_FIELD_NUMBER: _builtins.int
     TRANSPORT_MECHANISM_FIELD_NUMBER: _builtins.int
+    XEDDSA_SIGNED_FIELD_NUMBER: _builtins.int
     to: _builtins.int
     """
     The (immediate) destination for this packet
@@ -3214,6 +3232,10 @@ class MeshPacket(_message.Message):
     """
     Indicates which transport mechanism this packet arrived over
     """
+    xeddsa_signed: _builtins.bool
+    """
+    Indicates whether the packet has a valid signature
+    """
     @_builtins.property
     def decoded(self) -> Global___Data:
         """
@@ -3243,10 +3265,11 @@ class MeshPacket(_message.Message):
         relay_node: _builtins.int = ...,
         tx_after: _builtins.int = ...,
         transport_mechanism: Global___MeshPacket.TransportMechanism.ValueType = ...,
+        xeddsa_signed: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["decoded", b"decoded", "encrypted", b"encrypted", "payload_variant", b"payload_variant"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack", "xeddsa_signed", b"xeddsa_signed"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["decoded", "encrypted"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
@@ -3290,6 +3313,7 @@ class NodeInfo(_message.Message):
     IS_IGNORED_FIELD_NUMBER: _builtins.int
     IS_KEY_MANUALLY_VERIFIED_FIELD_NUMBER: _builtins.int
     IS_MUTED_FIELD_NUMBER: _builtins.int
+    HAS_XEDDSA_SIGNED_FIELD_NUMBER: _builtins.int
     num: _builtins.int
     """
     The node number
@@ -3342,6 +3366,12 @@ class NodeInfo(_message.Message):
     True if node has been muted
     Persistes between NodeDB internal clean ups
     """
+    has_xeddsa_signed: _builtins.bool
+    """
+    True if node is signing its packets via XEdDSA
+    Persists between NodeDB internal clean ups
+    LSB 1 of the bitfield
+    """
     @_builtins.property
     def user(self) -> Global___User:
         """
@@ -3377,10 +3407,11 @@ class NodeInfo(_message.Message):
         is_ignored: _builtins.bool = ...,
         is_key_manually_verified: _builtins.bool = ...,
         is_muted: _builtins.bool = ...,
+        has_xeddsa_signed: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "device_metrics", b"device_metrics", "hops_away", b"hops_away", "position", b"position", "user", b"user"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "channel", b"channel", "device_metrics", b"device_metrics", "hops_away", b"hops_away", "is_favorite", b"is_favorite", "is_ignored", b"is_ignored", "is_key_manually_verified", b"is_key_manually_verified", "is_muted", b"is_muted", "last_heard", b"last_heard", "num", b"num", "position", b"position", "snr", b"snr", "user", b"user", "via_mqtt", b"via_mqtt"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away", "channel", b"channel", "device_metrics", b"device_metrics", "has_xeddsa_signed", b"has_xeddsa_signed", "hops_away", b"hops_away", "is_favorite", b"is_favorite", "is_ignored", b"is_ignored", "is_key_manually_verified", b"is_key_manually_verified", "is_muted", b"is_muted", "last_heard", b"last_heard", "num", b"num", "position", b"position", "snr", b"snr", "user", b"user", "via_mqtt", b"via_mqtt"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__hops_away: _TypeAlias = _typing.Literal["hops_away"]  # noqa: Y015
     _WhichOneofArgType__hops_away: _TypeAlias = _typing.Literal["_hops_away", b"_hops_away"]  # noqa: Y015
@@ -3634,6 +3665,7 @@ class FromRadio(_message.Message):
     CLIENTNOTIFICATION_FIELD_NUMBER: _builtins.int
     DEVICEUICONFIG_FIELD_NUMBER: _builtins.int
     LOCKDOWN_STATUS_FIELD_NUMBER: _builtins.int
+    REGION_PRESETS_FIELD_NUMBER: _builtins.int
     id: _builtins.int
     """
     The packet id, used to allow the phone to request missing read packets from the FIFO,
@@ -3749,6 +3781,16 @@ class FromRadio(_message.Message):
         encoding state as magic-string prefixes inside ClientNotification.
         """
 
+    @_builtins.property
+    def region_presets(self) -> Global___LoRaRegionPresetMap:
+        """
+        Map of which modem presets are legal in each LoRa region. Sent once
+        during the want_config handshake (right after `metadata`, before the
+        first `channel`) so client UIs can prevent the user from selecting an
+        illegal region+preset combination. A region that does not appear in
+        any group carries no constraint info and should not be restricted.
+        """
+
     def __init__(
         self,
         *,
@@ -3770,12 +3812,13 @@ class FromRadio(_message.Message):
         clientNotification: Global___ClientNotification | None = ...,
         deviceuiConfig: _device_ui_pb2.DeviceUIConfig | None = ...,
         lockdown_status: Global___LockdownStatus | None = ...,
+        region_presets: Global___LoRaRegionPresetMap | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "id", b"id", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "id", b"id", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["packet", "my_info", "node_info", "config", "log_record", "config_complete_id", "rebooted", "moduleConfig", "channel", "queueStatus", "xmodemPacket", "metadata", "mqttClientProxyMessage", "fileInfo", "clientNotification", "deviceuiConfig", "lockdown_status"]  # noqa: Y015
+    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["packet", "my_info", "node_info", "config", "log_record", "config_complete_id", "rebooted", "moduleConfig", "channel", "queueStatus", "xmodemPacket", "metadata", "mqttClientProxyMessage", "fileInfo", "clientNotification", "deviceuiConfig", "lockdown_status", "region_presets"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     def WhichOneof(self, oneof_group: _WhichOneofArgType_payload_variant) -> _WhichOneofReturnType_payload_variant | None: ...
 
@@ -3822,6 +3865,15 @@ class LockdownStatus(_message.Message):
         """
         Passphrase rejected. backoff_seconds is non-zero when rate-limited.
         """
+        DISABLED: LockdownStatus._State.ValueType  # 5
+        """
+        Lockdown is supported by this firmware but not currently active
+        (no passphrase has been provisioned, or it was disabled via
+        AdminMessage.lockdown_auth.disable). The device is operating in
+        normal, non-encrypted mode. Clients render the lockdown-mode
+        toggle as OFF on receiving this. Distinct from NEEDS_PROVISION,
+        which is only used during an in-progress enable flow.
+        """
 
     class State(_State, metaclass=_StateEnumTypeWrapper): ...
     STATE_UNSPECIFIED: LockdownStatus.State.ValueType  # 0
@@ -3847,6 +3899,15 @@ class LockdownStatus(_message.Message):
     UNLOCK_FAILED: LockdownStatus.State.ValueType  # 4
     """
     Passphrase rejected. backoff_seconds is non-zero when rate-limited.
+    """
+    DISABLED: LockdownStatus.State.ValueType  # 5
+    """
+    Lockdown is supported by this firmware but not currently active
+    (no passphrase has been provisioned, or it was disabled via
+    AdminMessage.lockdown_auth.disable). The device is operating in
+    normal, non-encrypted mode. Clients render the lockdown-mode
+    toggle as OFF on receiving this. Distinct from NEEDS_PROVISION,
+    which is only used during an in-progress enable flow.
     """
 
     STATE_FIELD_NUMBER: _builtins.int
@@ -4407,6 +4468,132 @@ class DeviceMetadata(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeviceMetadata: _TypeAlias = DeviceMetadata  # noqa: Y015
+
+@_typing.final
+class LoRaPresetGroup(_message.Message):
+    """
+    A distinct set of legal modem presets shared by one or more LoRa regions.
+    Regions that have an identical preset list / default / licensing reference
+    the same group (by index) via LoRaRegionPresetMap.region_groups. This keeps
+    the whole map small enough to fit in a single FromRadio packet, since most
+    regions share the one standard preset list.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PRESETS_FIELD_NUMBER: _builtins.int
+    DEFAULT_PRESET_FIELD_NUMBER: _builtins.int
+    LICENSED_ONLY_FIELD_NUMBER: _builtins.int
+    default_preset: _config_pb2.Config.LoRaConfig.ModemPreset.ValueType
+    """
+    The firmware's default modem preset for regions in this group.
+    Always one of `presets`. Clients should select this when switching to one
+    of these regions, or when the current preset is not legal in the new region.
+    """
+    licensed_only: _builtins.bool
+    """
+    True if regions referencing this group are for licensed operators only
+    (e.g. amateur / ham radio bands). Clients should warn or gate accordingly.
+    """
+    @_builtins.property
+    def presets(self) -> _containers.RepeatedScalarFieldContainer[_config_pb2.Config.LoRaConfig.ModemPreset.ValueType]:
+        """
+        The modem presets that are legal for every region referencing this group.
+        """
+
+    def __init__(
+        self,
+        *,
+        presets: _abc.Iterable[_config_pb2.Config.LoRaConfig.ModemPreset.ValueType] | None = ...,
+        default_preset: _config_pb2.Config.LoRaConfig.ModemPreset.ValueType = ...,
+        licensed_only: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["default_preset", b"default_preset", "licensed_only", b"licensed_only", "presets", b"presets"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___LoRaPresetGroup: _TypeAlias = LoRaPresetGroup  # noqa: Y015
+
+@_typing.final
+class LoRaRegionPresets(_message.Message):
+    """
+    Associates a single LoRa region with its preset group.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    REGION_FIELD_NUMBER: _builtins.int
+    GROUP_INDEX_FIELD_NUMBER: _builtins.int
+    region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType
+    """
+    The LoRa region this entry describes.
+    """
+    group_index: _builtins.int
+    """
+    Index into LoRaRegionPresetMap.groups for the preset list that is legal
+    in `region`.
+    """
+    def __init__(
+        self,
+        *,
+        region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType = ...,
+        group_index: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["group_index", b"group_index", "region", b"region"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___LoRaRegionPresets: _TypeAlias = LoRaRegionPresets  # noqa: Y015
+
+@_typing.final
+class LoRaRegionPresetMap(_message.Message):
+    """
+    Map describing which modem presets are valid for each LoRa region. Sent by
+    the firmware during the want_config handshake (as FromRadio.region_presets)
+    so that client UIs can prevent illegal region+preset selections.
+
+    Delivery is grouped to save space: `groups` holds each distinct preset list,
+    and `region_groups` maps every known region to one of those groups by index.
+    A region that does NOT appear in `region_groups` carries no constraint
+    information and should not be restricted by the client (e.g. firmware that
+    predates this message, or a region with no firmware table entry). Clients
+    must also tolerate this whole message being absent.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    GROUPS_FIELD_NUMBER: _builtins.int
+    REGION_GROUPS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def groups(self) -> _containers.RepeatedCompositeFieldContainer[Global___LoRaPresetGroup]:
+        """
+        One entry per distinct (preset-list, default, licensing) combination.
+        Referenced by index from `region_groups`.
+        """
+
+    @_builtins.property
+    def region_groups(self) -> _containers.RepeatedCompositeFieldContainer[Global___LoRaRegionPresets]:
+        """
+        One entry per known LoRa region, pointing at its preset group.
+        """
+
+    def __init__(
+        self,
+        *,
+        groups: _abc.Iterable[Global___LoRaPresetGroup] | None = ...,
+        region_groups: _abc.Iterable[Global___LoRaRegionPresets] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["groups", b"groups", "region_groups", b"region_groups"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___LoRaRegionPresetMap: _TypeAlias = LoRaRegionPresetMap  # noqa: Y015
 
 @_typing.final
 class Heartbeat(_message.Message):
