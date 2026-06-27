@@ -744,11 +744,18 @@ def test_writeChannel_forwards_admin_index_to_session_key_bootstrap(
 def test_writeConfig_traffic_management(
     autospec_local_node_iface: Callable[[type[Any]], MagicMock],
 ) -> None:
-    """Test writeConfig writes traffic_management module config through set_module_config."""
+    """Test writeConfig writes traffic_management module config through set_module_config.
+
+    The bool toggles (``enabled``, ``rate_limit_enabled``, ...) were removed
+    from the protobuf in favour of the "non-zero implies enabled" convention
+    on their companion uint32 fields, so we exercise that convention here.
+    """
     iface = autospec_local_node_iface(MeshInterface)
     anode = Node(iface, "!12345678", noProto=True)
-    anode.moduleConfig.traffic_management.enabled = True
-    anode.moduleConfig.traffic_management.rate_limit_enabled = True
+    tm = anode.moduleConfig.traffic_management
+    tm.position_min_interval_secs = 30
+    tm.rate_limit_window_secs = 60
+    tm.rate_limit_max_packets = 100
 
     sent_messages: list[admin_pb2.AdminMessage] = []
     anode._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
@@ -761,8 +768,10 @@ def test_writeConfig_traffic_management(
     sent_message = sent_messages[0]
     assert sent_message.HasField("set_module_config")
     assert sent_message.set_module_config.HasField("traffic_management")
-    assert sent_message.set_module_config.traffic_management.enabled is True
-    assert sent_message.set_module_config.traffic_management.rate_limit_enabled is True
+    result = sent_message.set_module_config.traffic_management
+    assert result.position_min_interval_secs == 30
+    assert result.rate_limit_window_secs == 60
+    assert result.rate_limit_max_packets == 100
 
 
 @pytest.mark.unit
