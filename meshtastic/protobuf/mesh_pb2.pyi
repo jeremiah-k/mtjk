@@ -2759,6 +2759,7 @@ class Waypoint(_message.Message):
     BOUNDING_BOX_FIELD_NUMBER: _builtins.int
     NOTIFY_ON_ENTER_FIELD_NUMBER: _builtins.int
     NOTIFY_ON_EXIT_FIELD_NUMBER: _builtins.int
+    NOTIFY_FAVORITES_ONLY_FIELD_NUMBER: _builtins.int
     id: _builtins.int
     """
     Id of the waypoint
@@ -2808,6 +2809,13 @@ class Waypoint(_message.Message):
     If true, a notification should be raised when a tracked node exits this
     waypoint's geofence (the circular radius and/or the bounding box).
     """
+    notify_favorites_only: _builtins.bool
+    """
+    If true, only raise geofence enter/exit notifications for nodes that are
+    marked as favorites on the receiving device. Applies to both notify_on_enter
+    and notify_on_exit. Favorite status is resolved locally per receiver, so the
+    same waypoint alerts each node only for its own favorites.
+    """
     @_builtins.property
     def bounding_box(self) -> Global___BoundingBox:
         """
@@ -2830,10 +2838,11 @@ class Waypoint(_message.Message):
         bounding_box: Global___BoundingBox | None = ...,
         notify_on_enter: _builtins.bool = ...,
         notify_on_exit: _builtins.bool = ...,
+        notify_favorites_only: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box", "_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "bounding_box", b"bounding_box", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box", "_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "bounding_box", b"bounding_box", "description", b"description", "expire", b"expire", "geofence_radius", b"geofence_radius", "icon", b"icon", "id", b"id", "latitude_i", b"latitude_i", "locked_to", b"locked_to", "longitude_i", b"longitude_i", "name", b"name", "notify_on_enter", b"notify_on_enter", "notify_on_exit", b"notify_on_exit"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box", "_latitude_i", b"_latitude_i", "_longitude_i", b"_longitude_i", "bounding_box", b"bounding_box", "description", b"description", "expire", b"expire", "geofence_radius", b"geofence_radius", "icon", b"icon", "id", b"id", "latitude_i", b"latitude_i", "locked_to", b"locked_to", "longitude_i", b"longitude_i", "name", b"name", "notify_favorites_only", b"notify_favorites_only", "notify_on_enter", b"notify_on_enter", "notify_on_exit", b"notify_on_exit"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__bounding_box: _TypeAlias = _typing.Literal["bounding_box"]  # noqa: Y015
     _WhichOneofArgType__bounding_box: _TypeAlias = _typing.Literal["_bounding_box", b"_bounding_box"]  # noqa: Y015
