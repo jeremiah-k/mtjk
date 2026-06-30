@@ -234,6 +234,7 @@ considered stable API and may change without deprecation warnings.
 | `meshtastic.util`      | `message_to_json()`       | `messageToJson()`      |
 | `meshtastic.util`      | `to_node_num()`           | `toNodeNum()`          |
 | `meshtastic.util`      | `flags_to_list()`         | `flagsToList()`        |
+| `meshtastic.util`      | `flags_from_list()`       | `flagsFromList()`      |
 
 ### Node and Tunnel
 

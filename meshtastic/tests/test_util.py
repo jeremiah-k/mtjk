@@ -49,6 +49,7 @@ from meshtastic.util import (
     fixme,
     flags_to_list,
     flagsToList,
+    flagsFromList,
     fromPSK,
     fromStr,
     generate_channel_hash,
@@ -2022,3 +2023,80 @@ def test_flags_to_list_conservation(flags: int) -> None:
 
         assert accounted == (flags & known_union)
         assert (accounted | leftover) == flags
+
+
+# ---------------------------------------------------------------------------
+# flagsFromList tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_flagsFromList_single_flag() -> None:
+    """Test flagsFromList with a single flag name."""
+
+    assert flagsFromList(_POSITION_FLAGS, ["ALTITUDE"]) == 1
+
+
+@pytest.mark.unit
+def test_flagsFromList_multiple_flags() -> None:
+    """Test flagsFromList with multiple flag names."""
+
+    assert flagsFromList(_POSITION_FLAGS, ["ALTITUDE", "DOP"]) == 1 | 8
+
+
+@pytest.mark.unit
+def test_flagsFromList_empty_list() -> None:
+    """Test flagsFromList with empty list returns 0."""
+
+    assert flagsFromList(_POSITION_FLAGS, []) == 0
+
+
+@pytest.mark.unit
+def test_flagsFromList_strips_whitespace() -> None:
+    """Test flagsFromList strips whitespace from flag names."""
+
+    assert flagsFromList(_POSITION_FLAGS, ["  ALTITUDE  ", "DOP"]) == 1 | 8
+
+
+@pytest.mark.unit
+def test_flagsFromList_skips_empty_entries() -> None:
+    """Test flagsFromList skips empty entries in the list."""
+
+    assert flagsFromList(_POSITION_FLAGS, ["ALTITUDE", "", "  ", "DOP"]) == 1 | 8
+
+
+@pytest.mark.unit
+def test_flagsFromList_zero_valued_member_is_noop() -> None:
+    """Test that including a zero-valued member doesn't change the bitmask."""
+
+    result_with_zero = flagsFromList(_POSITION_FLAGS, ["UNSET", "ALTITUDE"])
+    result_without = flagsFromList(_POSITION_FLAGS, ["ALTITUDE"])
+    assert result_with_zero == result_without == 1
+
+
+@pytest.mark.unit
+def test_flagsFromList_raises_for_unknown_flag() -> None:
+    """Test flagsFromList raises ValueError for unknown flag names."""
+
+    with pytest.raises(ValueError, match="Unknown flag 'NOT_A_REAL_FLAG'"):
+        flagsFromList(_POSITION_FLAGS, ["NOT_A_REAL_FLAG"])
+
+
+@pytest.mark.unitslow
+@given(st.integers(min_value=0, max_value=0xFFFFF))
+def test_flagsFromList_roundtrip(flags: int) -> None:
+    """Property: flagsToList and flagsFromList roundtrip for known bits."""
+
+    for flag_type in (_EXCLUDED_MODULES, _POSITION_FLAGS):
+        names = [
+            n for n in flags_to_list(flag_type, flags)  # pyright: ignore[reportArgumentType]
+            if not n.startswith("UNKNOWN_ADDITIONAL_FLAGS(")
+        ]
+        if names:
+            reconstructed = flagsFromList(flag_type, names)
+            known_union = 0
+            for key in flag_type.keys():
+                value = flag_type.Value(key)
+                if value:
+                    known_union |= value
+            assert reconstructed == (flags & known_union)

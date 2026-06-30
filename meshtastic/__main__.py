@@ -110,6 +110,15 @@ except (ImportError, AttributeError) as exc:
 
 logger = logging.getLogger(__name__)
 
+# Map dotted preference paths to the protobuf enum that defines their flags.
+# These fields are stored as uint32 bitmasks in the protobuf but have an
+# associated enum that names the individual flags. Add new bitfield-enum
+# fields here as protobufs grow.
+BITFIELD_ENUMS = {
+    "network.enabled_protocols": config_pb2.Config.NetworkConfig.ProtocolFlags,
+    "position.position_flags": config_pb2.Config.PositionConfig.PositionFlags,
+}
+
 # ==============================================================================
 # CLI Timing Constants
 # ==============================================================================
@@ -1195,12 +1204,27 @@ def setPref(config: Any, comp_name: str, raw_val: Any) -> bool:
         print("Warning: network.wifi_psk must be 8 or more characters.")
         return False
 
+    # Handle uint32 bitfields that have an associated enum of flag names.
+    bitfield_enum = None
+    if config_type.message_type is not None:
+        bitfield_path = f"{config_type.name}.{pref.name}"
+        bitfield_enum = BITFIELD_ENUMS.get(bitfield_path)
+    if bitfield_enum and isinstance(val, str):
+        # At this point fromStr() could not parse val as int/float/bool/bytes,
+        # so treat it as a comma-separated list of bitfield flag names.
+        flag_names = [n.strip() for n in val.split(",") if n.strip()]
+        try:
+            val = meshtastic.util.flagsFromList(bitfield_enum, flag_names)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return False
+
     enumType = pref.enum_type
     if enumType and isinstance(val, str):
         # We've failed so far to convert this string into an enum, try to find it by reflection
-        e = enumType.values_by_name.get(val)
-        if e:
-            val = e.number
+        ev = enumType.values_by_name.get(val)
+        if ev:
+            val = ev.number
         else:
             print(
                 f"{name[0]}.{uni_name} does not have an enum called {val}, so you can not set it."
@@ -3049,6 +3073,10 @@ def common() -> None:
                     "ERROR: Ham radio callsign cannot be empty or contain only whitespace characters"
                 )
 
+        # Fail fast before connecting if the OTA firmware file does not exist.
+        if args.ota_update is not None and not os.path.isfile(args.ota_update):
+            _cli_exit(f"Error: OTA firmware file not found: {args.ota_update}")
+
         if _power_meter_requested(args):
             _create_power_meter()
 
@@ -3278,10 +3306,11 @@ def addConnectionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
         "--host",
         "--tcp",
         "-t",
-        help="Connect to a device using TCP, optionally passing hostname/IP or host:port. (defaults to '%(const)s')",
+        help="Connect to a device using TCP, optionally passing hostname/IP or host:port (default port 4403). (defaults to '%(const)s')",
         nargs="?",
         default=None,
         const="localhost",
+        metavar="HOST[:PORT]",
     )
 
     group.add_argument(
@@ -4034,7 +4063,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
         elif isinstance(exc, MeshInterface.MeshInterfaceError):
             retryable = bool(
                 hasattr(client, "_is_retryable_connect_error")
-                and client._is_retryable_connect_error(exc)  # type: ignore[union-attr]
+                and client._is_retryable_connect_error(exc)
             )
         else:
             retryable = False

@@ -162,25 +162,6 @@ def test_showNodes_favorite_asterisk_display(
 
 
 @pytest.mark.unit
-def test_showNodes_favorite_field_formatting() -> None:
-    """Test the formatting logic for isFavorite field."""
-    # Test favorite node
-    raw_value: bool | None = True
-    formatted_value = "*" if raw_value else ""
-    assert formatted_value == "*"
-
-    # Test non-favorite node
-    raw_value = False
-    formatted_value = "*" if raw_value else ""
-    assert formatted_value == ""
-
-    # Test None/missing value
-    raw_value = None
-    formatted_value = "*" if raw_value else ""
-    assert formatted_value == ""
-
-
-@pytest.mark.unit
 def test_showNodes_with_custom_fields_including_favorite(
     capsys: pytest.CaptureFixture[str], favorite_nodes_iface: MeshInterface
 ) -> None:

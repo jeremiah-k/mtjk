@@ -1271,6 +1271,12 @@ def to_node_num(node_id: int | str) -> int:
 def _flags_to_list(flag_type: Any, flags: int) -> list[str]:
     """Convert a protobuf enum bitfield into a list of active flag names.
 
+    Zero-valued members (e.g. EXCLUDED_NONE, UNSET, NO_BROADCAST) never appear
+    in the result: they hold no bit, so `flags & value` is always False for
+    them, and a flags value of 0 therefore decodes to an empty list rather
+    than a named "no flags" entry. Any leftover bits not corresponding to a
+    known member are reported via `UNKNOWN_ADDITIONAL_FLAGS(<leftover>)`.
+
     Parameters
     ----------
     flag_type : Any
@@ -1286,14 +1292,52 @@ def _flags_to_list(flag_type: Any, flags: int) -> list[str]:
     """
     ret = []
     for key in flag_type.keys():
-        if key == "EXCLUDED_NONE":
-            continue
         if flags & flag_type.Value(key):
             ret.append(key)
             flags &= ~flag_type.Value(key)
     if flags > 0:
         ret.append(f"UNKNOWN_ADDITIONAL_FLAGS({flags})")
     return ret
+
+
+def _flags_from_list(flag_type: Any, flags: list[str]) -> int:
+    """Combine a list of protobuf enum flag names into a bitmask.
+
+    Zero-valued members (e.g. EXCLUDED_NONE, UNSET, NO_BROADCAST) are accepted
+    but are no-ops: they OR in 0 and thus set nothing. A list consisting
+    solely of such a member (or an empty list) yields 0, which round-trips
+    back through `_flags_to_list` as an empty list rather than the original
+    member name -- see `_flags_to_list`'s docstring.
+
+    Parameters
+    ----------
+    flag_type : Any
+        Protobuf EnumTypeWrapper providing `.keys()` and `.Value(name)` for enum members.
+    flags : list[str]
+        Flag member names to combine. Whitespace is trimmed; blank entries are skipped.
+
+    Returns
+    -------
+    int
+        Bitmask formed by OR-ing the values of the named flags.
+
+    Raises
+    ------
+    ValueError
+        If any entry is not a member of `flag_type`. The error message lists the valid choices.
+    """
+    result = 0
+    valid_names = list(flag_type.keys())
+    for flag_name in flags:
+        flag_name = flag_name.strip()
+        if not flag_name:
+            continue
+        if flag_name not in valid_names:
+            raise ValueError(
+                f"Unknown flag '{flag_name}'. Valid choices: {', '.join(sorted(valid_names))}"
+            )
+        result |= flag_type.Value(flag_name)
+    return result
 
 
 def flagsToList(flag_type: Any, flags: int) -> list[str]:
@@ -1319,3 +1363,32 @@ def flagsToList(flag_type: Any, flags: int) -> list[str]:
 def flags_to_list(flag_type: Any, flags: int) -> list[str]:
     """Backward-compatible wrapper for :func:`flagsToList`."""
     return flagsToList(flag_type, flags)
+
+
+def flagsFromList(flag_type: Any, flags: list[str]) -> int:
+    """Combine a list of protobuf enum flag names into a bitmask.
+
+    Parameters
+    ----------
+    flag_type : Any
+        Protobuf EnumTypeWrapper providing `.keys()` and `.Value(name)` for enum members.
+    flags : list[str]
+        Flag member names to combine. Whitespace is trimmed; blank entries are skipped.
+
+    Returns
+    -------
+    int
+        Bitmask formed by OR-ing the values of the named flags.
+
+    Raises
+    ------
+    ValueError
+        If any entry is not a member of `flag_type`. The error message lists the valid choices.
+    """
+    return _flags_from_list(flag_type, flags)
+
+
+# COMPAT_STABLE_SHIM: snake_case mirror of flagsFromList for naming consistency with flags_to_list.
+def flags_from_list(flag_type: Any, flags: list[str]) -> int:
+    """Backward-compatible wrapper for :func:`flagsFromList`."""
+    return flagsFromList(flag_type, flags)
