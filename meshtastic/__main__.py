@@ -134,7 +134,7 @@ def _parse_integer_literal(value: str) -> int:
     if not stripped:
         raise ValueError("empty integer literal")
     unsigned = stripped[1:] if stripped[0] in "+-" else stripped
-    if unsigned.lower().startswith(("0x", "0b", "0o")):
+    if unsigned.lower().startswith(("0x", "0b")):
         return int(stripped, 0)
     return int(stripped, 10)
 

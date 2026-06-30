@@ -6237,15 +6237,17 @@ def test_main_setPref_bitfield_invalid_name(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize("value", ["0xZZ", "0o10"], ids=["invalid_hex", "octal"])
 def test_main_setPref_bitfield_invalid_numeric_string(
+    value: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """setPref() rejects malformed numeric-looking bitfield values cleanly."""
     config = config_pb2.Config()
-    assert setPref(config, "position.position_flags", "0xZZ") is False
+    assert setPref(config, "position.position_flags", value) is False
     assert config.position.position_flags == 0
     out, _ = capsys.readouterr()
-    assert "Invalid numeric bitfield value '0xZZ'" in out
+    assert f"Invalid numeric bitfield value '{value}'" in out
     assert "decimal" in out
     assert "0x" in out
     assert "0b" in out

@@ -47,9 +47,10 @@ from meshtastic.util import (
     eliminate_duplicate_port,
     findPorts,
     fixme,
+    flags_from_list,
     flags_to_list,
-    flagsToList,
     flagsFromList,
+    flagsToList,
     fromPSK,
     fromStr,
     generate_channel_hash,
@@ -2042,6 +2043,13 @@ def test_flagsFromList_multiple_flags() -> None:
     """Test flagsFromList with multiple flag names."""
 
     assert flagsFromList(_POSITION_FLAGS, ["ALTITUDE", "DOP"]) == 1 | 8
+
+
+@pytest.mark.unit
+def test_flags_from_list_wrapper() -> None:
+    """Test snake_case flags_from_list compatibility wrapper."""
+
+    assert flags_from_list(_POSITION_FLAGS, ["ALTITUDE", "SPEED"]) == 513
 
 
 @pytest.mark.unit
