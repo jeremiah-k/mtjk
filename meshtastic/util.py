@@ -1292,9 +1292,10 @@ def _flags_to_list(flag_type: Any, flags: int) -> list[str]:
     """
     ret = []
     for key in flag_type.keys():
-        if flags & flag_type.Value(key):
+        value = flag_type.Value(key)
+        if flags & value:
             ret.append(key)
-            flags &= ~flag_type.Value(key)
+            flags &= ~value
     if flags > 0:
         ret.append(f"UNKNOWN_ADDITIONAL_FLAGS({flags})")
     return ret
@@ -1327,7 +1328,7 @@ def _flags_from_list(flag_type: Any, flags: list[str]) -> int:
         If any entry is not a member of `flag_type`. The error message lists the valid choices.
     """
     result = 0
-    valid_names = list(flag_type.keys())
+    valid_names = set(flag_type.keys())
     for flag_name in flags:
         flag_name = flag_name.strip()
         if not flag_name:

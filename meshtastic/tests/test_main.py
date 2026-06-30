@@ -6171,9 +6171,17 @@ def test_flatten_leaf_paths_empty_nested_dict() -> None:
 @pytest.mark.parametrize(
     "field,value,expected,expected_output_substring",
     [
+        ("position.position_flags", 513, 513, "513"),
+        ("position.position_flags", "513", 513, "513"),
+        ("position.position_flags", "0x201", 513, "0x201"),
+        ("position.position_flags", "0b1000000001", 513, "0b1000000001"),
         ("network.enabled_protocols", "UDP_BROADCAST", 1, "UDP_BROADCAST"),
+        ("network.enabled_protocols", "0x1", 1, "0x1"),
         ("position.position_flags", "ALTITUDE,SPEED", 513, "ALTITUDE,SPEED"),
+        ("position.position_flags", "ALTITUDE, SPEED", 513, "ALTITUDE, SPEED"),
         ("network.enabled_protocols", "0", 0, "0"),
+        ("network.enabled_protocols", "0x0", 0, "0x0"),
+        ("network.enabled_protocols", "0b0", 0, "0b0"),
         ("position.position_flags", "ALTITUDE, , SPEED", 513, "ALTITUDE, , SPEED"),
         (
             "network.enabled_protocols",
@@ -6183,21 +6191,29 @@ def test_flatten_leaf_paths_empty_nested_dict() -> None:
         ),
     ],
     ids=[
-        "single_flag",
-        "comma_separated_flags",
         "raw_integer",
+        "decimal_string",
+        "hex_string",
+        "binary_string",
+        "single_flag",
+        "network_hex_string",
+        "comma_separated_flags",
+        "comma_separated_flags_with_spaces",
+        "zero_decimal_string",
+        "zero_hex_string",
+        "zero_binary_string",
         "whitespace_and_empty_entries",
         "zero_valued_member_is_noop",
     ],
 )
 def test_main_setPref_bitfield(
     field: str,
-    value: str,
+    value: Any,
     expected: int,
     expected_output_substring: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """setPref() accepts bitfield flag names, comma-separated lists, and raw integers."""
+    """setPref() accepts bitfield flag names and numeric masks."""
     config = config_pb2.Config()
     assert setPref(config, field, value) is True
     assert _get_config_field(config, field) == expected
@@ -6217,6 +6233,22 @@ def test_main_setPref_bitfield_invalid_name(
     assert "Unknown flag 'TCP'" in out
     assert "NO_BROADCAST" in out
     assert "UDP_BROADCAST" in out
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_setPref_bitfield_invalid_numeric_string(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """setPref() rejects malformed numeric-looking bitfield values cleanly."""
+    config = config_pb2.Config()
+    assert setPref(config, "position.position_flags", "0xZZ") is False
+    assert config.position.position_flags == 0
+    out, _ = capsys.readouterr()
+    assert "Invalid numeric bitfield value '0xZZ'" in out
+    assert "decimal" in out
+    assert "0x" in out
+    assert "0b" in out
 
 
 @pytest.mark.unit

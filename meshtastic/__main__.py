@@ -119,6 +119,52 @@ BITFIELD_ENUMS = {
     "position.position_flags": config_pb2.Config.PositionConfig.PositionFlags,
 }
 
+
+def _looks_like_integer_literal(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if stripped[0] in "+-":
+        stripped = stripped[1:]
+    return bool(stripped) and stripped[0].isdigit()
+
+
+def _parse_integer_literal(value: str) -> int:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("empty integer literal")
+    unsigned = stripped[1:] if stripped[0] in "+-" else stripped
+    if unsigned.lower().startswith(("0x", "0b", "0o")):
+        return int(stripped, 0)
+    return int(stripped, 10)
+
+
+def _parse_bitfield_value(flag_type: Any, raw_val: Any) -> int:
+    if isinstance(raw_val, int):
+        val = raw_val
+    elif isinstance(raw_val, str):
+        stripped = raw_val.strip()
+        if _looks_like_integer_literal(stripped):
+            try:
+                val = _parse_integer_literal(stripped)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid numeric bitfield value {raw_val!r}. Expected decimal, "
+                    "hex with 0x prefix, binary with 0b prefix, or comma-separated flag names."
+                ) from e
+        else:
+            flag_names = [n.strip() for n in stripped.split(",") if n.strip()]
+            val = meshtastic.util.flagsFromList(flag_type, flag_names)
+    else:
+        raise ValueError(
+            f"Invalid bitfield value {raw_val!r}. Expected integer, numeric string, or flag names."
+        )
+
+    if val < 0:
+        raise ValueError(f"Invalid bitfield value {raw_val!r}. Expected a non-negative integer.")
+    return val
+
+
 # ==============================================================================
 # CLI Timing Constants
 # ==============================================================================
@@ -1194,7 +1240,19 @@ def setPref(config: Any, comp_name: str, raw_val: Any) -> bool:
     if (not pref) or (not config_type):
         return False
 
-    if isinstance(raw_val, str):
+    # Handle uint32 bitfields that have an associated enum of flag names.
+    bitfield_enum = None
+    if config_type.message_type is not None:
+        bitfield_path = f"{config_type.name}.{pref.name}"
+        bitfield_enum = BITFIELD_ENUMS.get(bitfield_path)
+
+    if bitfield_enum:
+        try:
+            val = _parse_bitfield_value(bitfield_enum, raw_val)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return False
+    elif isinstance(raw_val, str):
         val = meshtastic.util.fromStr(raw_val)
     else:
         val = raw_val
@@ -1203,21 +1261,6 @@ def setPref(config: Any, comp_name: str, raw_val: Any) -> bool:
     if snake_name == "wifi_psk" and len(str(raw_val)) < 8:
         print("Warning: network.wifi_psk must be 8 or more characters.")
         return False
-
-    # Handle uint32 bitfields that have an associated enum of flag names.
-    bitfield_enum = None
-    if config_type.message_type is not None:
-        bitfield_path = f"{config_type.name}.{pref.name}"
-        bitfield_enum = BITFIELD_ENUMS.get(bitfield_path)
-    if bitfield_enum and isinstance(val, str):
-        # At this point fromStr() could not parse val as int/float/bool/bytes,
-        # so treat it as a comma-separated list of bitfield flag names.
-        flag_names = [n.strip() for n in val.split(",") if n.strip()]
-        try:
-            val = meshtastic.util.flagsFromList(bitfield_enum, flag_names)
-        except ValueError as e:
-            print(f"ERROR: {e}")
-            return False
 
     enumType = pref.enum_type
     if enumType and isinstance(val, str):
