@@ -3,7 +3,6 @@ name: API Baseline
 on:
   pull_request:
     branches:
-      - master
       - develop
       - "**-review"
   workflow_dispatch: {}

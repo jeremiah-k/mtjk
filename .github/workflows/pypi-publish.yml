@@ -12,6 +12,7 @@ env:
 
 jobs:
   build:
+    if: ${{ github.event.release.target_commitish != 'master' }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release_tag.outputs.tag }}
@@ -99,6 +100,7 @@ jobs:
 
   publish:
     needs: build
+    if: ${{ needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     environment: pypi-release
     permissions:

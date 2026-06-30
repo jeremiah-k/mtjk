@@ -2,11 +2,9 @@ name: CI
 on:
   push:
     branches:
-      - master
       - develop
   pull_request:
     branches:
-      - master
       - develop
       - "**-review"
   workflow_dispatch: {}

@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   docker-build:
+    if: ${{ github.ref_name != 'master' && (github.event_name != 'release' || github.event.release.target_commitish != 'master') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 

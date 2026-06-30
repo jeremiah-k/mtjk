@@ -11,6 +11,7 @@ env:
 
 jobs:
   update-protobufs:
+    if: ${{ github.ref_name != 'master' }}
     runs-on: ubuntu-latest
 
     steps:
