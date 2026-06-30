@@ -568,9 +568,9 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Heltec Mesh Node T096 board features an nRF52840 CPU and a TFT screen.
     """
-    TRACKER_T1000_E_PRO: _HardwareModel.ValueType  # 128
+    MESH_TRACKER_X1: _HardwareModel.ValueType  # 128
     """
-    Seeed studio T1000-E Pro tracker card. NRF52840 w/ LR2021 radio,
+    Seeed studio Mesh Tracker X1card. NRF52840 w/ LR2021 radio,
     GPS, button, buzzer, and sensors.
     """
     THINKNODE_M7: _HardwareModel.ValueType  # 129
@@ -1161,9 +1161,9 @@ HELTEC_MESH_NODE_T096: HardwareModel.ValueType  # 127
 """
 Heltec Mesh Node T096 board features an nRF52840 CPU and a TFT screen.
 """
-TRACKER_T1000_E_PRO: HardwareModel.ValueType  # 128
+MESH_TRACKER_X1: HardwareModel.ValueType  # 128
 """
-Seeed studio T1000-E Pro tracker card. NRF52840 w/ LR2021 radio,
+Seeed studio Mesh Tracker X1card. NRF52840 w/ LR2021 radio,
 GPS, button, buzzer, and sensors.
 """
 THINKNODE_M7: HardwareModel.ValueType  # 129
