@@ -32,6 +32,7 @@ from meshtastic.__main__ import (
     onNode,
     onReceive,
     printConfig,
+    setPref,
     support_info,
     traverseConfig,
     tunnelMain,
@@ -53,6 +54,14 @@ from ..tcp_interface import TCPInterface
 
 SDS_DISABLED_SENTINEL: int = 4_294_967_295
 MAIN_LOCAL_ADDR: str = cast(str, main_module.__dict__["LOCAL_ADDR"])
+
+
+def _get_config_field(config: Any, dotted_path: str) -> Any:
+    """Walk a dotted `section.field` path on a protobuf Config message."""
+    obj = config
+    for part in dotted_path.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _mock_sendText_helper(
@@ -5101,6 +5110,7 @@ def test_main_ota_update_requires_tcp_interface(
 
     with (
         patch("meshtastic.serial_interface.SerialInterface", return_value=iface),
+        patch("os.path.isfile", return_value=True),
         pytest.raises(SystemExit) as excinfo,
     ):
         main()
@@ -5159,6 +5169,7 @@ def test_main_ota_update_retries_then_exits(
             _make_fake_tcp_interface(get_node=get_node),
         ),
         patch("meshtastic.ota.ESP32WiFiOTA", return_value=ota),
+        patch("os.path.isfile", return_value=True),
         patch("meshtastic.__main__.time.sleep") as sleep_mock,
         pytest.raises(SystemExit) as excinfo,
     ):
@@ -5206,6 +5217,7 @@ def test_main_ota_update_fails_fast_on_non_transport_error(
             _make_fake_tcp_interface(get_node=get_node),
         ),
         patch("meshtastic.ota.ESP32WiFiOTA", return_value=ota),
+        patch("os.path.isfile", return_value=True),
         patch("meshtastic.__main__.time.sleep") as sleep_mock,
         pytest.raises(SystemExit) as excinfo,
     ):
@@ -5254,6 +5266,7 @@ def test_main_ota_update_constructor_error_exits_gracefully(
                 "Invalid OTA destination 'bad:port': malformed address"
             ),
         ) as ota_ctor_mock,
+        patch("os.path.isfile", return_value=True),
         patch("meshtastic.__main__.time.sleep") as sleep_mock,
         pytest.raises(SystemExit) as excinfo,
     ):
@@ -5295,6 +5308,7 @@ def test_main_ota_update_succeeds_and_prints_completion(
             _make_fake_tcp_interface(get_node=get_node),
         ),
         patch("meshtastic.ota.ESP32WiFiOTA", return_value=ota),
+        patch("os.path.isfile", return_value=True),
         patch("meshtastic.__main__.time.sleep") as sleep_mock,
     ):
         main()
@@ -5339,6 +5353,7 @@ def test_main_ota_update_rejects_remote_dest(
     with (
         patch("meshtastic.tcp_interface.TCPInterface", _make_fake_tcp_interface()),
         patch("meshtastic.ota.ESP32WiFiOTA") as ota_cls,
+        patch("os.path.isfile", return_value=True),
         pytest.raises(SystemExit) as excinfo,
     ):
         main()
@@ -5394,6 +5409,7 @@ def test_main_ota_update_allows_explicit_local_dest(
             _make_fake_tcp_interface(get_node=get_node),
         ),
         patch("meshtastic.ota.ESP32WiFiOTA", return_value=ota),
+        patch("os.path.isfile", return_value=True),
         patch("meshtastic.__main__.time.sleep"),
     ):
         main()
@@ -6148,3 +6164,120 @@ def test_flatten_leaf_paths_empty_nested_dict() -> None:
     """_flatten_leaf_paths treats an empty nested dict as a leaf."""
     result = main_module._flatten_leaf_paths("lora", {"hop_limit": 3, "empty": {}})
     assert sorted(result) == ["lora.empty", "lora.hop_limit"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize(
+    "field,value,expected,expected_output_substring",
+    [
+        ("position.position_flags", 513, 513, "513"),
+        ("position.position_flags", "513", 513, "513"),
+        ("position.position_flags", "0x201", 513, "0x201"),
+        ("position.position_flags", "0b1000000001", 513, "0b1000000001"),
+        ("network.enabled_protocols", "UDP_BROADCAST", 1, "UDP_BROADCAST"),
+        ("network.enabled_protocols", "0x1", 1, "0x1"),
+        ("position.position_flags", "ALTITUDE,SPEED", 513, "ALTITUDE,SPEED"),
+        ("position.position_flags", "ALTITUDE, SPEED", 513, "ALTITUDE, SPEED"),
+        ("network.enabled_protocols", "0", 0, "0"),
+        ("network.enabled_protocols", "0x0", 0, "0x0"),
+        ("network.enabled_protocols", "0b0", 0, "0b0"),
+        ("position.position_flags", "ALTITUDE, , SPEED", 513, "ALTITUDE, , SPEED"),
+        (
+            "network.enabled_protocols",
+            "NO_BROADCAST,UDP_BROADCAST",
+            1,
+            "NO_BROADCAST,UDP_BROADCAST",
+        ),
+    ],
+    ids=[
+        "raw_integer",
+        "decimal_string",
+        "hex_string",
+        "binary_string",
+        "single_flag",
+        "network_hex_string",
+        "comma_separated_flags",
+        "comma_separated_flags_with_spaces",
+        "zero_decimal_string",
+        "zero_hex_string",
+        "zero_binary_string",
+        "whitespace_and_empty_entries",
+        "zero_valued_member_is_noop",
+    ],
+)
+def test_main_setPref_bitfield(
+    field: str,
+    value: Any,
+    expected: int,
+    expected_output_substring: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """setPref() accepts bitfield flag names and numeric masks."""
+    config = config_pb2.Config()
+    assert setPref(config, field, value) is True
+    assert _get_config_field(config, field) == expected
+    out, _ = capsys.readouterr()
+    assert f"Set {field} to {expected_output_substring}" in out
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_setPref_bitfield_invalid_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """setPref() rejects unknown bitfield flag names."""
+    config = config_pb2.Config()
+    assert setPref(config, "network.enabled_protocols", "TCP") is False
+    out, _ = capsys.readouterr()
+    assert "Unknown flag 'TCP'" in out
+    assert "NO_BROADCAST" in out
+    assert "UDP_BROADCAST" in out
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize("value", ["0xZZ", "0o10"], ids=["invalid_hex", "octal"])
+def test_main_setPref_bitfield_invalid_numeric_string(
+    value: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """setPref() rejects malformed numeric-looking bitfield values cleanly."""
+    config = config_pb2.Config()
+    assert setPref(config, "position.position_flags", value) is False
+    assert config.position.position_flags == 0
+    out, _ = capsys.readouterr()
+    assert f"Invalid numeric bitfield value '{value}'" in out
+    assert "decimal" in out
+    assert "0x" in out
+    assert "0b" in out
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_ota_update_file_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--ota-update with a missing firmware file exits early before connecting."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["", "--host", "localhost", "--ota-update", "/nonexistent/firmware.bin"],
+    )
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    with (
+        patch("meshtastic.tcp_interface.TCPInterface") as tcp_cls,
+        patch("meshtastic.serial_interface.SerialInterface") as serial_cls,
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 1
+    _, err = capsys.readouterr()
+    assert "OTA firmware file not found" in err
+    assert "/nonexistent/firmware.bin" in err
+    # Verify no transport was constructed before the file check fired
+    tcp_cls.assert_not_called()
+    serial_cls.assert_not_called()

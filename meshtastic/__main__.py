@@ -110,6 +110,61 @@ except (ImportError, AttributeError) as exc:
 
 logger = logging.getLogger(__name__)
 
+# Map dotted preference paths to the protobuf enum that defines their flags.
+# These fields are stored as uint32 bitmasks in the protobuf but have an
+# associated enum that names the individual flags. Add new bitfield-enum
+# fields here as protobufs grow.
+BITFIELD_ENUMS = {
+    "network.enabled_protocols": config_pb2.Config.NetworkConfig.ProtocolFlags,
+    "position.position_flags": config_pb2.Config.PositionConfig.PositionFlags,
+}
+
+
+def _looks_like_integer_literal(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if stripped[0] in "+-":
+        stripped = stripped[1:]
+    return bool(stripped) and stripped[0].isdigit()
+
+
+def _parse_integer_literal(value: str) -> int:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("empty integer literal")
+    unsigned = stripped[1:] if stripped[0] in "+-" else stripped
+    if unsigned.lower().startswith(("0x", "0b")):
+        return int(stripped, 0)
+    return int(stripped, 10)
+
+
+def _parse_bitfield_value(flag_type: Any, raw_val: Any) -> int:
+    if isinstance(raw_val, int):
+        val = raw_val
+    elif isinstance(raw_val, str):
+        stripped = raw_val.strip()
+        if _looks_like_integer_literal(stripped):
+            try:
+                val = _parse_integer_literal(stripped)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid numeric bitfield value {raw_val!r}. Expected decimal, "
+                    "hex with 0x prefix, binary with 0b prefix, or comma-separated flag names."
+                ) from e
+        else:
+            flag_names = [n.strip() for n in stripped.split(",") if n.strip()]
+            val = meshtastic.util.flagsFromList(flag_type, flag_names)
+    else:
+        raise ValueError(
+            f"Invalid bitfield value {raw_val!r}. Expected integer, numeric string, or flag names."
+        )
+
+    if val < 0:
+        raise ValueError(f"Invalid bitfield value {raw_val!r}. Expected a non-negative integer.")
+    return val
+
+
 # ==============================================================================
 # CLI Timing Constants
 # ==============================================================================
@@ -1185,7 +1240,19 @@ def setPref(config: Any, comp_name: str, raw_val: Any) -> bool:
     if (not pref) or (not config_type):
         return False
 
-    if isinstance(raw_val, str):
+    # Handle uint32 bitfields that have an associated enum of flag names.
+    bitfield_enum = None
+    if config_type.message_type is not None:
+        bitfield_path = f"{config_type.name}.{pref.name}"
+        bitfield_enum = BITFIELD_ENUMS.get(bitfield_path)
+
+    if bitfield_enum:
+        try:
+            val = _parse_bitfield_value(bitfield_enum, raw_val)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return False
+    elif isinstance(raw_val, str):
         val = meshtastic.util.fromStr(raw_val)
     else:
         val = raw_val
@@ -1198,9 +1265,9 @@ def setPref(config: Any, comp_name: str, raw_val: Any) -> bool:
     enumType = pref.enum_type
     if enumType and isinstance(val, str):
         # We've failed so far to convert this string into an enum, try to find it by reflection
-        e = enumType.values_by_name.get(val)
-        if e:
-            val = e.number
+        ev = enumType.values_by_name.get(val)
+        if ev:
+            val = ev.number
         else:
             print(
                 f"{name[0]}.{uni_name} does not have an enum called {val}, so you can not set it."
@@ -3049,6 +3116,10 @@ def common() -> None:
                     "ERROR: Ham radio callsign cannot be empty or contain only whitespace characters"
                 )
 
+        # Fail fast before connecting if the OTA firmware file does not exist.
+        if args.ota_update is not None and not os.path.isfile(args.ota_update):
+            _cli_exit(f"Error: OTA firmware file not found: {args.ota_update}")
+
         if _power_meter_requested(args):
             _create_power_meter()
 
@@ -3278,10 +3349,11 @@ def addConnectionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
         "--host",
         "--tcp",
         "-t",
-        help="Connect to a device using TCP, optionally passing hostname/IP or host:port. (defaults to '%(const)s')",
+        help="Connect to a device using TCP, optionally passing hostname/IP or host:port (default port 4403). (defaults to '%(const)s')",
         nargs="?",
         default=None,
         const="localhost",
+        metavar="HOST[:PORT]",
     )
 
     group.add_argument(
@@ -4034,7 +4106,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
         elif isinstance(exc, MeshInterface.MeshInterfaceError):
             retryable = bool(
                 hasattr(client, "_is_retryable_connect_error")
-                and client._is_retryable_connect_error(exc)  # type: ignore[union-attr]
+                and client._is_retryable_connect_error(exc)
             )
         else:
             retryable = False
