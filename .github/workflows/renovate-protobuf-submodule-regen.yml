@@ -3,6 +3,9 @@ name: Regenerate protobufs for Renovate submodule updates
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - develop
+      - "**-review"
     paths:
       - protobufs
 

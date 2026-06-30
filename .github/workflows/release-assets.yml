@@ -12,6 +12,7 @@ env:
 
 jobs:
   build-and-upload-assets:
+    if: ${{ github.event.release.target_commitish != 'master' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
