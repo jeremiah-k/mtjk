@@ -35,6 +35,8 @@ class DeviceProfile(_message.Message):
     FIXED_POSITION_FIELD_NUMBER: _builtins.int
     RINGTONE_FIELD_NUMBER: _builtins.int
     CANNED_MESSAGES_FIELD_NUMBER: _builtins.int
+    IS_UNMESSAGABLE_FIELD_NUMBER: _builtins.int
+    IS_LICENSED_FIELD_NUMBER: _builtins.int
     long_name: _builtins.str
     """
     Long name for the node
@@ -54,6 +56,14 @@ class DeviceProfile(_message.Message):
     canned_messages: _builtins.str
     """
     Predefined messages for CannedMessage
+    """
+    is_unmessagable: _builtins.bool
+    """
+    Is the node unmessagable
+    """
+    is_licensed: _builtins.bool
+    """
+    Is this node in licensed user mode
     """
     @_builtins.property
     def config(self) -> _localonly_pb2.LocalConfig:
@@ -84,10 +94,12 @@ class DeviceProfile(_message.Message):
         fixed_position: _mesh_pb2.Position | None = ...,
         ringtone: _builtins.str | None = ...,
         canned_messages: _builtins.str | None = ...,
+        is_unmessagable: _builtins.bool | None = ...,
+        is_licensed: _builtins.bool | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_canned_messages", b"_canned_messages", "_channel_url", b"_channel_url", "_config", b"_config", "_fixed_position", b"_fixed_position", "_long_name", b"_long_name", "_module_config", b"_module_config", "_ringtone", b"_ringtone", "_short_name", b"_short_name", "canned_messages", b"canned_messages", "channel_url", b"channel_url", "config", b"config", "fixed_position", b"fixed_position", "long_name", b"long_name", "module_config", b"module_config", "ringtone", b"ringtone", "short_name", b"short_name"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_canned_messages", b"_canned_messages", "_channel_url", b"_channel_url", "_config", b"_config", "_fixed_position", b"_fixed_position", "_is_licensed", b"_is_licensed", "_is_unmessagable", b"_is_unmessagable", "_long_name", b"_long_name", "_module_config", b"_module_config", "_ringtone", b"_ringtone", "_short_name", b"_short_name", "canned_messages", b"canned_messages", "channel_url", b"channel_url", "config", b"config", "fixed_position", b"fixed_position", "is_licensed", b"is_licensed", "is_unmessagable", b"is_unmessagable", "long_name", b"long_name", "module_config", b"module_config", "ringtone", b"ringtone", "short_name", b"short_name"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_canned_messages", b"_canned_messages", "_channel_url", b"_channel_url", "_config", b"_config", "_fixed_position", b"_fixed_position", "_long_name", b"_long_name", "_module_config", b"_module_config", "_ringtone", b"_ringtone", "_short_name", b"_short_name", "canned_messages", b"canned_messages", "channel_url", b"channel_url", "config", b"config", "fixed_position", b"fixed_position", "long_name", b"long_name", "module_config", b"module_config", "ringtone", b"ringtone", "short_name", b"short_name"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_canned_messages", b"_canned_messages", "_channel_url", b"_channel_url", "_config", b"_config", "_fixed_position", b"_fixed_position", "_is_licensed", b"_is_licensed", "_is_unmessagable", b"_is_unmessagable", "_long_name", b"_long_name", "_module_config", b"_module_config", "_ringtone", b"_ringtone", "_short_name", b"_short_name", "canned_messages", b"canned_messages", "channel_url", b"channel_url", "config", b"config", "fixed_position", b"fixed_position", "is_licensed", b"is_licensed", "is_unmessagable", b"is_unmessagable", "long_name", b"long_name", "module_config", b"module_config", "ringtone", b"ringtone", "short_name", b"short_name"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__canned_messages: _TypeAlias = _typing.Literal["canned_messages"]  # noqa: Y015
     _WhichOneofArgType__canned_messages: _TypeAlias = _typing.Literal["_canned_messages", b"_canned_messages"]  # noqa: Y015
@@ -97,6 +109,10 @@ class DeviceProfile(_message.Message):
     _WhichOneofArgType__config: _TypeAlias = _typing.Literal["_config", b"_config"]  # noqa: Y015
     _WhichOneofReturnType__fixed_position: _TypeAlias = _typing.Literal["fixed_position"]  # noqa: Y015
     _WhichOneofArgType__fixed_position: _TypeAlias = _typing.Literal["_fixed_position", b"_fixed_position"]  # noqa: Y015
+    _WhichOneofReturnType__is_licensed: _TypeAlias = _typing.Literal["is_licensed"]  # noqa: Y015
+    _WhichOneofArgType__is_licensed: _TypeAlias = _typing.Literal["_is_licensed", b"_is_licensed"]  # noqa: Y015
+    _WhichOneofReturnType__is_unmessagable: _TypeAlias = _typing.Literal["is_unmessagable"]  # noqa: Y015
+    _WhichOneofArgType__is_unmessagable: _TypeAlias = _typing.Literal["_is_unmessagable", b"_is_unmessagable"]  # noqa: Y015
     _WhichOneofReturnType__long_name: _TypeAlias = _typing.Literal["long_name"]  # noqa: Y015
     _WhichOneofArgType__long_name: _TypeAlias = _typing.Literal["_long_name", b"_long_name"]  # noqa: Y015
     _WhichOneofReturnType__module_config: _TypeAlias = _typing.Literal["module_config"]  # noqa: Y015
@@ -113,6 +129,10 @@ class DeviceProfile(_message.Message):
     def WhichOneof(self, oneof_group: _WhichOneofArgType__config) -> _WhichOneofReturnType__config | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__fixed_position) -> _WhichOneofReturnType__fixed_position | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__is_licensed) -> _WhichOneofReturnType__is_licensed | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__is_unmessagable) -> _WhichOneofReturnType__is_unmessagable | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__long_name) -> _WhichOneofReturnType__long_name | None: ...
     @_typing.overload
