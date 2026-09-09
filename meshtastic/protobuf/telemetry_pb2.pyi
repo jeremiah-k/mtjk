@@ -252,7 +252,7 @@ class _TelemetrySensorTypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_T
     """
     ICM42607P: _TelemetrySensorType.ValueType  # 53
     """
-    ICM-42607-P 6‑Axis IMU
+    ICM-42607-P 6-Axis IMU
     """
     SPA06: _TelemetrySensorType.ValueType  # 54
     """
@@ -490,7 +490,7 @@ MMC5983MA 3-Axis Digital Magnetic Sensor
 """
 ICM42607P: TelemetrySensorType.ValueType  # 53
 """
-ICM-42607-P 6‑Axis IMU
+ICM-42607-P 6-Axis IMU
 """
 SPA06: TelemetrySensorType.ValueType  # 54
 """
