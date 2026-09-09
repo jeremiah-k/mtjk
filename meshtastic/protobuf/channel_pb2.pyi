@@ -51,6 +51,7 @@ class ChannelSettings(_message.Message):
     UPLINK_ENABLED_FIELD_NUMBER: _builtins.int
     DOWNLINK_ENABLED_FIELD_NUMBER: _builtins.int
     MODULE_SETTINGS_FIELD_NUMBER: _builtins.int
+    USE_AEAD_FIELD_NUMBER: _builtins.int
     @_builtins.property
     @_deprecated("""This field has been marked as deprecated using proto field options.""")
     def channel_num(self) -> _builtins.int:
@@ -111,6 +112,14 @@ class ChannelSettings(_message.Message):
     """
     If true, messages seen on the internet will be forwarded to the local mesh.
     """
+    use_aead: _builtins.bool
+    """
+    Enable authenticated encryption (AES-CCM) for this channel.
+    When true, messages include a 12-byte authentication tag that prevents
+    forgery and bit-flipping attacks. All nodes on the channel must have
+    this enabled - unauthenticated (AES-CTR) packets are rejected.
+    Experimental. Default: false (standard AES-CTR encryption).
+    """
     @_builtins.property
     def module_settings(self) -> Global___ModuleSettings:
         """
@@ -127,10 +136,11 @@ class ChannelSettings(_message.Message):
         uplink_enabled: _builtins.bool = ...,
         downlink_enabled: _builtins.bool = ...,
         module_settings: Global___ModuleSettings | None = ...,
+        use_aead: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["module_settings", b"module_settings"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel_num", b"channel_num", "downlink_enabled", b"downlink_enabled", "id", b"id", "module_settings", b"module_settings", "name", b"name", "psk", b"psk", "uplink_enabled", b"uplink_enabled"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel_num", b"channel_num", "downlink_enabled", b"downlink_enabled", "id", b"id", "module_settings", b"module_settings", "name", b"name", "psk", b"psk", "uplink_enabled", b"uplink_enabled", "use_aead", b"use_aead"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
