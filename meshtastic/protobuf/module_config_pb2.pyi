@@ -569,7 +569,10 @@ class ModuleConfig(_message.Message):
     class TrafficManagementConfig(_message.Message):
         """
         Config for the Traffic Management module.
-        Provides packet inspection and traffic shaping to help reduce channel utilization
+        Provides packet inspection and traffic shaping to help reduce channel utilization.
+        Every field uses the proto3 zero value to mean "disabled"; there is no
+        "use the firmware default" sentinel. Firmware installs its own defaults when it
+        first creates this config, and a client that writes 0 turns that feature off.
         """
 
         DESCRIPTOR: _descriptor.Descriptor
@@ -583,6 +586,7 @@ class ModuleConfig(_message.Message):
         """
         Minimum interval in seconds between position updates from the same node.
         A non-zero value implicitly enables the suppression window; 0 disables it.
+        Firmware default: 21600 (6 hours), installed when this config is first created.
         """
         nodeinfo_direct_response_max_hops: _builtins.int
         """
