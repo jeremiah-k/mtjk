@@ -38,7 +38,7 @@ pandas-stubs = { version = "^2.3.3.260113", optional = true }
 wcwidth = { version = "^0.8.0", optional = true }
 
 [tool.poetry.group.dev.dependencies]
-hypothesis = "6.167.1"
+hypothesis = "6.168.0"
 pytest = "9.1.1"
 pytest-cov = "7.1.0"
 pytest-timeout = "2.5.0"
