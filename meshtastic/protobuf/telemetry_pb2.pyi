@@ -628,21 +628,6 @@ class EnvironmentMetrics(_message.Message):
     ONE_WIRE_TEMPERATURE_CH7_FIELD_NUMBER: _builtins.int
     LIGHTNING_STRIKE_COUNT_1H_FIELD_NUMBER: _builtins.int
     LIGHTNING_DISTANCE_KM_FIELD_NUMBER: _builtins.int
-    SOIL_PH_FIELD_NUMBER: _builtins.int
-    PH_FIELD_NUMBER: _builtins.int
-    ELECTRICAL_CONDUCTIVITY_FIELD_NUMBER: _builtins.int
-    SALINITY_FIELD_NUMBER: _builtins.int
-    NITROGEN_FIELD_NUMBER: _builtins.int
-    PHOSPHORUS_FIELD_NUMBER: _builtins.int
-    POTASSIUM_FIELD_NUMBER: _builtins.int
-    DISSOLVED_OXYGEN_FIELD_NUMBER: _builtins.int
-    ORP_FIELD_NUMBER: _builtins.int
-    CHEMICAL_OXYGEN_DEMAND_FIELD_NUMBER: _builtins.int
-    TURBIDITY_FIELD_NUMBER: _builtins.int
-    NITRATE_FIELD_NUMBER: _builtins.int
-    AMMONIUM_FIELD_NUMBER: _builtins.int
-    BIOCHEMICAL_OXYGEN_DEMAND_FIELD_NUMBER: _builtins.int
-    SOLAR_IRRADIANCE_FIELD_NUMBER: _builtins.int
     temperature: _builtins.float
     """
     Temperature measured
@@ -805,6 +790,252 @@ class EnvironmentMetrics(_message.Message):
     """
     Estimated distance to the leading edge of the storm, in km
     """
+    @_builtins.property
+    @_deprecated("""This field has been marked as deprecated using proto field options.""")
+    def one_wire_temperature(self) -> _containers.RepeatedScalarFieldContainer[_builtins.float]:
+        """
+        Never implemented, but Voltage may be mis-interpreted by old clients as temperature
+        """
+
+    def __init__(
+        self,
+        *,
+        temperature: _builtins.float | None = ...,
+        relative_humidity: _builtins.float | None = ...,
+        barometric_pressure: _builtins.float | None = ...,
+        gas_resistance: _builtins.float | None = ...,
+        voltage: _builtins.float | None = ...,
+        current: _builtins.float | None = ...,
+        iaq: _builtins.int | None = ...,
+        distance: _builtins.float | None = ...,
+        lux: _builtins.float | None = ...,
+        white_lux: _builtins.float | None = ...,
+        ir_lux: _builtins.float | None = ...,
+        uv_lux: _builtins.float | None = ...,
+        wind_direction: _builtins.int | None = ...,
+        wind_speed: _builtins.float | None = ...,
+        weight: _builtins.float | None = ...,
+        wind_gust: _builtins.float | None = ...,
+        wind_lull: _builtins.float | None = ...,
+        radiation: _builtins.float | None = ...,
+        rainfall_1h: _builtins.float | None = ...,
+        rainfall_24h: _builtins.float | None = ...,
+        soil_moisture: _builtins.int | None = ...,
+        soil_temperature: _builtins.float | None = ...,
+        one_wire_temperature: _abc.Iterable[_builtins.float] | None = ...,
+        adc_voltage_ch0: _builtins.float | None = ...,
+        adc_voltage_ch1: _builtins.float | None = ...,
+        adc_voltage_ch2: _builtins.float | None = ...,
+        adc_voltage_ch3: _builtins.float | None = ...,
+        adc_voltage_ch4: _builtins.float | None = ...,
+        adc_voltage_ch5: _builtins.float | None = ...,
+        adc_voltage_ch6: _builtins.float | None = ...,
+        adc_voltage_ch7: _builtins.float | None = ...,
+        one_wire_temperature_ch0: _builtins.float | None = ...,
+        one_wire_temperature_ch1: _builtins.float | None = ...,
+        one_wire_temperature_ch2: _builtins.float | None = ...,
+        one_wire_temperature_ch3: _builtins.float | None = ...,
+        one_wire_temperature_ch4: _builtins.float | None = ...,
+        one_wire_temperature_ch5: _builtins.float | None = ...,
+        one_wire_temperature_ch6: _builtins.float | None = ...,
+        one_wire_temperature_ch7: _builtins.float | None = ...,
+        lightning_strike_count_1h: _builtins.int | None = ...,
+        lightning_distance_km: _builtins.float | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0", "_adc_voltage_ch1", b"_adc_voltage_ch1", "_adc_voltage_ch2", b"_adc_voltage_ch2", "_adc_voltage_ch3", b"_adc_voltage_ch3", "_adc_voltage_ch4", b"_adc_voltage_ch4", "_adc_voltage_ch5", b"_adc_voltage_ch5", "_adc_voltage_ch6", b"_adc_voltage_ch6", "_adc_voltage_ch7", b"_adc_voltage_ch7", "_barometric_pressure", b"_barometric_pressure", "_current", b"_current", "_distance", b"_distance", "_gas_resistance", b"_gas_resistance", "_iaq", b"_iaq", "_ir_lux", b"_ir_lux", "_lightning_distance_km", b"_lightning_distance_km", "_lightning_strike_count_1h", b"_lightning_strike_count_1h", "_lux", b"_lux", "_one_wire_temperature_ch0", b"_one_wire_temperature_ch0", "_one_wire_temperature_ch1", b"_one_wire_temperature_ch1", "_one_wire_temperature_ch2", b"_one_wire_temperature_ch2", "_one_wire_temperature_ch3", b"_one_wire_temperature_ch3", "_one_wire_temperature_ch4", b"_one_wire_temperature_ch4", "_one_wire_temperature_ch5", b"_one_wire_temperature_ch5", "_one_wire_temperature_ch6", b"_one_wire_temperature_ch6", "_one_wire_temperature_ch7", b"_one_wire_temperature_ch7", "_radiation", b"_radiation", "_rainfall_1h", b"_rainfall_1h", "_rainfall_24h", b"_rainfall_24h", "_relative_humidity", b"_relative_humidity", "_soil_moisture", b"_soil_moisture", "_soil_temperature", b"_soil_temperature", "_temperature", b"_temperature", "_uv_lux", b"_uv_lux", "_voltage", b"_voltage", "_weight", b"_weight", "_white_lux", b"_white_lux", "_wind_direction", b"_wind_direction", "_wind_gust", b"_wind_gust", "_wind_lull", b"_wind_lull", "_wind_speed", b"_wind_speed", "adc_voltage_ch0", b"adc_voltage_ch0", "adc_voltage_ch1", b"adc_voltage_ch1", "adc_voltage_ch2", b"adc_voltage_ch2", "adc_voltage_ch3", b"adc_voltage_ch3", "adc_voltage_ch4", b"adc_voltage_ch4", "adc_voltage_ch5", b"adc_voltage_ch5", "adc_voltage_ch6", b"adc_voltage_ch6", "adc_voltage_ch7", b"adc_voltage_ch7", "barometric_pressure", b"barometric_pressure", "current", b"current", "distance", b"distance", "gas_resistance", b"gas_resistance", "iaq", b"iaq", "ir_lux", b"ir_lux", "lightning_distance_km", b"lightning_distance_km", "lightning_strike_count_1h", b"lightning_strike_count_1h", "lux", b"lux", "one_wire_temperature_ch0", b"one_wire_temperature_ch0", "one_wire_temperature_ch1", b"one_wire_temperature_ch1", "one_wire_temperature_ch2", b"one_wire_temperature_ch2", "one_wire_temperature_ch3", b"one_wire_temperature_ch3", "one_wire_temperature_ch4", b"one_wire_temperature_ch4", "one_wire_temperature_ch5", b"one_wire_temperature_ch5", "one_wire_temperature_ch6", b"one_wire_temperature_ch6", "one_wire_temperature_ch7", b"one_wire_temperature_ch7", "radiation", b"radiation", "rainfall_1h", b"rainfall_1h", "rainfall_24h", b"rainfall_24h", "relative_humidity", b"relative_humidity", "soil_moisture", b"soil_moisture", "soil_temperature", b"soil_temperature", "temperature", b"temperature", "uv_lux", b"uv_lux", "voltage", b"voltage", "weight", b"weight", "white_lux", b"white_lux", "wind_direction", b"wind_direction", "wind_gust", b"wind_gust", "wind_lull", b"wind_lull", "wind_speed", b"wind_speed"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0", "_adc_voltage_ch1", b"_adc_voltage_ch1", "_adc_voltage_ch2", b"_adc_voltage_ch2", "_adc_voltage_ch3", b"_adc_voltage_ch3", "_adc_voltage_ch4", b"_adc_voltage_ch4", "_adc_voltage_ch5", b"_adc_voltage_ch5", "_adc_voltage_ch6", b"_adc_voltage_ch6", "_adc_voltage_ch7", b"_adc_voltage_ch7", "_barometric_pressure", b"_barometric_pressure", "_current", b"_current", "_distance", b"_distance", "_gas_resistance", b"_gas_resistance", "_iaq", b"_iaq", "_ir_lux", b"_ir_lux", "_lightning_distance_km", b"_lightning_distance_km", "_lightning_strike_count_1h", b"_lightning_strike_count_1h", "_lux", b"_lux", "_one_wire_temperature_ch0", b"_one_wire_temperature_ch0", "_one_wire_temperature_ch1", b"_one_wire_temperature_ch1", "_one_wire_temperature_ch2", b"_one_wire_temperature_ch2", "_one_wire_temperature_ch3", b"_one_wire_temperature_ch3", "_one_wire_temperature_ch4", b"_one_wire_temperature_ch4", "_one_wire_temperature_ch5", b"_one_wire_temperature_ch5", "_one_wire_temperature_ch6", b"_one_wire_temperature_ch6", "_one_wire_temperature_ch7", b"_one_wire_temperature_ch7", "_radiation", b"_radiation", "_rainfall_1h", b"_rainfall_1h", "_rainfall_24h", b"_rainfall_24h", "_relative_humidity", b"_relative_humidity", "_soil_moisture", b"_soil_moisture", "_soil_temperature", b"_soil_temperature", "_temperature", b"_temperature", "_uv_lux", b"_uv_lux", "_voltage", b"_voltage", "_weight", b"_weight", "_white_lux", b"_white_lux", "_wind_direction", b"_wind_direction", "_wind_gust", b"_wind_gust", "_wind_lull", b"_wind_lull", "_wind_speed", b"_wind_speed", "adc_voltage_ch0", b"adc_voltage_ch0", "adc_voltage_ch1", b"adc_voltage_ch1", "adc_voltage_ch2", b"adc_voltage_ch2", "adc_voltage_ch3", b"adc_voltage_ch3", "adc_voltage_ch4", b"adc_voltage_ch4", "adc_voltage_ch5", b"adc_voltage_ch5", "adc_voltage_ch6", b"adc_voltage_ch6", "adc_voltage_ch7", b"adc_voltage_ch7", "barometric_pressure", b"barometric_pressure", "current", b"current", "distance", b"distance", "gas_resistance", b"gas_resistance", "iaq", b"iaq", "ir_lux", b"ir_lux", "lightning_distance_km", b"lightning_distance_km", "lightning_strike_count_1h", b"lightning_strike_count_1h", "lux", b"lux", "one_wire_temperature", b"one_wire_temperature", "one_wire_temperature_ch0", b"one_wire_temperature_ch0", "one_wire_temperature_ch1", b"one_wire_temperature_ch1", "one_wire_temperature_ch2", b"one_wire_temperature_ch2", "one_wire_temperature_ch3", b"one_wire_temperature_ch3", "one_wire_temperature_ch4", b"one_wire_temperature_ch4", "one_wire_temperature_ch5", b"one_wire_temperature_ch5", "one_wire_temperature_ch6", b"one_wire_temperature_ch6", "one_wire_temperature_ch7", b"one_wire_temperature_ch7", "radiation", b"radiation", "rainfall_1h", b"rainfall_1h", "rainfall_24h", b"rainfall_24h", "relative_humidity", b"relative_humidity", "soil_moisture", b"soil_moisture", "soil_temperature", b"soil_temperature", "temperature", b"temperature", "uv_lux", b"uv_lux", "voltage", b"voltage", "weight", b"weight", "white_lux", b"white_lux", "wind_direction", b"wind_direction", "wind_gust", b"wind_gust", "wind_lull", b"wind_lull", "wind_speed", b"wind_speed"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__adc_voltage_ch0: _TypeAlias = _typing.Literal["adc_voltage_ch0"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch0: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch1: _TypeAlias = _typing.Literal["adc_voltage_ch1"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch1: _TypeAlias = _typing.Literal["_adc_voltage_ch1", b"_adc_voltage_ch1"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch2: _TypeAlias = _typing.Literal["adc_voltage_ch2"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch2: _TypeAlias = _typing.Literal["_adc_voltage_ch2", b"_adc_voltage_ch2"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch3: _TypeAlias = _typing.Literal["adc_voltage_ch3"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch3: _TypeAlias = _typing.Literal["_adc_voltage_ch3", b"_adc_voltage_ch3"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch4: _TypeAlias = _typing.Literal["adc_voltage_ch4"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch4: _TypeAlias = _typing.Literal["_adc_voltage_ch4", b"_adc_voltage_ch4"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch5: _TypeAlias = _typing.Literal["adc_voltage_ch5"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch5: _TypeAlias = _typing.Literal["_adc_voltage_ch5", b"_adc_voltage_ch5"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch6: _TypeAlias = _typing.Literal["adc_voltage_ch6"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch6: _TypeAlias = _typing.Literal["_adc_voltage_ch6", b"_adc_voltage_ch6"]  # noqa: Y015
+    _WhichOneofReturnType__adc_voltage_ch7: _TypeAlias = _typing.Literal["adc_voltage_ch7"]  # noqa: Y015
+    _WhichOneofArgType__adc_voltage_ch7: _TypeAlias = _typing.Literal["_adc_voltage_ch7", b"_adc_voltage_ch7"]  # noqa: Y015
+    _WhichOneofReturnType__barometric_pressure: _TypeAlias = _typing.Literal["barometric_pressure"]  # noqa: Y015
+    _WhichOneofArgType__barometric_pressure: _TypeAlias = _typing.Literal["_barometric_pressure", b"_barometric_pressure"]  # noqa: Y015
+    _WhichOneofReturnType__current: _TypeAlias = _typing.Literal["current"]  # noqa: Y015
+    _WhichOneofArgType__current: _TypeAlias = _typing.Literal["_current", b"_current"]  # noqa: Y015
+    _WhichOneofReturnType__distance: _TypeAlias = _typing.Literal["distance"]  # noqa: Y015
+    _WhichOneofArgType__distance: _TypeAlias = _typing.Literal["_distance", b"_distance"]  # noqa: Y015
+    _WhichOneofReturnType__gas_resistance: _TypeAlias = _typing.Literal["gas_resistance"]  # noqa: Y015
+    _WhichOneofArgType__gas_resistance: _TypeAlias = _typing.Literal["_gas_resistance", b"_gas_resistance"]  # noqa: Y015
+    _WhichOneofReturnType__iaq: _TypeAlias = _typing.Literal["iaq"]  # noqa: Y015
+    _WhichOneofArgType__iaq: _TypeAlias = _typing.Literal["_iaq", b"_iaq"]  # noqa: Y015
+    _WhichOneofReturnType__ir_lux: _TypeAlias = _typing.Literal["ir_lux"]  # noqa: Y015
+    _WhichOneofArgType__ir_lux: _TypeAlias = _typing.Literal["_ir_lux", b"_ir_lux"]  # noqa: Y015
+    _WhichOneofReturnType__lightning_distance_km: _TypeAlias = _typing.Literal["lightning_distance_km"]  # noqa: Y015
+    _WhichOneofArgType__lightning_distance_km: _TypeAlias = _typing.Literal["_lightning_distance_km", b"_lightning_distance_km"]  # noqa: Y015
+    _WhichOneofReturnType__lightning_strike_count_1h: _TypeAlias = _typing.Literal["lightning_strike_count_1h"]  # noqa: Y015
+    _WhichOneofArgType__lightning_strike_count_1h: _TypeAlias = _typing.Literal["_lightning_strike_count_1h", b"_lightning_strike_count_1h"]  # noqa: Y015
+    _WhichOneofReturnType__lux: _TypeAlias = _typing.Literal["lux"]  # noqa: Y015
+    _WhichOneofArgType__lux: _TypeAlias = _typing.Literal["_lux", b"_lux"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch0: _TypeAlias = _typing.Literal["one_wire_temperature_ch0"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch0: _TypeAlias = _typing.Literal["_one_wire_temperature_ch0", b"_one_wire_temperature_ch0"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch1: _TypeAlias = _typing.Literal["one_wire_temperature_ch1"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch1: _TypeAlias = _typing.Literal["_one_wire_temperature_ch1", b"_one_wire_temperature_ch1"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch2: _TypeAlias = _typing.Literal["one_wire_temperature_ch2"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch2: _TypeAlias = _typing.Literal["_one_wire_temperature_ch2", b"_one_wire_temperature_ch2"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch3: _TypeAlias = _typing.Literal["one_wire_temperature_ch3"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch3: _TypeAlias = _typing.Literal["_one_wire_temperature_ch3", b"_one_wire_temperature_ch3"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch4: _TypeAlias = _typing.Literal["one_wire_temperature_ch4"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch4: _TypeAlias = _typing.Literal["_one_wire_temperature_ch4", b"_one_wire_temperature_ch4"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch5: _TypeAlias = _typing.Literal["one_wire_temperature_ch5"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch5: _TypeAlias = _typing.Literal["_one_wire_temperature_ch5", b"_one_wire_temperature_ch5"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch6: _TypeAlias = _typing.Literal["one_wire_temperature_ch6"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch6: _TypeAlias = _typing.Literal["_one_wire_temperature_ch6", b"_one_wire_temperature_ch6"]  # noqa: Y015
+    _WhichOneofReturnType__one_wire_temperature_ch7: _TypeAlias = _typing.Literal["one_wire_temperature_ch7"]  # noqa: Y015
+    _WhichOneofArgType__one_wire_temperature_ch7: _TypeAlias = _typing.Literal["_one_wire_temperature_ch7", b"_one_wire_temperature_ch7"]  # noqa: Y015
+    _WhichOneofReturnType__radiation: _TypeAlias = _typing.Literal["radiation"]  # noqa: Y015
+    _WhichOneofArgType__radiation: _TypeAlias = _typing.Literal["_radiation", b"_radiation"]  # noqa: Y015
+    _WhichOneofReturnType__rainfall_1h: _TypeAlias = _typing.Literal["rainfall_1h"]  # noqa: Y015
+    _WhichOneofArgType__rainfall_1h: _TypeAlias = _typing.Literal["_rainfall_1h", b"_rainfall_1h"]  # noqa: Y015
+    _WhichOneofReturnType__rainfall_24h: _TypeAlias = _typing.Literal["rainfall_24h"]  # noqa: Y015
+    _WhichOneofArgType__rainfall_24h: _TypeAlias = _typing.Literal["_rainfall_24h", b"_rainfall_24h"]  # noqa: Y015
+    _WhichOneofReturnType__relative_humidity: _TypeAlias = _typing.Literal["relative_humidity"]  # noqa: Y015
+    _WhichOneofArgType__relative_humidity: _TypeAlias = _typing.Literal["_relative_humidity", b"_relative_humidity"]  # noqa: Y015
+    _WhichOneofReturnType__soil_moisture: _TypeAlias = _typing.Literal["soil_moisture"]  # noqa: Y015
+    _WhichOneofArgType__soil_moisture: _TypeAlias = _typing.Literal["_soil_moisture", b"_soil_moisture"]  # noqa: Y015
+    _WhichOneofReturnType__soil_temperature: _TypeAlias = _typing.Literal["soil_temperature"]  # noqa: Y015
+    _WhichOneofArgType__soil_temperature: _TypeAlias = _typing.Literal["_soil_temperature", b"_soil_temperature"]  # noqa: Y015
+    _WhichOneofReturnType__temperature: _TypeAlias = _typing.Literal["temperature"]  # noqa: Y015
+    _WhichOneofArgType__temperature: _TypeAlias = _typing.Literal["_temperature", b"_temperature"]  # noqa: Y015
+    _WhichOneofReturnType__uv_lux: _TypeAlias = _typing.Literal["uv_lux"]  # noqa: Y015
+    _WhichOneofArgType__uv_lux: _TypeAlias = _typing.Literal["_uv_lux", b"_uv_lux"]  # noqa: Y015
+    _WhichOneofReturnType__voltage: _TypeAlias = _typing.Literal["voltage"]  # noqa: Y015
+    _WhichOneofArgType__voltage: _TypeAlias = _typing.Literal["_voltage", b"_voltage"]  # noqa: Y015
+    _WhichOneofReturnType__weight: _TypeAlias = _typing.Literal["weight"]  # noqa: Y015
+    _WhichOneofArgType__weight: _TypeAlias = _typing.Literal["_weight", b"_weight"]  # noqa: Y015
+    _WhichOneofReturnType__white_lux: _TypeAlias = _typing.Literal["white_lux"]  # noqa: Y015
+    _WhichOneofArgType__white_lux: _TypeAlias = _typing.Literal["_white_lux", b"_white_lux"]  # noqa: Y015
+    _WhichOneofReturnType__wind_direction: _TypeAlias = _typing.Literal["wind_direction"]  # noqa: Y015
+    _WhichOneofArgType__wind_direction: _TypeAlias = _typing.Literal["_wind_direction", b"_wind_direction"]  # noqa: Y015
+    _WhichOneofReturnType__wind_gust: _TypeAlias = _typing.Literal["wind_gust"]  # noqa: Y015
+    _WhichOneofArgType__wind_gust: _TypeAlias = _typing.Literal["_wind_gust", b"_wind_gust"]  # noqa: Y015
+    _WhichOneofReturnType__wind_lull: _TypeAlias = _typing.Literal["wind_lull"]  # noqa: Y015
+    _WhichOneofArgType__wind_lull: _TypeAlias = _typing.Literal["_wind_lull", b"_wind_lull"]  # noqa: Y015
+    _WhichOneofReturnType__wind_speed: _TypeAlias = _typing.Literal["wind_speed"]  # noqa: Y015
+    _WhichOneofArgType__wind_speed: _TypeAlias = _typing.Literal["_wind_speed", b"_wind_speed"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch0) -> _WhichOneofReturnType__adc_voltage_ch0 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch1) -> _WhichOneofReturnType__adc_voltage_ch1 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch2) -> _WhichOneofReturnType__adc_voltage_ch2 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch3) -> _WhichOneofReturnType__adc_voltage_ch3 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch4) -> _WhichOneofReturnType__adc_voltage_ch4 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch5) -> _WhichOneofReturnType__adc_voltage_ch5 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch6) -> _WhichOneofReturnType__adc_voltage_ch6 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch7) -> _WhichOneofReturnType__adc_voltage_ch7 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__barometric_pressure) -> _WhichOneofReturnType__barometric_pressure | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__current) -> _WhichOneofReturnType__current | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__distance) -> _WhichOneofReturnType__distance | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__gas_resistance) -> _WhichOneofReturnType__gas_resistance | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__iaq) -> _WhichOneofReturnType__iaq | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__ir_lux) -> _WhichOneofReturnType__ir_lux | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__lightning_distance_km) -> _WhichOneofReturnType__lightning_distance_km | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__lightning_strike_count_1h) -> _WhichOneofReturnType__lightning_strike_count_1h | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__lux) -> _WhichOneofReturnType__lux | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch0) -> _WhichOneofReturnType__one_wire_temperature_ch0 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch1) -> _WhichOneofReturnType__one_wire_temperature_ch1 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch2) -> _WhichOneofReturnType__one_wire_temperature_ch2 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch3) -> _WhichOneofReturnType__one_wire_temperature_ch3 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch4) -> _WhichOneofReturnType__one_wire_temperature_ch4 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch5) -> _WhichOneofReturnType__one_wire_temperature_ch5 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch6) -> _WhichOneofReturnType__one_wire_temperature_ch6 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch7) -> _WhichOneofReturnType__one_wire_temperature_ch7 | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__radiation) -> _WhichOneofReturnType__radiation | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__rainfall_1h) -> _WhichOneofReturnType__rainfall_1h | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__rainfall_24h) -> _WhichOneofReturnType__rainfall_24h | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__relative_humidity) -> _WhichOneofReturnType__relative_humidity | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__soil_moisture) -> _WhichOneofReturnType__soil_moisture | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__soil_temperature) -> _WhichOneofReturnType__soil_temperature | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__temperature) -> _WhichOneofReturnType__temperature | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__uv_lux) -> _WhichOneofReturnType__uv_lux | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__voltage) -> _WhichOneofReturnType__voltage | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__weight) -> _WhichOneofReturnType__weight | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__white_lux) -> _WhichOneofReturnType__white_lux | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_direction) -> _WhichOneofReturnType__wind_direction | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_gust) -> _WhichOneofReturnType__wind_gust | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_lull) -> _WhichOneofReturnType__wind_lull | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_speed) -> _WhichOneofReturnType__wind_speed | None: ...
+
+Global___EnvironmentMetrics: _TypeAlias = EnvironmentMetrics  # noqa: Y015
+
+@_typing.final
+class SoilWaterMetrics(_message.Message):
+    """
+    Soil and water probe metrics.
+
+    Chemistry reported by soil probes (RS-485/SDI-12 NPK probes) and by
+    water-quality sondes. Split out of EnvironmentMetrics so that message stays
+    within the mesh payload budget.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SOIL_PH_FIELD_NUMBER: _builtins.int
+    PH_FIELD_NUMBER: _builtins.int
+    ELECTRICAL_CONDUCTIVITY_FIELD_NUMBER: _builtins.int
+    SALINITY_FIELD_NUMBER: _builtins.int
+    NITROGEN_FIELD_NUMBER: _builtins.int
+    PHOSPHORUS_FIELD_NUMBER: _builtins.int
+    POTASSIUM_FIELD_NUMBER: _builtins.int
+    DISSOLVED_OXYGEN_FIELD_NUMBER: _builtins.int
+    ORP_FIELD_NUMBER: _builtins.int
+    CHEMICAL_OXYGEN_DEMAND_FIELD_NUMBER: _builtins.int
+    TURBIDITY_FIELD_NUMBER: _builtins.int
+    NITRATE_FIELD_NUMBER: _builtins.int
+    AMMONIUM_FIELD_NUMBER: _builtins.int
+    BIOCHEMICAL_OXYGEN_DEMAND_FIELD_NUMBER: _builtins.int
+    SOLAR_IRRADIANCE_FIELD_NUMBER: _builtins.int
     soil_ph: _builtins.float
     """
     Soil pH, 0-14
@@ -865,57 +1096,9 @@ class EnvironmentMetrics(_message.Message):
     """
     Solar irradiance in W/m^2 (distinct from the radiation field's uR/h)
     """
-    @_builtins.property
-    @_deprecated("""This field has been marked as deprecated using proto field options.""")
-    def one_wire_temperature(self) -> _containers.RepeatedScalarFieldContainer[_builtins.float]:
-        """
-        Never implemented, but Voltage may be mis-interpreted by old clients as temperature
-        """
-
     def __init__(
         self,
         *,
-        temperature: _builtins.float | None = ...,
-        relative_humidity: _builtins.float | None = ...,
-        barometric_pressure: _builtins.float | None = ...,
-        gas_resistance: _builtins.float | None = ...,
-        voltage: _builtins.float | None = ...,
-        current: _builtins.float | None = ...,
-        iaq: _builtins.int | None = ...,
-        distance: _builtins.float | None = ...,
-        lux: _builtins.float | None = ...,
-        white_lux: _builtins.float | None = ...,
-        ir_lux: _builtins.float | None = ...,
-        uv_lux: _builtins.float | None = ...,
-        wind_direction: _builtins.int | None = ...,
-        wind_speed: _builtins.float | None = ...,
-        weight: _builtins.float | None = ...,
-        wind_gust: _builtins.float | None = ...,
-        wind_lull: _builtins.float | None = ...,
-        radiation: _builtins.float | None = ...,
-        rainfall_1h: _builtins.float | None = ...,
-        rainfall_24h: _builtins.float | None = ...,
-        soil_moisture: _builtins.int | None = ...,
-        soil_temperature: _builtins.float | None = ...,
-        one_wire_temperature: _abc.Iterable[_builtins.float] | None = ...,
-        adc_voltage_ch0: _builtins.float | None = ...,
-        adc_voltage_ch1: _builtins.float | None = ...,
-        adc_voltage_ch2: _builtins.float | None = ...,
-        adc_voltage_ch3: _builtins.float | None = ...,
-        adc_voltage_ch4: _builtins.float | None = ...,
-        adc_voltage_ch5: _builtins.float | None = ...,
-        adc_voltage_ch6: _builtins.float | None = ...,
-        adc_voltage_ch7: _builtins.float | None = ...,
-        one_wire_temperature_ch0: _builtins.float | None = ...,
-        one_wire_temperature_ch1: _builtins.float | None = ...,
-        one_wire_temperature_ch2: _builtins.float | None = ...,
-        one_wire_temperature_ch3: _builtins.float | None = ...,
-        one_wire_temperature_ch4: _builtins.float | None = ...,
-        one_wire_temperature_ch5: _builtins.float | None = ...,
-        one_wire_temperature_ch6: _builtins.float | None = ...,
-        one_wire_temperature_ch7: _builtins.float | None = ...,
-        lightning_strike_count_1h: _builtins.int | None = ...,
-        lightning_distance_km: _builtins.float | None = ...,
         soil_ph: _builtins.float | None = ...,
         ph: _builtins.float | None = ...,
         electrical_conductivity: _builtins.float | None = ...,
@@ -932,74 +1115,24 @@ class EnvironmentMetrics(_message.Message):
         biochemical_oxygen_demand: _builtins.float | None = ...,
         solar_irradiance: _builtins.float | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0", "_adc_voltage_ch1", b"_adc_voltage_ch1", "_adc_voltage_ch2", b"_adc_voltage_ch2", "_adc_voltage_ch3", b"_adc_voltage_ch3", "_adc_voltage_ch4", b"_adc_voltage_ch4", "_adc_voltage_ch5", b"_adc_voltage_ch5", "_adc_voltage_ch6", b"_adc_voltage_ch6", "_adc_voltage_ch7", b"_adc_voltage_ch7", "_ammonium", b"_ammonium", "_barometric_pressure", b"_barometric_pressure", "_biochemical_oxygen_demand", b"_biochemical_oxygen_demand", "_chemical_oxygen_demand", b"_chemical_oxygen_demand", "_current", b"_current", "_dissolved_oxygen", b"_dissolved_oxygen", "_distance", b"_distance", "_electrical_conductivity", b"_electrical_conductivity", "_gas_resistance", b"_gas_resistance", "_iaq", b"_iaq", "_ir_lux", b"_ir_lux", "_lightning_distance_km", b"_lightning_distance_km", "_lightning_strike_count_1h", b"_lightning_strike_count_1h", "_lux", b"_lux", "_nitrate", b"_nitrate", "_nitrogen", b"_nitrogen", "_one_wire_temperature_ch0", b"_one_wire_temperature_ch0", "_one_wire_temperature_ch1", b"_one_wire_temperature_ch1", "_one_wire_temperature_ch2", b"_one_wire_temperature_ch2", "_one_wire_temperature_ch3", b"_one_wire_temperature_ch3", "_one_wire_temperature_ch4", b"_one_wire_temperature_ch4", "_one_wire_temperature_ch5", b"_one_wire_temperature_ch5", "_one_wire_temperature_ch6", b"_one_wire_temperature_ch6", "_one_wire_temperature_ch7", b"_one_wire_temperature_ch7", "_orp", b"_orp", "_ph", b"_ph", "_phosphorus", b"_phosphorus", "_potassium", b"_potassium", "_radiation", b"_radiation", "_rainfall_1h", b"_rainfall_1h", "_rainfall_24h", b"_rainfall_24h", "_relative_humidity", b"_relative_humidity", "_salinity", b"_salinity", "_soil_moisture", b"_soil_moisture", "_soil_ph", b"_soil_ph", "_soil_temperature", b"_soil_temperature", "_solar_irradiance", b"_solar_irradiance", "_temperature", b"_temperature", "_turbidity", b"_turbidity", "_uv_lux", b"_uv_lux", "_voltage", b"_voltage", "_weight", b"_weight", "_white_lux", b"_white_lux", "_wind_direction", b"_wind_direction", "_wind_gust", b"_wind_gust", "_wind_lull", b"_wind_lull", "_wind_speed", b"_wind_speed", "adc_voltage_ch0", b"adc_voltage_ch0", "adc_voltage_ch1", b"adc_voltage_ch1", "adc_voltage_ch2", b"adc_voltage_ch2", "adc_voltage_ch3", b"adc_voltage_ch3", "adc_voltage_ch4", b"adc_voltage_ch4", "adc_voltage_ch5", b"adc_voltage_ch5", "adc_voltage_ch6", b"adc_voltage_ch6", "adc_voltage_ch7", b"adc_voltage_ch7", "ammonium", b"ammonium", "barometric_pressure", b"barometric_pressure", "biochemical_oxygen_demand", b"biochemical_oxygen_demand", "chemical_oxygen_demand", b"chemical_oxygen_demand", "current", b"current", "dissolved_oxygen", b"dissolved_oxygen", "distance", b"distance", "electrical_conductivity", b"electrical_conductivity", "gas_resistance", b"gas_resistance", "iaq", b"iaq", "ir_lux", b"ir_lux", "lightning_distance_km", b"lightning_distance_km", "lightning_strike_count_1h", b"lightning_strike_count_1h", "lux", b"lux", "nitrate", b"nitrate", "nitrogen", b"nitrogen", "one_wire_temperature_ch0", b"one_wire_temperature_ch0", "one_wire_temperature_ch1", b"one_wire_temperature_ch1", "one_wire_temperature_ch2", b"one_wire_temperature_ch2", "one_wire_temperature_ch3", b"one_wire_temperature_ch3", "one_wire_temperature_ch4", b"one_wire_temperature_ch4", "one_wire_temperature_ch5", b"one_wire_temperature_ch5", "one_wire_temperature_ch6", b"one_wire_temperature_ch6", "one_wire_temperature_ch7", b"one_wire_temperature_ch7", "orp", b"orp", "ph", b"ph", "phosphorus", b"phosphorus", "potassium", b"potassium", "radiation", b"radiation", "rainfall_1h", b"rainfall_1h", "rainfall_24h", b"rainfall_24h", "relative_humidity", b"relative_humidity", "salinity", b"salinity", "soil_moisture", b"soil_moisture", "soil_ph", b"soil_ph", "soil_temperature", b"soil_temperature", "solar_irradiance", b"solar_irradiance", "temperature", b"temperature", "turbidity", b"turbidity", "uv_lux", b"uv_lux", "voltage", b"voltage", "weight", b"weight", "white_lux", b"white_lux", "wind_direction", b"wind_direction", "wind_gust", b"wind_gust", "wind_lull", b"wind_lull", "wind_speed", b"wind_speed"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_ammonium", b"_ammonium", "_biochemical_oxygen_demand", b"_biochemical_oxygen_demand", "_chemical_oxygen_demand", b"_chemical_oxygen_demand", "_dissolved_oxygen", b"_dissolved_oxygen", "_electrical_conductivity", b"_electrical_conductivity", "_nitrate", b"_nitrate", "_nitrogen", b"_nitrogen", "_orp", b"_orp", "_ph", b"_ph", "_phosphorus", b"_phosphorus", "_potassium", b"_potassium", "_salinity", b"_salinity", "_soil_ph", b"_soil_ph", "_solar_irradiance", b"_solar_irradiance", "_turbidity", b"_turbidity", "ammonium", b"ammonium", "biochemical_oxygen_demand", b"biochemical_oxygen_demand", "chemical_oxygen_demand", b"chemical_oxygen_demand", "dissolved_oxygen", b"dissolved_oxygen", "electrical_conductivity", b"electrical_conductivity", "nitrate", b"nitrate", "nitrogen", b"nitrogen", "orp", b"orp", "ph", b"ph", "phosphorus", b"phosphorus", "potassium", b"potassium", "salinity", b"salinity", "soil_ph", b"soil_ph", "solar_irradiance", b"solar_irradiance", "turbidity", b"turbidity"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0", "_adc_voltage_ch1", b"_adc_voltage_ch1", "_adc_voltage_ch2", b"_adc_voltage_ch2", "_adc_voltage_ch3", b"_adc_voltage_ch3", "_adc_voltage_ch4", b"_adc_voltage_ch4", "_adc_voltage_ch5", b"_adc_voltage_ch5", "_adc_voltage_ch6", b"_adc_voltage_ch6", "_adc_voltage_ch7", b"_adc_voltage_ch7", "_ammonium", b"_ammonium", "_barometric_pressure", b"_barometric_pressure", "_biochemical_oxygen_demand", b"_biochemical_oxygen_demand", "_chemical_oxygen_demand", b"_chemical_oxygen_demand", "_current", b"_current", "_dissolved_oxygen", b"_dissolved_oxygen", "_distance", b"_distance", "_electrical_conductivity", b"_electrical_conductivity", "_gas_resistance", b"_gas_resistance", "_iaq", b"_iaq", "_ir_lux", b"_ir_lux", "_lightning_distance_km", b"_lightning_distance_km", "_lightning_strike_count_1h", b"_lightning_strike_count_1h", "_lux", b"_lux", "_nitrate", b"_nitrate", "_nitrogen", b"_nitrogen", "_one_wire_temperature_ch0", b"_one_wire_temperature_ch0", "_one_wire_temperature_ch1", b"_one_wire_temperature_ch1", "_one_wire_temperature_ch2", b"_one_wire_temperature_ch2", "_one_wire_temperature_ch3", b"_one_wire_temperature_ch3", "_one_wire_temperature_ch4", b"_one_wire_temperature_ch4", "_one_wire_temperature_ch5", b"_one_wire_temperature_ch5", "_one_wire_temperature_ch6", b"_one_wire_temperature_ch6", "_one_wire_temperature_ch7", b"_one_wire_temperature_ch7", "_orp", b"_orp", "_ph", b"_ph", "_phosphorus", b"_phosphorus", "_potassium", b"_potassium", "_radiation", b"_radiation", "_rainfall_1h", b"_rainfall_1h", "_rainfall_24h", b"_rainfall_24h", "_relative_humidity", b"_relative_humidity", "_salinity", b"_salinity", "_soil_moisture", b"_soil_moisture", "_soil_ph", b"_soil_ph", "_soil_temperature", b"_soil_temperature", "_solar_irradiance", b"_solar_irradiance", "_temperature", b"_temperature", "_turbidity", b"_turbidity", "_uv_lux", b"_uv_lux", "_voltage", b"_voltage", "_weight", b"_weight", "_white_lux", b"_white_lux", "_wind_direction", b"_wind_direction", "_wind_gust", b"_wind_gust", "_wind_lull", b"_wind_lull", "_wind_speed", b"_wind_speed", "adc_voltage_ch0", b"adc_voltage_ch0", "adc_voltage_ch1", b"adc_voltage_ch1", "adc_voltage_ch2", b"adc_voltage_ch2", "adc_voltage_ch3", b"adc_voltage_ch3", "adc_voltage_ch4", b"adc_voltage_ch4", "adc_voltage_ch5", b"adc_voltage_ch5", "adc_voltage_ch6", b"adc_voltage_ch6", "adc_voltage_ch7", b"adc_voltage_ch7", "ammonium", b"ammonium", "barometric_pressure", b"barometric_pressure", "biochemical_oxygen_demand", b"biochemical_oxygen_demand", "chemical_oxygen_demand", b"chemical_oxygen_demand", "current", b"current", "dissolved_oxygen", b"dissolved_oxygen", "distance", b"distance", "electrical_conductivity", b"electrical_conductivity", "gas_resistance", b"gas_resistance", "iaq", b"iaq", "ir_lux", b"ir_lux", "lightning_distance_km", b"lightning_distance_km", "lightning_strike_count_1h", b"lightning_strike_count_1h", "lux", b"lux", "nitrate", b"nitrate", "nitrogen", b"nitrogen", "one_wire_temperature", b"one_wire_temperature", "one_wire_temperature_ch0", b"one_wire_temperature_ch0", "one_wire_temperature_ch1", b"one_wire_temperature_ch1", "one_wire_temperature_ch2", b"one_wire_temperature_ch2", "one_wire_temperature_ch3", b"one_wire_temperature_ch3", "one_wire_temperature_ch4", b"one_wire_temperature_ch4", "one_wire_temperature_ch5", b"one_wire_temperature_ch5", "one_wire_temperature_ch6", b"one_wire_temperature_ch6", "one_wire_temperature_ch7", b"one_wire_temperature_ch7", "orp", b"orp", "ph", b"ph", "phosphorus", b"phosphorus", "potassium", b"potassium", "radiation", b"radiation", "rainfall_1h", b"rainfall_1h", "rainfall_24h", b"rainfall_24h", "relative_humidity", b"relative_humidity", "salinity", b"salinity", "soil_moisture", b"soil_moisture", "soil_ph", b"soil_ph", "soil_temperature", b"soil_temperature", "solar_irradiance", b"solar_irradiance", "temperature", b"temperature", "turbidity", b"turbidity", "uv_lux", b"uv_lux", "voltage", b"voltage", "weight", b"weight", "white_lux", b"white_lux", "wind_direction", b"wind_direction", "wind_gust", b"wind_gust", "wind_lull", b"wind_lull", "wind_speed", b"wind_speed"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_ammonium", b"_ammonium", "_biochemical_oxygen_demand", b"_biochemical_oxygen_demand", "_chemical_oxygen_demand", b"_chemical_oxygen_demand", "_dissolved_oxygen", b"_dissolved_oxygen", "_electrical_conductivity", b"_electrical_conductivity", "_nitrate", b"_nitrate", "_nitrogen", b"_nitrogen", "_orp", b"_orp", "_ph", b"_ph", "_phosphorus", b"_phosphorus", "_potassium", b"_potassium", "_salinity", b"_salinity", "_soil_ph", b"_soil_ph", "_solar_irradiance", b"_solar_irradiance", "_turbidity", b"_turbidity", "ammonium", b"ammonium", "biochemical_oxygen_demand", b"biochemical_oxygen_demand", "chemical_oxygen_demand", b"chemical_oxygen_demand", "dissolved_oxygen", b"dissolved_oxygen", "electrical_conductivity", b"electrical_conductivity", "nitrate", b"nitrate", "nitrogen", b"nitrogen", "orp", b"orp", "ph", b"ph", "phosphorus", b"phosphorus", "potassium", b"potassium", "salinity", b"salinity", "soil_ph", b"soil_ph", "solar_irradiance", b"solar_irradiance", "turbidity", b"turbidity"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    _WhichOneofReturnType__adc_voltage_ch0: _TypeAlias = _typing.Literal["adc_voltage_ch0"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch0: _TypeAlias = _typing.Literal["_adc_voltage_ch0", b"_adc_voltage_ch0"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch1: _TypeAlias = _typing.Literal["adc_voltage_ch1"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch1: _TypeAlias = _typing.Literal["_adc_voltage_ch1", b"_adc_voltage_ch1"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch2: _TypeAlias = _typing.Literal["adc_voltage_ch2"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch2: _TypeAlias = _typing.Literal["_adc_voltage_ch2", b"_adc_voltage_ch2"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch3: _TypeAlias = _typing.Literal["adc_voltage_ch3"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch3: _TypeAlias = _typing.Literal["_adc_voltage_ch3", b"_adc_voltage_ch3"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch4: _TypeAlias = _typing.Literal["adc_voltage_ch4"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch4: _TypeAlias = _typing.Literal["_adc_voltage_ch4", b"_adc_voltage_ch4"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch5: _TypeAlias = _typing.Literal["adc_voltage_ch5"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch5: _TypeAlias = _typing.Literal["_adc_voltage_ch5", b"_adc_voltage_ch5"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch6: _TypeAlias = _typing.Literal["adc_voltage_ch6"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch6: _TypeAlias = _typing.Literal["_adc_voltage_ch6", b"_adc_voltage_ch6"]  # noqa: Y015
-    _WhichOneofReturnType__adc_voltage_ch7: _TypeAlias = _typing.Literal["adc_voltage_ch7"]  # noqa: Y015
-    _WhichOneofArgType__adc_voltage_ch7: _TypeAlias = _typing.Literal["_adc_voltage_ch7", b"_adc_voltage_ch7"]  # noqa: Y015
     _WhichOneofReturnType__ammonium: _TypeAlias = _typing.Literal["ammonium"]  # noqa: Y015
     _WhichOneofArgType__ammonium: _TypeAlias = _typing.Literal["_ammonium", b"_ammonium"]  # noqa: Y015
-    _WhichOneofReturnType__barometric_pressure: _TypeAlias = _typing.Literal["barometric_pressure"]  # noqa: Y015
-    _WhichOneofArgType__barometric_pressure: _TypeAlias = _typing.Literal["_barometric_pressure", b"_barometric_pressure"]  # noqa: Y015
     _WhichOneofReturnType__biochemical_oxygen_demand: _TypeAlias = _typing.Literal["biochemical_oxygen_demand"]  # noqa: Y015
     _WhichOneofArgType__biochemical_oxygen_demand: _TypeAlias = _typing.Literal["_biochemical_oxygen_demand", b"_biochemical_oxygen_demand"]  # noqa: Y015
     _WhichOneofReturnType__chemical_oxygen_demand: _TypeAlias = _typing.Literal["chemical_oxygen_demand"]  # noqa: Y015
     _WhichOneofArgType__chemical_oxygen_demand: _TypeAlias = _typing.Literal["_chemical_oxygen_demand", b"_chemical_oxygen_demand"]  # noqa: Y015
-    _WhichOneofReturnType__current: _TypeAlias = _typing.Literal["current"]  # noqa: Y015
-    _WhichOneofArgType__current: _TypeAlias = _typing.Literal["_current", b"_current"]  # noqa: Y015
     _WhichOneofReturnType__dissolved_oxygen: _TypeAlias = _typing.Literal["dissolved_oxygen"]  # noqa: Y015
     _WhichOneofArgType__dissolved_oxygen: _TypeAlias = _typing.Literal["_dissolved_oxygen", b"_dissolved_oxygen"]  # noqa: Y015
-    _WhichOneofReturnType__distance: _TypeAlias = _typing.Literal["distance"]  # noqa: Y015
-    _WhichOneofArgType__distance: _TypeAlias = _typing.Literal["_distance", b"_distance"]  # noqa: Y015
     _WhichOneofReturnType__electrical_conductivity: _TypeAlias = _typing.Literal["electrical_conductivity"]  # noqa: Y015
     _WhichOneofArgType__electrical_conductivity: _TypeAlias = _typing.Literal["_electrical_conductivity", b"_electrical_conductivity"]  # noqa: Y015
-    _WhichOneofReturnType__gas_resistance: _TypeAlias = _typing.Literal["gas_resistance"]  # noqa: Y015
-    _WhichOneofArgType__gas_resistance: _TypeAlias = _typing.Literal["_gas_resistance", b"_gas_resistance"]  # noqa: Y015
-    _WhichOneofReturnType__iaq: _TypeAlias = _typing.Literal["iaq"]  # noqa: Y015
-    _WhichOneofArgType__iaq: _TypeAlias = _typing.Literal["_iaq", b"_iaq"]  # noqa: Y015
-    _WhichOneofReturnType__ir_lux: _TypeAlias = _typing.Literal["ir_lux"]  # noqa: Y015
-    _WhichOneofArgType__ir_lux: _TypeAlias = _typing.Literal["_ir_lux", b"_ir_lux"]  # noqa: Y015
-    _WhichOneofReturnType__lightning_distance_km: _TypeAlias = _typing.Literal["lightning_distance_km"]  # noqa: Y015
-    _WhichOneofArgType__lightning_distance_km: _TypeAlias = _typing.Literal["_lightning_distance_km", b"_lightning_distance_km"]  # noqa: Y015
-    _WhichOneofReturnType__lightning_strike_count_1h: _TypeAlias = _typing.Literal["lightning_strike_count_1h"]  # noqa: Y015
-    _WhichOneofArgType__lightning_strike_count_1h: _TypeAlias = _typing.Literal["_lightning_strike_count_1h", b"_lightning_strike_count_1h"]  # noqa: Y015
-    _WhichOneofReturnType__lux: _TypeAlias = _typing.Literal["lux"]  # noqa: Y015
-    _WhichOneofArgType__lux: _TypeAlias = _typing.Literal["_lux", b"_lux"]  # noqa: Y015
     _WhichOneofReturnType__nitrate: _TypeAlias = _typing.Literal["nitrate"]  # noqa: Y015
     _WhichOneofArgType__nitrate: _TypeAlias = _typing.Literal["_nitrate", b"_nitrate"]  # noqa: Y015
     _WhichOneofReturnType__nitrogen: _TypeAlias = _typing.Literal["nitrogen"]  # noqa: Y015
     _WhichOneofArgType__nitrogen: _TypeAlias = _typing.Literal["_nitrogen", b"_nitrogen"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch0: _TypeAlias = _typing.Literal["one_wire_temperature_ch0"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch0: _TypeAlias = _typing.Literal["_one_wire_temperature_ch0", b"_one_wire_temperature_ch0"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch1: _TypeAlias = _typing.Literal["one_wire_temperature_ch1"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch1: _TypeAlias = _typing.Literal["_one_wire_temperature_ch1", b"_one_wire_temperature_ch1"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch2: _TypeAlias = _typing.Literal["one_wire_temperature_ch2"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch2: _TypeAlias = _typing.Literal["_one_wire_temperature_ch2", b"_one_wire_temperature_ch2"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch3: _TypeAlias = _typing.Literal["one_wire_temperature_ch3"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch3: _TypeAlias = _typing.Literal["_one_wire_temperature_ch3", b"_one_wire_temperature_ch3"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch4: _TypeAlias = _typing.Literal["one_wire_temperature_ch4"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch4: _TypeAlias = _typing.Literal["_one_wire_temperature_ch4", b"_one_wire_temperature_ch4"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch5: _TypeAlias = _typing.Literal["one_wire_temperature_ch5"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch5: _TypeAlias = _typing.Literal["_one_wire_temperature_ch5", b"_one_wire_temperature_ch5"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch6: _TypeAlias = _typing.Literal["one_wire_temperature_ch6"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch6: _TypeAlias = _typing.Literal["_one_wire_temperature_ch6", b"_one_wire_temperature_ch6"]  # noqa: Y015
-    _WhichOneofReturnType__one_wire_temperature_ch7: _TypeAlias = _typing.Literal["one_wire_temperature_ch7"]  # noqa: Y015
-    _WhichOneofArgType__one_wire_temperature_ch7: _TypeAlias = _typing.Literal["_one_wire_temperature_ch7", b"_one_wire_temperature_ch7"]  # noqa: Y015
     _WhichOneofReturnType__orp: _TypeAlias = _typing.Literal["orp"]  # noqa: Y015
     _WhichOneofArgType__orp: _TypeAlias = _typing.Literal["_orp", b"_orp"]  # noqa: Y015
     _WhichOneofReturnType__ph: _TypeAlias = _typing.Literal["ph"]  # noqa: Y015
@@ -1008,108 +1141,28 @@ class EnvironmentMetrics(_message.Message):
     _WhichOneofArgType__phosphorus: _TypeAlias = _typing.Literal["_phosphorus", b"_phosphorus"]  # noqa: Y015
     _WhichOneofReturnType__potassium: _TypeAlias = _typing.Literal["potassium"]  # noqa: Y015
     _WhichOneofArgType__potassium: _TypeAlias = _typing.Literal["_potassium", b"_potassium"]  # noqa: Y015
-    _WhichOneofReturnType__radiation: _TypeAlias = _typing.Literal["radiation"]  # noqa: Y015
-    _WhichOneofArgType__radiation: _TypeAlias = _typing.Literal["_radiation", b"_radiation"]  # noqa: Y015
-    _WhichOneofReturnType__rainfall_1h: _TypeAlias = _typing.Literal["rainfall_1h"]  # noqa: Y015
-    _WhichOneofArgType__rainfall_1h: _TypeAlias = _typing.Literal["_rainfall_1h", b"_rainfall_1h"]  # noqa: Y015
-    _WhichOneofReturnType__rainfall_24h: _TypeAlias = _typing.Literal["rainfall_24h"]  # noqa: Y015
-    _WhichOneofArgType__rainfall_24h: _TypeAlias = _typing.Literal["_rainfall_24h", b"_rainfall_24h"]  # noqa: Y015
-    _WhichOneofReturnType__relative_humidity: _TypeAlias = _typing.Literal["relative_humidity"]  # noqa: Y015
-    _WhichOneofArgType__relative_humidity: _TypeAlias = _typing.Literal["_relative_humidity", b"_relative_humidity"]  # noqa: Y015
     _WhichOneofReturnType__salinity: _TypeAlias = _typing.Literal["salinity"]  # noqa: Y015
     _WhichOneofArgType__salinity: _TypeAlias = _typing.Literal["_salinity", b"_salinity"]  # noqa: Y015
-    _WhichOneofReturnType__soil_moisture: _TypeAlias = _typing.Literal["soil_moisture"]  # noqa: Y015
-    _WhichOneofArgType__soil_moisture: _TypeAlias = _typing.Literal["_soil_moisture", b"_soil_moisture"]  # noqa: Y015
     _WhichOneofReturnType__soil_ph: _TypeAlias = _typing.Literal["soil_ph"]  # noqa: Y015
     _WhichOneofArgType__soil_ph: _TypeAlias = _typing.Literal["_soil_ph", b"_soil_ph"]  # noqa: Y015
-    _WhichOneofReturnType__soil_temperature: _TypeAlias = _typing.Literal["soil_temperature"]  # noqa: Y015
-    _WhichOneofArgType__soil_temperature: _TypeAlias = _typing.Literal["_soil_temperature", b"_soil_temperature"]  # noqa: Y015
     _WhichOneofReturnType__solar_irradiance: _TypeAlias = _typing.Literal["solar_irradiance"]  # noqa: Y015
     _WhichOneofArgType__solar_irradiance: _TypeAlias = _typing.Literal["_solar_irradiance", b"_solar_irradiance"]  # noqa: Y015
-    _WhichOneofReturnType__temperature: _TypeAlias = _typing.Literal["temperature"]  # noqa: Y015
-    _WhichOneofArgType__temperature: _TypeAlias = _typing.Literal["_temperature", b"_temperature"]  # noqa: Y015
     _WhichOneofReturnType__turbidity: _TypeAlias = _typing.Literal["turbidity"]  # noqa: Y015
     _WhichOneofArgType__turbidity: _TypeAlias = _typing.Literal["_turbidity", b"_turbidity"]  # noqa: Y015
-    _WhichOneofReturnType__uv_lux: _TypeAlias = _typing.Literal["uv_lux"]  # noqa: Y015
-    _WhichOneofArgType__uv_lux: _TypeAlias = _typing.Literal["_uv_lux", b"_uv_lux"]  # noqa: Y015
-    _WhichOneofReturnType__voltage: _TypeAlias = _typing.Literal["voltage"]  # noqa: Y015
-    _WhichOneofArgType__voltage: _TypeAlias = _typing.Literal["_voltage", b"_voltage"]  # noqa: Y015
-    _WhichOneofReturnType__weight: _TypeAlias = _typing.Literal["weight"]  # noqa: Y015
-    _WhichOneofArgType__weight: _TypeAlias = _typing.Literal["_weight", b"_weight"]  # noqa: Y015
-    _WhichOneofReturnType__white_lux: _TypeAlias = _typing.Literal["white_lux"]  # noqa: Y015
-    _WhichOneofArgType__white_lux: _TypeAlias = _typing.Literal["_white_lux", b"_white_lux"]  # noqa: Y015
-    _WhichOneofReturnType__wind_direction: _TypeAlias = _typing.Literal["wind_direction"]  # noqa: Y015
-    _WhichOneofArgType__wind_direction: _TypeAlias = _typing.Literal["_wind_direction", b"_wind_direction"]  # noqa: Y015
-    _WhichOneofReturnType__wind_gust: _TypeAlias = _typing.Literal["wind_gust"]  # noqa: Y015
-    _WhichOneofArgType__wind_gust: _TypeAlias = _typing.Literal["_wind_gust", b"_wind_gust"]  # noqa: Y015
-    _WhichOneofReturnType__wind_lull: _TypeAlias = _typing.Literal["wind_lull"]  # noqa: Y015
-    _WhichOneofArgType__wind_lull: _TypeAlias = _typing.Literal["_wind_lull", b"_wind_lull"]  # noqa: Y015
-    _WhichOneofReturnType__wind_speed: _TypeAlias = _typing.Literal["wind_speed"]  # noqa: Y015
-    _WhichOneofArgType__wind_speed: _TypeAlias = _typing.Literal["_wind_speed", b"_wind_speed"]  # noqa: Y015
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch0) -> _WhichOneofReturnType__adc_voltage_ch0 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch1) -> _WhichOneofReturnType__adc_voltage_ch1 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch2) -> _WhichOneofReturnType__adc_voltage_ch2 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch3) -> _WhichOneofReturnType__adc_voltage_ch3 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch4) -> _WhichOneofReturnType__adc_voltage_ch4 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch5) -> _WhichOneofReturnType__adc_voltage_ch5 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch6) -> _WhichOneofReturnType__adc_voltage_ch6 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__adc_voltage_ch7) -> _WhichOneofReturnType__adc_voltage_ch7 | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__ammonium) -> _WhichOneofReturnType__ammonium | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__barometric_pressure) -> _WhichOneofReturnType__barometric_pressure | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__biochemical_oxygen_demand) -> _WhichOneofReturnType__biochemical_oxygen_demand | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__chemical_oxygen_demand) -> _WhichOneofReturnType__chemical_oxygen_demand | None: ...
     @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__current) -> _WhichOneofReturnType__current | None: ...
-    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__dissolved_oxygen) -> _WhichOneofReturnType__dissolved_oxygen | None: ...
     @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__distance) -> _WhichOneofReturnType__distance | None: ...
-    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__electrical_conductivity) -> _WhichOneofReturnType__electrical_conductivity | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__gas_resistance) -> _WhichOneofReturnType__gas_resistance | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__iaq) -> _WhichOneofReturnType__iaq | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__ir_lux) -> _WhichOneofReturnType__ir_lux | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__lightning_distance_km) -> _WhichOneofReturnType__lightning_distance_km | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__lightning_strike_count_1h) -> _WhichOneofReturnType__lightning_strike_count_1h | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__lux) -> _WhichOneofReturnType__lux | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__nitrate) -> _WhichOneofReturnType__nitrate | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__nitrogen) -> _WhichOneofReturnType__nitrogen | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch0) -> _WhichOneofReturnType__one_wire_temperature_ch0 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch1) -> _WhichOneofReturnType__one_wire_temperature_ch1 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch2) -> _WhichOneofReturnType__one_wire_temperature_ch2 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch3) -> _WhichOneofReturnType__one_wire_temperature_ch3 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch4) -> _WhichOneofReturnType__one_wire_temperature_ch4 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch5) -> _WhichOneofReturnType__one_wire_temperature_ch5 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch6) -> _WhichOneofReturnType__one_wire_temperature_ch6 | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__one_wire_temperature_ch7) -> _WhichOneofReturnType__one_wire_temperature_ch7 | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__orp) -> _WhichOneofReturnType__orp | None: ...
     @_typing.overload
@@ -1119,45 +1172,15 @@ class EnvironmentMetrics(_message.Message):
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__potassium) -> _WhichOneofReturnType__potassium | None: ...
     @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__radiation) -> _WhichOneofReturnType__radiation | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__rainfall_1h) -> _WhichOneofReturnType__rainfall_1h | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__rainfall_24h) -> _WhichOneofReturnType__rainfall_24h | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__relative_humidity) -> _WhichOneofReturnType__relative_humidity | None: ...
-    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__salinity) -> _WhichOneofReturnType__salinity | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__soil_moisture) -> _WhichOneofReturnType__soil_moisture | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__soil_ph) -> _WhichOneofReturnType__soil_ph | None: ...
     @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__soil_temperature) -> _WhichOneofReturnType__soil_temperature | None: ...
-    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__solar_irradiance) -> _WhichOneofReturnType__solar_irradiance | None: ...
     @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__temperature) -> _WhichOneofReturnType__temperature | None: ...
-    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__turbidity) -> _WhichOneofReturnType__turbidity | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__uv_lux) -> _WhichOneofReturnType__uv_lux | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__voltage) -> _WhichOneofReturnType__voltage | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__weight) -> _WhichOneofReturnType__weight | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__white_lux) -> _WhichOneofReturnType__white_lux | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_direction) -> _WhichOneofReturnType__wind_direction | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_gust) -> _WhichOneofReturnType__wind_gust | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_lull) -> _WhichOneofReturnType__wind_lull | None: ...
-    @_typing.overload
-    def WhichOneof(self, oneof_group: _WhichOneofArgType__wind_speed) -> _WhichOneofReturnType__wind_speed | None: ...
 
-Global___EnvironmentMetrics: _TypeAlias = EnvironmentMetrics  # noqa: Y015
+Global___SoilWaterMetrics: _TypeAlias = SoilWaterMetrics  # noqa: Y015
 
 @_typing.final
 class PowerMetrics(_message.Message):
@@ -2046,6 +2069,7 @@ class Telemetry(_message.Message):
     HEALTH_METRICS_FIELD_NUMBER: _builtins.int
     HOST_METRICS_FIELD_NUMBER: _builtins.int
     TRAFFIC_MANAGEMENT_STATS_FIELD_NUMBER: _builtins.int
+    SOIL_WATER_METRICS_FIELD_NUMBER: _builtins.int
     time: _builtins.int
     """
     Seconds since 1970 - or 0 for unknown/unset
@@ -2098,6 +2122,12 @@ class Telemetry(_message.Message):
         Traffic management statistics
         """
 
+    @_builtins.property
+    def soil_water_metrics(self) -> Global___SoilWaterMetrics:
+        """
+        Soil and water probe metrics
+        """
+
     def __init__(
         self,
         *,
@@ -2110,12 +2140,13 @@ class Telemetry(_message.Message):
         health_metrics: Global___HealthMetrics | None = ...,
         host_metrics: Global___HostMetrics | None = ...,
         traffic_management_stats: Global___TrafficManagementStats | None = ...,
+        soil_water_metrics: Global___SoilWaterMetrics | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["air_quality_metrics", b"air_quality_metrics", "device_metrics", b"device_metrics", "environment_metrics", b"environment_metrics", "health_metrics", b"health_metrics", "host_metrics", b"host_metrics", "local_stats", b"local_stats", "power_metrics", b"power_metrics", "traffic_management_stats", b"traffic_management_stats", "variant", b"variant"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["air_quality_metrics", b"air_quality_metrics", "device_metrics", b"device_metrics", "environment_metrics", b"environment_metrics", "health_metrics", b"health_metrics", "host_metrics", b"host_metrics", "local_stats", b"local_stats", "power_metrics", b"power_metrics", "soil_water_metrics", b"soil_water_metrics", "traffic_management_stats", b"traffic_management_stats", "variant", b"variant"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["air_quality_metrics", b"air_quality_metrics", "device_metrics", b"device_metrics", "environment_metrics", b"environment_metrics", "health_metrics", b"health_metrics", "host_metrics", b"host_metrics", "local_stats", b"local_stats", "power_metrics", b"power_metrics", "time", b"time", "traffic_management_stats", b"traffic_management_stats", "variant", b"variant"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["air_quality_metrics", b"air_quality_metrics", "device_metrics", b"device_metrics", "environment_metrics", b"environment_metrics", "health_metrics", b"health_metrics", "host_metrics", b"host_metrics", "local_stats", b"local_stats", "power_metrics", b"power_metrics", "soil_water_metrics", b"soil_water_metrics", "time", b"time", "traffic_management_stats", b"traffic_management_stats", "variant", b"variant"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    _WhichOneofReturnType_variant: _TypeAlias = _typing.Literal["device_metrics", "environment_metrics", "air_quality_metrics", "power_metrics", "local_stats", "health_metrics", "host_metrics", "traffic_management_stats"]  # noqa: Y015
+    _WhichOneofReturnType_variant: _TypeAlias = _typing.Literal["device_metrics", "environment_metrics", "air_quality_metrics", "power_metrics", "local_stats", "health_metrics", "host_metrics", "traffic_management_stats", "soil_water_metrics"]  # noqa: Y015
     _WhichOneofArgType_variant: _TypeAlias = _typing.Literal["variant", b"variant"]  # noqa: Y015
     def WhichOneof(self, oneof_group: _WhichOneofArgType_variant) -> _WhichOneofReturnType_variant | None: ...
 
