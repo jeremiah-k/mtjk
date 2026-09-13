@@ -315,6 +315,7 @@ class StoreAndForward(_message.Message):
     HISTORY_FIELD_NUMBER: _builtins.int
     HEARTBEAT_FIELD_NUMBER: _builtins.int
     TEXT_FIELD_NUMBER: _builtins.int
+    ORIGINAL_ID_FIELD_NUMBER: _builtins.int
     rr: Global___StoreAndForward.RequestResponse.ValueType
     """
     TODO: REPLACE
@@ -322,6 +323,10 @@ class StoreAndForward(_message.Message):
     text: _builtins.bytes
     """
     Text from history message.
+    """
+    original_id: _builtins.int
+    """
+    Contains the original ID of the contained message.
     """
     @_builtins.property
     def stats(self) -> Global___StoreAndForward.Statistics:
@@ -349,10 +354,11 @@ class StoreAndForward(_message.Message):
         history: Global___StoreAndForward.History | None = ...,
         heartbeat: Global___StoreAndForward.Heartbeat | None = ...,
         text: _builtins.bytes = ...,
+        original_id: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["heartbeat", b"heartbeat", "history", b"history", "stats", b"stats", "text", b"text", "variant", b"variant"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["heartbeat", b"heartbeat", "history", b"history", "rr", b"rr", "stats", b"stats", "text", b"text", "variant", b"variant"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["heartbeat", b"heartbeat", "history", b"history", "original_id", b"original_id", "rr", b"rr", "stats", b"stats", "text", b"text", "variant", b"variant"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_variant: _TypeAlias = _typing.Literal["stats", "history", "heartbeat", "text"]  # noqa: Y015
     _WhichOneofArgType_variant: _TypeAlias = _typing.Literal["variant", b"variant"]  # noqa: Y015
