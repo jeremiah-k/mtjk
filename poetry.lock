@@ -3995,15 +3995,15 @@ pyserial = "*"
 
 [[package]]
 name = "print-color"
-version = "0.4.7"
+version = "0.4.8"
 description = "A simple package to print in color to the terminal"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
 markers = "extra == \"cli\""
 files = [
-    {file = "print_color-0.4.7-py3-none-any.whl", hash = "sha256:1ec1706f9cec1b0e79d3c8a4da51d4c880080b0864c0966281d8be7b8207c093"},
-    {file = "print_color-0.4.7.tar.gz", hash = "sha256:5f07ab99f45d1439c7b88a0930a775affcade40ad04259e2f77d18fd643d5328"},
+    {file = "print_color-0.4.8-py3-none-any.whl", hash = "sha256:8eaa5b8a9ee39e9e4dbfe1efef463ff9c91b5606c520fe9a9ededb3c26d74472"},
+    {file = "print_color-0.4.8.tar.gz", hash = "sha256:20e4c7c565c0359d980513a9e0cde4a59a468e5ffee904b5e4614c721319c8a3"},
 ]
 
 [package.extras]
