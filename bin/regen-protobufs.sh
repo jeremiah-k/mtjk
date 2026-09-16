@@ -73,9 +73,9 @@ cp ./protobufs/meshtastic/*.proto "${INDIR}"
 cp ./protobufs/nanopb.proto "${INDIR}"
 cp ./protobufs/meshtastic/*.options "${INDIR}"
 
-# Rewrite the upstream protobuf package/import namespace consistently before
-# generation.  This also updates package-qualified custom options such as
-# (meshtastic.field_metadata), whose defining package moves with the schema.
+# Rewrite the upstream protobuf namespace consistently before generation,
+# including package declarations, import paths, and code-level qualified
+# references such as (meshtastic.field_metadata).
 python3 ./bin/fixup_protobuf_namespace.py "${INDIR}"
 
 # OS-X sed is apparently a little different and expects an arg for -i
