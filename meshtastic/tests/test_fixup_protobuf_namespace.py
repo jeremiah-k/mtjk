@@ -109,6 +109,23 @@ def test_rewrite_proto_source_is_generic_for_future_qualified_symbols() -> None:
 
 
 @pytest.mark.unit
+def test_rewrite_proto_source_rewrites_only_root_qualified_symbols() -> None:
+    source = textwrap.dedent("""\
+        meshtastic.Type plain = 1;
+        .meshtastic.Type rooted = 2;
+        vendor.meshtastic.Type foreign = 3;
+        _meshtastic.Type prefixed = 4;
+        """)
+
+    assert _rewrite_proto_source(source) == textwrap.dedent("""\
+        meshtastic.protobuf.Type plain = 1;
+        .meshtastic.protobuf.Type rooted = 2;
+        vendor.meshtastic.Type foreign = 3;
+        _meshtastic.Type prefixed = 4;
+        """)
+
+
+@pytest.mark.unit
 def test_rewrite_proto_source_preserves_strings_and_comments() -> None:
     source = textwrap.dedent("""\
         // (meshtastic.comment_option) must stay documentation.
