@@ -161,7 +161,7 @@ def inject_into_proto(
 
     lines = content.split("\n")
 
-    # Check if nanopb is already imported (after sed fixup, it will be
+    # Check if nanopb is already imported (after namespace fixup, it will be
     # 'meshtastic/protobuf/nanopb.proto')
     nanopb_already_imported = any(
         "nanopb.proto" in line for line in lines if line.strip().startswith("import")
@@ -320,7 +320,7 @@ def main() -> int:
 
     content = proto_path.read_text(encoding="utf-8")
 
-    # After regen-protobufs.sh's sed fixup, the nanopb import path is:
+    # After regen-protobufs.sh's namespace fixup, the nanopb import path is:
     nanopb_import_path = "meshtastic/protobuf/nanopb.proto"
 
     modified = inject_into_proto(content, specific, wildcard, nanopb_import_path)
