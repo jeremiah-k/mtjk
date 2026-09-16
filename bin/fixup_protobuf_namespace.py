@@ -14,26 +14,25 @@ from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Callable
 from pathlib import Path
 
 TARGET_PACKAGE = "meshtastic.protobuf"
 TARGET_IMPORT_PREFIX = "meshtastic/protobuf/"
 NANOPB_TARGET_IMPORT = "meshtastic/protobuf/nanopb.proto"
 
-_PACKAGE_RE = re.compile(
-    r"(?m)^(?P<prefix>[ \t]*package[ \t]+)meshtastic(?P<suffix>[ \t]*;)"
-)
+# Statement grammars accept any whitespace run between tokens: protobuf treats
+# comments as whitespace, and masking comments to same-length spaces keeps
+# matches aligned with the original bytes. Only the named ``target`` group is
+# ever replaced, so comments crossed by a match stay byte-for-byte intact.
+_PACKAGE_RE = re.compile(r"(?m)^\s*package\s+(?P<target>meshtastic)(?=\s*;)")
 _MESHTASTIC_IMPORT_RE = re.compile(
-    r'(?m)^(?P<prefix>[ \t]*import(?:[ \t]+(?:public|weak))?[ \t]+")'
-    r"meshtastic/(?!protobuf/)"
+    r'(?m)^\s*import(?:\s+(?:public|weak))?\s+"' r"(?P<target>meshtastic/)(?!protobuf/)"
 )
 _NANOPB_IMPORT_RE = re.compile(
-    r'(?m)^(?P<prefix>[ \t]*import(?:[ \t]+(?:public|weak))?[ \t]+")'
-    r'nanopb\.proto(?P<suffix>"[ \t]*;)'
+    r'(?m)^\s*import(?:\s+(?:public|weak))?\s+"' r'(?P<target>nanopb\.proto)(?="\s*;)'
 )
 _QUALIFIED_SYMBOL_RE = re.compile(
-    r"(?P<prefix>(?<![A-Za-z0-9_.])\.?)meshtastic\.(?!protobuf\b)"
+    r"(?<![A-Za-z0-9_.])\.?(?P<target>meshtastic\.)(?!protobuf\b)"
 )
 
 # Proto comments and quoted strings are the only regions namespace rewriting
@@ -63,14 +62,19 @@ def _masked_source(source: str, *, protect_strings: bool) -> str:
     return _PROTECTED_RE.sub(replace, source)
 
 
-def _rewrite_matches(
+def _rewrite_target_matches(
     source: str,
     pattern: re.Pattern[str],
-    replacement: str | Callable[[re.Match[str]], str],
+    replacement: str,
     *,
     protect_strings: bool,
 ) -> str:
-    """Apply one regex only where the corresponding source is not protected."""
+    """Rewrite only each named ``target`` group outside protected source.
+
+    Matches are located on a same-length masked copy, but only the target token
+    is replaced in the original source. This preserves comments and unusual
+    whitespace that may legally appear between surrounding protobuf tokens.
+    """
     masked = _masked_source(source, protect_strings=protect_strings)
     matches = list(pattern.finditer(masked))
     if not matches:
@@ -78,11 +82,8 @@ def _rewrite_matches(
 
     rewritten = source
     for match in reversed(matches):
-        if isinstance(replacement, str):
-            value = match.expand(replacement)
-        else:
-            value = replacement(match)
-        rewritten = rewritten[: match.start()] + value + rewritten[match.end() :]
+        start, end = match.span("target")
+        rewritten = rewritten[:start] + replacement + rewritten[end:]
     return rewritten
 
 
@@ -98,28 +99,28 @@ def _rewrite_proto_source(source: str) -> str:
     The operation is idempotent so callers can safely apply it repeatedly to the
     same staged source.
     """
-    rewritten = _rewrite_matches(
+    rewritten = _rewrite_target_matches(
         source,
         _PACKAGE_RE,
-        rf"\g<prefix>{TARGET_PACKAGE}\g<suffix>",
+        TARGET_PACKAGE,
         protect_strings=False,
     )
-    rewritten = _rewrite_matches(
+    rewritten = _rewrite_target_matches(
         rewritten,
         _MESHTASTIC_IMPORT_RE,
-        rf"\g<prefix>{TARGET_IMPORT_PREFIX}",
+        TARGET_IMPORT_PREFIX,
         protect_strings=False,
     )
-    rewritten = _rewrite_matches(
+    rewritten = _rewrite_target_matches(
         rewritten,
         _NANOPB_IMPORT_RE,
-        rf"\g<prefix>{NANOPB_TARGET_IMPORT}\g<suffix>",
+        NANOPB_TARGET_IMPORT,
         protect_strings=False,
     )
-    return _rewrite_matches(
+    return _rewrite_target_matches(
         rewritten,
         _QUALIFIED_SYMBOL_RE,
-        rf"\g<prefix>{TARGET_PACKAGE}.",
+        f"{TARGET_PACKAGE}.",
         protect_strings=True,
     )
 

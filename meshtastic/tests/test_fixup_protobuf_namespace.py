@@ -1,6 +1,7 @@
 """Regression tests for the protobuf namespace staging transformation."""
 
 import importlib.util
+import re
 import sys
 import textwrap
 import types
@@ -200,3 +201,291 @@ def test_rewrite_proto_directory_rejects_missing_directory(tmp_path: Path) -> No
 
     with pytest.raises(NotADirectoryError, match="missing"):
         _rewrite_proto_directory(missing)
+
+
+def _comment_regions(source: str) -> list[str]:
+    """Return every comment region byte-for-byte, in order of appearance."""
+    return re.findall(r"//[^\n]*|/\*.*?\*/", source, flags=re.DOTALL)
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_preserves_inline_comments_between_tokens() -> None:
+    source = textwrap.dedent("""\
+        package /* package comment */ meshtastic;
+        import /* import comment */ "meshtastic/config.proto";
+        import public /* public comment */ "meshtastic/field_metadata.proto";
+        import weak /* weak comment */ "nanopb.proto";
+        """)
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == textwrap.dedent("""\
+        package /* package comment */ meshtastic.protobuf;
+        import /* import comment */ "meshtastic/protobuf/config.proto";
+        import public /* public comment */ "meshtastic/protobuf/field_metadata.proto";
+        import weak /* weak comment */ "meshtastic/protobuf/nanopb.proto";
+        """)
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_preserves_line_comments_between_tokens() -> None:
+    source = (
+        "package // package comment\n"
+        "meshtastic;\n"
+        "import // import comment\n"
+        '"meshtastic/config.proto";\n'
+    )
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == (
+        "package // package comment\n"
+        "meshtastic.protobuf;\n"
+        "import // import comment\n"
+        '"meshtastic/protobuf/config.proto";\n'
+    )
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_preserves_multiline_block_comments() -> None:
+    source = (
+        "package /* first line\n"
+        "second line */ meshtastic;\n"
+        "import /* first line\n"
+        'second line */ "meshtastic/config.proto";\n'
+    )
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == (
+        "package /* first line\n"
+        "second line */ meshtastic.protobuf;\n"
+        "import /* first line\n"
+        'second line */ "meshtastic/protobuf/config.proto";\n'
+    )
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_preserves_comment_after_nanopb_import() -> None:
+    source = 'import "nanopb.proto" /* staged beside the schemas */;\n'
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == (
+        'import "meshtastic/protobuf/nanopb.proto"'
+        " /* staged beside the schemas */;\n"
+    )
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_preserves_comments_around_qualified_symbols() -> None:
+    source = textwrap.dedent("""\
+        /* leading */ .meshtastic.Type rooted = 1;
+        // own line
+        meshtastic.Type plain = 2;
+        """)
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == textwrap.dedent("""\
+        /* leading */ .meshtastic.protobuf.Type rooted = 1;
+        // own line
+        meshtastic.protobuf.Type plain = 2;
+        """)
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_does_not_match_non_statement_lines() -> None:
+    source = textwrap.dedent("""\
+        option java_package = "org.meshtastic.proto";
+        packagex meshtastic;
+        message package_info {
+          string label = 1;
+        }
+        """)
+
+    assert _rewrite_proto_source(source) == source
+
+
+def _build_comment_preserving_variants() -> list[tuple[str, str, str]]:
+    """Build ``(name, source, expected)`` pairs over separator matrices.
+
+    Each variant interleaves legal comment/whitespace separators around the
+    namespace tokens; the expected output keeps every non-token byte intact.
+    """
+    variants: list[tuple[str, str, str]] = []
+
+    package_leads = ["", "  ", "\t", "// lead\n", "/* lead */ "]
+    package_inners = [
+        " ",
+        "\t",
+        " /* inner */ ",
+        " // inner\n",
+        " /* multi\n   line */ ",
+    ]
+    package_tails = ["", " ", " /* tail */ ", " // tail\n"]
+    for lead_index, lead in enumerate(package_leads):
+        for inner_index, inner in enumerate(package_inners):
+            for tail_index, tail in enumerate(package_tails):
+                name = f"package-lead{lead_index}-inner{inner_index}-tail{tail_index}"
+                source = f"{lead}package{inner}meshtastic{tail};\n"
+                expected = f"{lead}package{inner}meshtastic.protobuf{tail};\n"
+                variants.append((name, source, expected))
+
+    import_verbs = ["import", "import public", "import weak"]
+    import_inners = [" ", " /* inner */ ", " // inner\n"]
+    import_leads = ["", "// lead\n"]
+    for verb_index, verb in enumerate(import_verbs):
+        for inner_index, inner in enumerate(import_inners):
+            for lead_index, lead in enumerate(import_leads):
+                name = f"import-verb{verb_index}-inner{inner_index}-lead{lead_index}"
+                source = f'{lead}{verb}{inner}"meshtastic/config.proto";\n'
+                expected = f'{lead}{verb}{inner}"meshtastic/protobuf/config.proto";\n'
+                variants.append((name, source, expected))
+
+    nanopb_verbs = ["import", "import weak"]
+    nanopb_inners = [" ", " /* inner */ "]
+    nanopb_tails = ["", " /* tail */ ", " // tail\n"]
+    for verb_index, verb in enumerate(nanopb_verbs):
+        for inner_index, inner in enumerate(nanopb_inners):
+            for tail_index, tail in enumerate(nanopb_tails):
+                name = f"nanopb-verb{verb_index}-inner{inner_index}-tail{tail_index}"
+                source = f'{verb}{inner}"nanopb.proto"{tail};\n'
+                expected = f'{verb}{inner}"meshtastic/protobuf/nanopb.proto"{tail};\n'
+                variants.append((name, source, expected))
+
+    qualified_placements = ["", " ", " /* pre */ ", "// pre\n", " /* pre\n   */ "]
+    qualified_forms = [
+        (
+            "plain",
+            "meshtastic.Type plain = 1;",
+            "meshtastic.protobuf.Type plain = 1;",
+        ),
+        (
+            "rooted",
+            ".meshtastic.Type rooted = 2;",
+            ".meshtastic.protobuf.Type rooted = 2;",
+        ),
+    ]
+    for form_name, before, after in qualified_forms:
+        for placement_index, placement in enumerate(qualified_placements):
+            name = f"qualified-{form_name}-placement{placement_index}"
+            variants.append((name, f"{placement}{before}\n", f"{placement}{after}\n"))
+
+    variants.append(
+        (
+            "qualified-vendor-unchanged",
+            "vendor.meshtastic.Type foreign = 3;\n",
+            "vendor.meshtastic.Type foreign = 3;\n",
+        )
+    )
+    variants.append(
+        (
+            "qualified-prefixed-unchanged",
+            "_meshtastic.Type prefixed = 4;\n",
+            "_meshtastic.Type prefixed = 4;\n",
+        )
+    )
+
+    variants.append(
+        (
+            "combined-block-comments",
+            textwrap.dedent("""\
+                // header comment
+                syntax = "proto3";
+
+                /* lead */ package /* inner
+                   line */ meshtastic /* tail */;
+
+                import // lead
+                "meshtastic/device_ui.proto";
+                import public /* inner */ "meshtastic/field_metadata.proto";
+                import weak "nanopb.proto" /* tail */;
+
+                message Example {
+                  .meshtastic.Config config = 1;
+                  uint32 value = 2 [(meshtastic.field_metadata) = {diy_only: true}];
+                }
+                """),
+            "// header comment\n"
+            'syntax = "proto3";\n'
+            "\n"
+            "/* lead */ package /* inner\n"
+            "   line */ meshtastic.protobuf /* tail */;\n"
+            "\n"
+            "import // lead\n"
+            '"meshtastic/protobuf/device_ui.proto";\n'
+            'import public /* inner */ "meshtastic/protobuf/'
+            'field_metadata.proto";\n'
+            'import weak "meshtastic/protobuf/nanopb.proto" /* tail */;\n'
+            "\n"
+            "message Example {\n"
+            "  .meshtastic.protobuf.Config config = 1;\n"
+            "  uint32 value = 2 [(meshtastic.protobuf.field_metadata)"
+            " = {diy_only: true}];\n"
+            "}\n",
+        )
+    )
+    variants.append(
+        (
+            "combined-line-comments",
+            textwrap.dedent("""\
+                // header comment
+                syntax = "proto3";
+
+                package // package comment
+                meshtastic;
+
+                import // import comment
+                "meshtastic/config.proto";
+                import public // public comment
+                "meshtastic/field_metadata.proto";
+                import weak // weak comment
+                "nanopb.proto";
+
+                message Example {
+                  .meshtastic.Config config = 1;
+                  uint32 value = 2 [(meshtastic.field_metadata) = {diy_only: true}];
+                }
+                """),
+            "// header comment\n"
+            'syntax = "proto3";\n'
+            "\n"
+            "package // package comment\n"
+            "meshtastic.protobuf;\n"
+            "\n"
+            "import // import comment\n"
+            '"meshtastic/protobuf/config.proto";\n'
+            "import public // public comment\n"
+            '"meshtastic/protobuf/field_metadata.proto";\n'
+            "import weak // weak comment\n"
+            '"meshtastic/protobuf/nanopb.proto";\n'
+            "\n"
+            "message Example {\n"
+            "  .meshtastic.protobuf.Config config = 1;\n"
+            "  uint32 value = 2 [(meshtastic.protobuf.field_metadata)"
+            " = {diy_only: true}];\n"
+            "}\n",
+        )
+    )
+
+    return variants
+
+
+_VARIANTS = _build_comment_preserving_variants()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [(source, expected) for _, source, expected in _VARIANTS],
+    ids=[name for name, _, _ in _VARIANTS],
+)
+def test_rewrite_proto_source_preserves_comments_across_variants(
+    source: str, expected: str
+) -> None:
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == expected
+    assert _comment_regions(source) == _comment_regions(rewritten)
+    assert _rewrite_proto_source(rewritten) == rewritten
