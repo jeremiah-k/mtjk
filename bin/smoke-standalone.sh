@@ -36,9 +36,14 @@ help_output="$("${binary}" --help)"
 require_output "${help_output}" "--version" "--help"
 require_output "${help_output}" "--support" "--help"
 require_output "${help_output}" "--list-fields" "--help"
+require_output "${help_output}" "--describe-field" "--help"
 
 fields_output="$("${binary}" --list-fields)"
 require_output "${fields_output}" "Local config fields:" "--list-fields"
 require_output "${fields_output}" "Module config fields:" "--list-fields"
+
+describe_output="$("${binary}" --describe-field lora.hop_limit)"
+require_output "${describe_output}" "Field: lora.hop_limit" "--describe-field"
+require_output "${describe_output}" "Range: 0 to 7" "--describe-field"
 
 printf 'Standalone smoke test passed: %s (%s)\n' "${binary}" "${expected_version_output}"

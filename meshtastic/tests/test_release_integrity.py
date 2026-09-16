@@ -326,15 +326,25 @@ def _write_fake_standalone(
     *,
     version: str,
     product: str = PRIMARY_CLI_NAME,
-    help_values: tuple[str, ...] = ("--version", "--support", "--list-fields"),
+    help_values: tuple[str, ...] = (
+        "--version",
+        "--support",
+        "--list-fields",
+        "--describe-field",
+    ),
     field_values: tuple[str, ...] = (
         "Local config fields:",
         "Module config fields:",
+    ),
+    describe_values: tuple[str, ...] = (
+        "Field: lora.hop_limit",
+        "Range: 0 to 7",
     ),
 ) -> None:
     """Write a small executable implementing a configurable smoke-test surface."""
     help_text = " ".join(help_values)
     field_args = " ".join(shlex.quote(value) for value in field_values)
+    describe_args = " ".join(shlex.quote(value) for value in describe_values)
     path.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -342,6 +352,7 @@ def _write_fake_standalone(
         f"  --version) printf '%s\\n' {shlex.quote(f'{product} {version}')} ;;\n"
         f"  --help) printf '%s\\n' {shlex.quote(help_text)} ;;\n"
         f"  --list-fields) printf '%s\\n' {field_args} ;;\n"
+        f"  --describe-field) printf '%s\\n' {describe_args} ;;\n"
         "  *) exit 2 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -452,17 +463,25 @@ def test_standalone_smoke_contract_rejects_wrong_version(tmp_path: Path) -> None
         ("help", "--version", "--help"),
         ("help", "--support", "--help"),
         ("help", "--list-fields", "--help"),
+        ("help", "--describe-field", "--help"),
         ("fields", "Local config fields:", "--list-fields"),
         ("fields", "Module config fields:", "--list-fields"),
+        ("describe", "Field: lora.hop_limit", "--describe-field"),
+        ("describe", "Range: 0 to 7", "--describe-field"),
     ],
 )
 def test_standalone_smoke_contract_rejects_missing_required_surface(
     tmp_path: Path, surface: str, missing: str, operation: str
 ) -> None:
     """Every required standalone help/schema value must be enforced independently."""
-    help_values = ["--version", "--support", "--list-fields"]
+    help_values = ["--version", "--support", "--list-fields", "--describe-field"]
     field_values = ["Local config fields:", "Module config fields:"]
-    values = help_values if surface == "help" else field_values
+    describe_values = ["Field: lora.hop_limit", "Range: 0 to 7"]
+    values = {
+        "help": help_values,
+        "fields": field_values,
+        "describe": describe_values,
+    }[surface]
     values.remove(missing)
     binary = tmp_path / PRIMARY_CLI_NAME
     _write_fake_standalone(
@@ -470,6 +489,7 @@ def test_standalone_smoke_contract_rejects_missing_required_surface(
         version="1.2.3",
         help_values=tuple(help_values),
         field_values=tuple(field_values),
+        describe_values=tuple(describe_values),
     )
 
     result = subprocess.run(

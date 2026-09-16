@@ -1396,6 +1396,19 @@ def printAvailableConfigFields() -> None:
     )
 
 
+def _describe_config_field(field_name: str) -> bool:
+    """Describe one protobuf-backed CLI field without connecting to a device."""
+    return cli_config_io.describe_config_field(
+        field_name,
+        normalize_pref_name=cli_preference_runtime.normalize_pref_name,
+        display_pref_name=_display_pref_name,
+        type_label=cli_preference_runtime.protobuf_field_type_label,
+        bitfield_enums=cli_preference_runtime.BITFIELD_ENUMS,
+        local_config_factory=localonly_pb2.LocalConfig,
+        module_config_factory=localonly_pb2.LocalModuleConfig,
+    )
+
+
 def onNode(node: Any) -> None:
     """Notify about a node database change by printing the changed node.
 
@@ -1658,6 +1671,7 @@ def _build_bootstrap_hooks() -> cli_bootstrap.BootstrapHooks:
         cli_exit=_cli_exit,
         support_info=supportInfo,
         print_available_config_fields=printAvailableConfigFields,
+        describe_config_field=_describe_config_field,
         create_power_meter=_create_power_meter,
         get_power_meter=lambda: meter,
         release_power_meter=_release_session_power_meter,

@@ -63,6 +63,11 @@ def _normalize_metadata(
     )
 
 
+def _format_numeric_bound(value: float) -> str:
+    """Format a metadata numeric bound without unnecessary decimal noise."""
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
 def _get_field_metadata(field: FieldDescriptor) -> _SchemaMetadata | None:
     """Return normalized metadata for ``field``, including standard deprecation."""
     options = field.GetOptions()

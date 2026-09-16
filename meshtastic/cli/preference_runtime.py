@@ -20,7 +20,7 @@ from google.protobuf.json_format import ParseDict, ParseError
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
-from meshtastic.cli.schema_metadata import _get_field_metadata
+from meshtastic.cli.schema_metadata import _format_numeric_bound, _get_field_metadata
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
 
@@ -299,11 +299,6 @@ def _converted_pref_value(
         return False, None
 
 
-def _format_metadata_bound(value: float) -> str:
-    """Format a protobuf metadata bound without unnecessary decimal noise."""
-    return str(int(value)) if value.is_integer() else f"{value:g}"
-
-
 def _validate_metadata_bounds(
     pref: FieldDescriptor,
     value: Any,
@@ -329,14 +324,14 @@ def _validate_metadata_bounds(
 
     if minimum is not None and maximum is not None:
         expected = (
-            f"between {_format_metadata_bound(minimum)} and "
-            f"{_format_metadata_bound(maximum)}"
+            f"between {_format_numeric_bound(minimum)} and "
+            f"{_format_numeric_bound(maximum)}"
         )
     elif minimum is not None:
-        expected = f"at least {_format_metadata_bound(minimum)}"
+        expected = f"at least {_format_numeric_bound(minimum)}"
     else:
         assert maximum is not None
-        expected = f"at most {_format_metadata_bound(maximum)}"
+        expected = f"at most {_format_numeric_bound(maximum)}"
     display_value = redact_pref_value(field_path, repr(value))
     return _reject_pref_validation_message(
         f"Invalid value {display_value} for {field_path}; expected {expected}.",
