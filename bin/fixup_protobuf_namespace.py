@@ -38,10 +38,7 @@ _QUALIFIED_SYMBOL_RE = re.compile(r"(?<![A-Za-z0-9_])meshtastic\.(?!protobuf\b)"
 # must not inspect. Matching both together keeps comment markers embedded inside
 # quoted metadata from being mistaken for real comments.
 _PROTECTED_RE = re.compile(
-    r"//[^\n]*"
-    r"|/\*.*?\*/"
-    r'|"(?:\\.|[^"\\])*"'
-    r"|'(?:\\.|[^'\\])*'",
+    r"//[^\n]*" r"|/\*.*?\*/" r'|"(?:\\.|[^"\\])*"' r"|'(?:\\.|[^'\\])*'",
     re.DOTALL,
 )
 
