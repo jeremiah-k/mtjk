@@ -46,7 +46,7 @@ format_nanopb_opts = _inj.format_nanopb_opts
 inject_into_proto = _inj.inject_into_proto
 message_path_matches = _inj.message_path_matches
 
-# Convenience: the nanopb import path the script uses after the sed fixup
+# Convenience: the nanopb import path the script uses after namespace fixup
 NANOPB_IMPORT = 'import "meshtastic/protobuf/nanopb.proto";'
 
 

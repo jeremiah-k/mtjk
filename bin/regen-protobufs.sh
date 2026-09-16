@@ -73,19 +73,17 @@ cp ./protobufs/meshtastic/*.proto "${INDIR}"
 cp ./protobufs/nanopb.proto "${INDIR}"
 cp ./protobufs/meshtastic/*.options "${INDIR}"
 
+# Rewrite the upstream protobuf package/import namespace consistently before
+# generation.  This also updates package-qualified custom options such as
+# (meshtastic.field_metadata), whose defining package moves with the schema.
+python3 ./bin/fixup_protobuf_namespace.py "${INDIR}"
+
 # OS-X sed is apparently a little different and expects an arg for -i
 if [[ ${OSTYPE-} == darwin* ]]; then
 	SEDCMD=(sed -i '' -E)
 else
 	SEDCMD=(sed -i -E)
 fi
-
-# change the package names to meshtastic.protobuf
-"${SEDCMD[@]}" 's/^package meshtastic;/package meshtastic.protobuf;/' "${INDIR}/"*.proto
-# fix the imports to match
-"${SEDCMD[@]}" 's/^import "meshtastic\//import "meshtastic\/protobuf\//' "${INDIR}/"*.proto
-
-"${SEDCMD[@]}" 's/^import "nanopb.proto"/import "meshtastic\/protobuf\/nanopb.proto"/' "${INDIR}/"*.proto
 
 # Inject nanopb .options constraints as inline proto field options so that
 # protoc --python_out embeds them in the generated descriptors.  Python code
