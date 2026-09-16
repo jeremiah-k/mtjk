@@ -285,3 +285,77 @@ def test_cli_invalid_repeated_value_exits_without_mutation_or_write(
     out, err = capsys.readouterr()
     assert "expected integer" in err
     assert "Traceback" not in out + err
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_schema_metadata_numeric_bounds(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Schema presentation bounds reject values the firmware would reject."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.hop_limit", "8") is False
+    assert config.lora.hop_limit == 0
+
+    out, err = capsys.readouterr()
+    assert "Invalid value 8 for lora.hop_limit; expected between 0 and 7." in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ("0", "7"))
+def test_set_pref_accepts_schema_metadata_boundaries(value: str) -> None:
+    """Inclusive schema bounds remain valid preference values."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.hop_limit", value) is True
+    assert config.lora.hop_limit == int(value)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_cli_out_of_metadata_bounds_exits_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI preflight rejects out-of-range metadata values before device writes."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "meshtastic",
+            "--host",
+            "meshtastic.local",
+            "--set",
+            "lora.hop_limit",
+            "8",
+        ],
+    )
+    interface, node = _mock_tcp_interface_with_channels()
+
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=interface):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+    node.writeConfig.assert_not_called()
+    out, err = capsys.readouterr()
+    assert "expected between 0 and 7" in err
+    assert "Traceback" not in out + err
+
+
+@pytest.mark.unit
+def test_metadata_bounds_use_fatal_preflight_policy() -> None:
+    """Configure preflight receives bounds failures through the shared fatal path."""
+    from meshtastic.cli.preference_runtime import (
+        PreferenceValueError,
+        fatal_preference_value_errors,
+    )
+
+    config = localonly_pb2.LocalConfig()
+
+    with fatal_preference_value_errors():
+        with pytest.raises(PreferenceValueError, match=r"expected between 0 and 7"):
+            setPref(config, "lora.hop_limit", "8")
+
+    assert config.lora.hop_limit == 0
