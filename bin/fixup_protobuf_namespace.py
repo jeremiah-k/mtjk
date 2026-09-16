@@ -33,9 +33,7 @@ _NANOPB_IMPORT_RE = re.compile(
     r"(?m)^\s*import(?:\s+(?:public|weak))?\s+"
     r"(?P<quote>['\"])(?P<target>nanopb\.proto)(?P=quote)(?=\s*;)"
 )
-_QUALIFIED_SYMBOL_RE = re.compile(
-    r"(?P<target>meshtastic)(?=\s*\.(?!\s*protobuf\b))"
-)
+_QUALIFIED_SYMBOL_RE = re.compile(r"(?P<target>meshtastic)(?=\s*\.(?!\s*protobuf\b))")
 
 # Proto comments and quoted strings are the only regions namespace rewriting
 # must not inspect. Matching both together keeps comment markers embedded inside
