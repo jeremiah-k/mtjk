@@ -22,8 +22,7 @@ NANOPB_TARGET_IMPORT = "meshtastic/protobuf/nanopb.proto"
 
 _PACKAGE_RE = re.compile(r"(?m)^(?P<prefix>\s*package\s+)meshtastic(?P<suffix>\s*;)")
 _MESHTASTIC_IMPORT_RE = re.compile(
-    r'(?m)^(?P<prefix>\s*import(?:\s+(?:public|weak))?\s+")'
-    r"meshtastic/(?!protobuf/)"
+    r'(?m)^(?P<prefix>\s*import(?:\s+(?:public|weak))?\s+")' r"meshtastic/(?!protobuf/)"
 )
 _NANOPB_IMPORT_RE = re.compile(
     r'(?m)^(?P<prefix>\s*import(?:\s+(?:public|weak))?\s+")'
@@ -54,7 +53,7 @@ def _rewrite_custom_option_references(source: str) -> str:
 
 
 def rewrite_proto_source(source: str) -> str:
-    """Return one proto source rewritten for ``meshtastic.protobuf``.
+    r"""Return one proto source rewritten for ``meshtastic.protobuf``.
 
     The transformation is intentionally narrow: it updates the protobuf package,
     Meshtastic import paths, nanopb's import path, and package-qualified custom
@@ -65,9 +64,7 @@ def rewrite_proto_source(source: str) -> str:
     than once to the same staged source.
     """
 
-    rewritten = _PACKAGE_RE.sub(
-        rf"\g<prefix>{TARGET_PACKAGE}\g<suffix>", source
-    )
+    rewritten = _PACKAGE_RE.sub(rf"\g<prefix>{TARGET_PACKAGE}\g<suffix>", source)
     rewritten = _MESHTASTIC_IMPORT_RE.sub(
         rf"\g<prefix>{TARGET_IMPORT_PREFIX}", rewritten
     )

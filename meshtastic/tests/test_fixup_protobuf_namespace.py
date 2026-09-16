@@ -34,8 +34,7 @@ rewrite_proto_directory = _fixup.rewrite_proto_directory
 
 @pytest.mark.unit
 def test_rewrite_proto_source_moves_package_imports_and_custom_options():
-    source = textwrap.dedent(
-        '''\
+    source = textwrap.dedent("""\
         syntax = "proto3";
 
         package meshtastic;
@@ -49,8 +48,7 @@ def test_rewrite_proto_source_moves_package_imports_and_custom_options():
         message Example {
           uint32 value = 1 [(meshtastic.field_metadata) = {diy_only: true}];
         }
-        '''
-    )
+        """)
 
     rewritten = rewrite_proto_source(source)
 
@@ -64,8 +62,7 @@ def test_rewrite_proto_source_moves_package_imports_and_custom_options():
 
 @pytest.mark.unit
 def test_rewrite_proto_source_handles_field_and_enum_metadata_from_680d829():
-    source = textwrap.dedent(
-        '''\
+    source = textwrap.dedent("""\
         syntax = "proto3";
         package meshtastic;
         import "meshtastic/field_metadata.proto";
@@ -81,8 +78,7 @@ def test_rewrite_proto_source_handles_field_and_enum_metadata_from_680d829():
             uint32 rx_gpio = 8 [(meshtastic.field_metadata) = {diy_only: true}];
           }
         }
-        '''
-    )
+        """)
 
     rewritten = rewrite_proto_source(source)
 
@@ -104,15 +100,13 @@ def test_rewrite_proto_source_is_generic_for_future_custom_options():
 
 @pytest.mark.unit
 def test_rewrite_proto_source_preserves_option_like_text_in_strings_and_comments():
-    source = textwrap.dedent(
-        """\
+    source = textwrap.dedent("""\
         // (meshtastic.comment_option) must stay documentation.
         /* (meshtastic.block_option) must also stay documentation. */
         option java_package = "(meshtastic.string_option)";
         option csharp_namespace = '(meshtastic.single_quoted_option)';
         uint32 value = 1 [(meshtastic.real_option) = true];
-        """
-    )
+        """)
 
     rewritten = rewrite_proto_source(source)
 
@@ -125,15 +119,13 @@ def test_rewrite_proto_source_preserves_option_like_text_in_strings_and_comments
 
 @pytest.mark.unit
 def test_rewrite_proto_source_is_idempotent():
-    source = textwrap.dedent(
-        '''\
+    source = textwrap.dedent("""\
         package meshtastic;
         import "meshtastic/config.proto";
         message Example {
           uint32 value = 1 [(meshtastic.field_metadata) = {diy_only: true}];
         }
-        '''
-    )
+        """)
 
     once = rewrite_proto_source(source)
 
@@ -156,9 +148,7 @@ def test_rewrite_proto_file_reports_whether_content_changed(tmp_path: Path):
 def test_rewrite_proto_directory_only_changes_proto_files(tmp_path: Path):
     proto = tmp_path / "config.proto"
     options = tmp_path / "config.options"
-    proto.write_text(
-        'package meshtastic;\nimport "nanopb.proto";\n', encoding="utf-8"
-    )
+    proto.write_text('package meshtastic;\nimport "nanopb.proto";\n', encoding="utf-8")
     options.write_text("*Config.value max_size:8\n", encoding="utf-8")
 
     assert rewrite_proto_directory(tmp_path) == 1
