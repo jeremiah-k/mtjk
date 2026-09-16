@@ -11,6 +11,7 @@ import contextlib
 import contextvars
 import json
 import logging
+import math
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -19,7 +20,7 @@ from google.protobuf.json_format import ParseDict, ParseError
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
-from meshtastic.cli.schema_metadata import get_field_metadata
+from meshtastic.cli.schema_metadata import _get_field_metadata
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
 
@@ -311,8 +312,8 @@ def _validate_metadata_bounds(
     cli_print: Callable[..., None],
 ) -> bool:
     """Reject numeric CLI values outside schema-declared presentation bounds."""
-    metadata = get_field_metadata(pref)
-    if metadata is None or not metadata.has_bounds:
+    metadata = _get_field_metadata(pref)
+    if metadata is None or not metadata._has_bounds:
         return True
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         # Preserve the existing protobuf type-error path for non-numeric input.
@@ -320,9 +321,10 @@ def _validate_metadata_bounds(
 
     minimum = metadata.min_value
     maximum = metadata.max_value
+    non_finite = isinstance(value, float) and not math.isfinite(value)
     below = minimum is not None and value < minimum
     above = maximum is not None and value > maximum
-    if not (below or above):
+    if not (non_finite or below or above):
         return True
 
     if minimum is not None and maximum is not None:

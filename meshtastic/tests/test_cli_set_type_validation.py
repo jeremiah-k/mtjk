@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
+import meshtastic.cli.preference_runtime as preference_runtime
 from meshtastic.__main__ import main, setPref
+from meshtastic.cli.schema_metadata import _SchemaMetadata
 from meshtastic.protobuf import config_pb2, localonly_pb2
 
 from .cli_validation_test_helpers import _mock_tcp_interface_with_channels
@@ -359,3 +361,61 @@ def test_metadata_bounds_use_fatal_preflight_policy() -> None:
             setPref(config, "lora.hop_limit", "8")
 
     assert config.lora.hop_limit == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "value", "expected"),
+    (
+        (_SchemaMetadata(min_value=1.0), "0", "at least 1"),
+        (_SchemaMetadata(max_value=1.0), "2", "at most 1"),
+    ),
+)
+def test_set_pref_reports_one_sided_metadata_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata: _SchemaMetadata,
+    value: str,
+    expected: str,
+) -> None:
+    """One-sided schema bounds retain precise validation diagnostics."""
+    monkeypatch.setattr(
+        preference_runtime, "_get_field_metadata", lambda _field: metadata
+    )
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "power.adc_multiplier_override", value) is False
+
+    out, err = capsys.readouterr()
+    assert expected in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "value"),
+    (
+        (_SchemaMetadata(min_value=0.0, max_value=1.0), "nan"),
+        (_SchemaMetadata(min_value=0.0), "inf"),
+        (_SchemaMetadata(max_value=1.0), "-inf"),
+    ),
+)
+def test_set_pref_rejects_non_finite_values_for_bounded_float_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata: _SchemaMetadata,
+    value: str,
+) -> None:
+    """NaN and infinities cannot bypass finite schema presentation bounds."""
+    monkeypatch.setattr(
+        preference_runtime, "_get_field_metadata", lambda _field: metadata
+    )
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "power.adc_multiplier_override", value) is False
+    assert config.power.adc_multiplier_override == 0.0
+
+    out, err = capsys.readouterr()
+    assert "Invalid value" in out
+    assert "power.adc_multiplier_override" in out
+    assert err == ""
