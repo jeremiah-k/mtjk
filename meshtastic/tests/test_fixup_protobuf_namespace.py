@@ -110,6 +110,47 @@ def test_rewrite_proto_source_is_generic_for_future_qualified_symbols() -> None:
 
 
 @pytest.mark.unit
+def test_rewrite_proto_source_handles_single_quoted_imports() -> None:
+    source = textwrap.dedent("""\
+        import 'meshtastic/config.proto';
+        import public 'meshtastic/field_metadata.proto';
+        import weak 'nanopb.proto';
+        import 'meshtastic/' 'device_ui.proto';
+        """)
+
+    assert _rewrite_proto_source(source) == textwrap.dedent("""\
+        import 'meshtastic/protobuf/config.proto';
+        import public 'meshtastic/protobuf/field_metadata.proto';
+        import weak 'meshtastic/protobuf/nanopb.proto';
+        import 'meshtastic/protobuf/' 'device_ui.proto';
+        """)
+
+
+@pytest.mark.unit
+def test_rewrite_proto_source_handles_spaced_qualified_symbols() -> None:
+    source = textwrap.dedent("""\
+        meshtastic . Config spaced = 1;
+        meshtastic /* qualifier comment */ . Config commented = 2;
+        . meshtastic . Config rooted = 3;
+        vendor.meshtastic . Config foreign = 4;
+        vendor /* foreign qualifier */ . meshtastic . Config separated_foreign = 5;
+        meshtastic.protobuf . Config already_rewritten = 6;
+        """)
+
+    rewritten = _rewrite_proto_source(source)
+
+    assert rewritten == textwrap.dedent("""\
+        meshtastic.protobuf . Config spaced = 1;
+        meshtastic.protobuf /* qualifier comment */ . Config commented = 2;
+        . meshtastic.protobuf . Config rooted = 3;
+        vendor.meshtastic . Config foreign = 4;
+        vendor /* foreign qualifier */ . meshtastic . Config separated_foreign = 5;
+        meshtastic.protobuf . Config already_rewritten = 6;
+        """)
+    assert _rewrite_proto_source(rewritten) == rewritten
+
+
+@pytest.mark.unit
 def test_rewrite_proto_source_rewrites_only_root_qualified_symbols() -> None:
     source = textwrap.dedent("""\
         meshtastic.Type plain = 1;

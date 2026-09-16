@@ -26,13 +26,15 @@ NANOPB_TARGET_IMPORT = "meshtastic/protobuf/nanopb.proto"
 # ever replaced, so comments crossed by a match stay byte-for-byte intact.
 _PACKAGE_RE = re.compile(r"(?m)^\s*package\s+(?P<target>meshtastic)(?=\s*;)")
 _MESHTASTIC_IMPORT_RE = re.compile(
-    r'(?m)^\s*import(?:\s+(?:public|weak))?\s+"' r"(?P<target>meshtastic/)(?!protobuf/)"
+    r"(?m)^\s*import(?:\s+(?:public|weak))?\s+['\"]"
+    r"(?P<target>meshtastic/)(?!protobuf/)"
 )
 _NANOPB_IMPORT_RE = re.compile(
-    r'(?m)^\s*import(?:\s+(?:public|weak))?\s+"' r'(?P<target>nanopb\.proto)(?="\s*;)'
+    r"(?m)^\s*import(?:\s+(?:public|weak))?\s+"
+    r"(?P<quote>['\"])(?P<target>nanopb\.proto)(?P=quote)(?=\s*;)"
 )
 _QUALIFIED_SYMBOL_RE = re.compile(
-    r"(?<![A-Za-z0-9_.])\.?(?P<target>meshtastic\.)(?!protobuf\b)"
+    r"(?P<target>meshtastic)(?=\s*\.(?!\s*protobuf\b))"
 )
 
 # Proto comments and quoted strings are the only regions namespace rewriting
@@ -87,12 +89,56 @@ def _rewrite_target_matches(
     return rewritten
 
 
+def _previous_non_whitespace(source: str, index: int) -> int:
+    """Return the previous non-whitespace offset, or ``-1`` when absent."""
+    while index >= 0 and source[index].isspace():
+        index -= 1
+    return index
+
+
+def _is_root_qualified_symbol(masked: str, start: int) -> bool:
+    """Return whether ``meshtastic`` at ``start`` begins a root qualification.
+
+    Protobuf permits whitespace/comments around ``.`` tokens. Inspect the
+    masked lexical context so ``vendor . meshtastic . Type`` remains foreign,
+    while ``. meshtastic . Type`` and ``meshtastic . Type`` are relocated.
+    """
+    previous = _previous_non_whitespace(masked, start - 1)
+    if previous < 0:
+        return True
+
+    previous_char = masked[previous]
+    if previous_char != ".":
+        return not (previous_char.isalnum() or previous_char == "_")
+
+    before_dot = _previous_non_whitespace(masked, previous - 1)
+    return before_dot < 0 or not (
+        masked[before_dot].isalnum() or masked[before_dot] == "_"
+    )
+
+
+def _rewrite_qualified_symbols(source: str) -> str:
+    """Relocate root-qualified Meshtastic symbols outside strings/comments."""
+    masked = _masked_source(source, protect_strings=True)
+    matches = [
+        match
+        for match in _QUALIFIED_SYMBOL_RE.finditer(masked)
+        if _is_root_qualified_symbol(masked, match.start("target"))
+    ]
+    rewritten = source
+    for match in reversed(matches):
+        start, end = match.span("target")
+        rewritten = rewritten[:start] + TARGET_PACKAGE + rewritten[end:]
+    return rewritten
+
+
 def _rewrite_proto_source(source: str) -> str:
     r"""Return one proto source rewritten for ``meshtastic.protobuf``.
 
     Package declarations and import strings are rewritten outside comments.
     Fully-qualified ``meshtastic.*`` symbols are rewritten only in protobuf code,
-    so option/documentation strings and comments remain untouched. This covers
+    including legal whitespace/comments around the qualification dot, so
+    option/documentation strings and comments remain untouched. This covers
     custom options such as ``(meshtastic.field_metadata)`` as well as future
     fully-qualified message or enum references.
 
@@ -117,12 +163,7 @@ def _rewrite_proto_source(source: str) -> str:
         NANOPB_TARGET_IMPORT,
         protect_strings=False,
     )
-    return _rewrite_target_matches(
-        rewritten,
-        _QUALIFIED_SYMBOL_RE,
-        f"{TARGET_PACKAGE}.",
-        protect_strings=True,
-    )
+    return _rewrite_qualified_symbols(rewritten)
 
 
 def _rewrite_proto_file(path: Path) -> bool:
