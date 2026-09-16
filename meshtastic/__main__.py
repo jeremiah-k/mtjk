@@ -1398,7 +1398,7 @@ def printAvailableConfigFields() -> None:
 
 def _describe_config_field(field_name: str) -> bool:
     """Describe one protobuf-backed CLI field without connecting to a device."""
-    return cli_config_io.describe_config_field(
+    return cli_config_io._describe_config_field(
         field_name,
         normalize_pref_name=cli_preference_runtime.normalize_pref_name,
         display_pref_name=_display_pref_name,

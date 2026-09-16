@@ -177,6 +177,18 @@ def _find_config_field_descriptor(
     return None
 
 
+def _metadata_flags(metadata: Any) -> tuple[str, ...]:
+    """Return display flags represented by normalized schema metadata."""
+    flags: list[str] = []
+    if metadata.diy_only:
+        flags.append("DIY only")
+    if metadata.admin_only:
+        flags.append("admin only")
+    if metadata.deprecated:
+        flags.append("deprecated")
+    return tuple(flags)
+
+
 def _describe_enum_values(enum_descriptor: Any) -> None:
     """Print enum values with any schema-provided labels and descriptions."""
     print("Choices:")
@@ -188,9 +200,13 @@ def _describe_enum_values(enum_descriptor: Any) -> None:
             print(f"        {metadata.description}")
         if metadata and metadata.keywords:
             print(f"        Keywords: {', '.join(metadata.keywords)}")
+        if metadata:
+            flags = _metadata_flags(metadata)
+            if flags:
+                print(f"        Flags: {', '.join(flags)}")
 
 
-def describe_config_field(
+def _describe_config_field(
     field_name: str,
     *,
     normalize_pref_name: Callable[[str], str],
@@ -233,21 +249,11 @@ def describe_config_field(
             print(f"Maximum: {_format_numeric_bound(metadata.max_value)}")
         if metadata.unit:
             print(f"Unit: {metadata.unit}")
-        flags = []
-        if metadata.diy_only:
-            flags.append("DIY only")
-        if metadata.admin_only:
-            flags.append("admin only")
-        if metadata.deprecated:
-            flags.append("deprecated")
-        if field.GetOptions().deprecated and "deprecated" not in flags:
-            flags.append("deprecated")
+        flags = _metadata_flags(metadata)
         if flags:
             print(f"Flags: {', '.join(flags)}")
         if metadata.keywords:
             print(f"Keywords: {', '.join(metadata.keywords)}")
-    elif field.GetOptions().deprecated:
-        print("Flags: deprecated")
 
     enum_descriptor = field.enum_type
     if enum_descriptor is None and bitfield_enum is not None:
