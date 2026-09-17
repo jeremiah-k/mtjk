@@ -14,6 +14,11 @@ from google.protobuf.message import DecodeError, Message
 
 import meshtastic.util
 from meshtastic.cli.context import CliExit, _terminate_cli
+from meshtastic.cli.schema_metadata import (
+    _format_numeric_bound,
+    _get_enum_value_metadata,
+    _get_field_metadata,
+)
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import clientonly_pb2, localonly_pb2
 
@@ -148,6 +153,114 @@ def print_available_config_fields(
                 f"    {display_pref_name(alias_name)} -> "
                 f"{display_pref_name(canonical_name)}"
             )
+
+
+def _find_config_field_descriptor(
+    field_name: str, factories: Sequence[Callable[[], Any]]
+) -> FieldDescriptor | None:
+    """Resolve a dotted field path against local and module config wrappers."""
+    parts = field_name.split(".")
+    if not parts or any(not part for part in parts):
+        return None
+    for factory in factories:
+        descriptor = factory().DESCRIPTOR
+        field: FieldDescriptor | None = None
+        for index, part in enumerate(parts):
+            field = descriptor.fields_by_name.get(part)
+            if field is None:
+                break
+            if index == len(parts) - 1:
+                return field
+            if field.message_type is None:
+                break
+            descriptor = field.message_type
+    return None
+
+
+def _metadata_flags(metadata: Any) -> tuple[str, ...]:
+    """Return display flags represented by normalized schema metadata."""
+    flags: list[str] = []
+    if metadata.diy_only:
+        flags.append("DIY only")
+    if metadata.admin_only:
+        flags.append("admin only")
+    if metadata.deprecated:
+        flags.append("deprecated")
+    return tuple(flags)
+
+
+def _describe_enum_values(enum_descriptor: Any) -> None:
+    """Print enum values with any schema-provided labels and descriptions."""
+    print("Choices:")
+    for value in enum_descriptor.values:
+        metadata = _get_enum_value_metadata(value)
+        suffix = f" - {metadata.label}" if metadata and metadata.label else ""
+        print(f"    {value.name} = {value.number}{suffix}")
+        if metadata and metadata.description:
+            print(f"        {metadata.description}")
+        if metadata and metadata.keywords:
+            print(f"        Keywords: {', '.join(metadata.keywords)}")
+        if metadata:
+            flags = _metadata_flags(metadata)
+            if flags:
+                print(f"        Flags: {', '.join(flags)}")
+
+
+def _describe_config_field(
+    field_name: str,
+    *,
+    normalize_pref_name: Callable[[str], str],
+    display_pref_name: Callable[[str], str],
+    type_label: Callable[[FieldDescriptor], str],
+    bitfield_enums: Mapping[str, Any],
+    local_config_factory: Callable[[], Any] = localonly_pb2.LocalConfig,
+    module_config_factory: Callable[[], Any] = localonly_pb2.LocalModuleConfig,
+) -> bool:
+    """Print schema type and optional Meshtastic metadata for one config field."""
+    canonical = normalize_pref_name(field_name)
+    field = _find_config_field_descriptor(
+        canonical, (local_config_factory, module_config_factory)
+    )
+    if field is None:
+        return False
+
+    bitfield_enum = bitfield_enums.get(canonical)
+    field_type = type_label(field)
+    if bitfield_enum is not None:
+        field_type = f"{field_type} (bitfield)"
+
+    print(f"Field: {display_pref_name(canonical)}")
+    print(f"Type: {field_type}")
+    metadata = _get_field_metadata(field)
+    if metadata is not None:
+        if metadata.label:
+            print(f"Label: {metadata.label}")
+        if metadata.description:
+            print(f"Description: {metadata.description}")
+        if metadata.min_value is not None and metadata.max_value is not None:
+            print(
+                "Range: "
+                f"{_format_numeric_bound(metadata.min_value)} to "
+                f"{_format_numeric_bound(metadata.max_value)}"
+            )
+        elif metadata.min_value is not None:
+            print(f"Minimum: {_format_numeric_bound(metadata.min_value)}")
+        elif metadata.max_value is not None:
+            print(f"Maximum: {_format_numeric_bound(metadata.max_value)}")
+        if metadata.unit:
+            print(f"Unit: {metadata.unit}")
+        flags = _metadata_flags(metadata)
+        if flags:
+            print(f"Flags: {', '.join(flags)}")
+        if metadata.keywords:
+            print(f"Keywords: {', '.join(metadata.keywords)}")
+
+    enum_descriptor = field.enum_type
+    if enum_descriptor is None and bitfield_enum is not None:
+        enum_descriptor = getattr(bitfield_enum, "DESCRIPTOR", None)
+    if enum_descriptor is not None:
+        _describe_enum_values(enum_descriptor)
+    return True
 
 
 def is_repeated_field(field_desc: Any) -> bool:

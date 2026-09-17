@@ -17,13 +17,11 @@ from meshtastic.key_verification import (
     KEY_VERIFICATION_STAGES as _KEY_VERIFICATION_STAGES,
 )
 from meshtastic.key_verification import SECURITY_NUMBER_MAX, SECURITY_NUMBER_MIN
-from meshtastic.node_runtime.shared import (
-    MAX_INPUT_EVENT_CODE as _MAX_INPUT_EVENT_CODE,
-    MAX_INPUT_KB_CHAR as _MAX_INPUT_KB_CHAR,
-    MAX_INPUT_TOUCH_X as _MAX_INPUT_TOUCH_X,
-    MAX_INPUT_TOUCH_Y as _MAX_INPUT_TOUCH_Y,
-    _delete_file_path_error,
-)
+from meshtastic.node_runtime.shared import MAX_INPUT_EVENT_CODE as _MAX_INPUT_EVENT_CODE
+from meshtastic.node_runtime.shared import MAX_INPUT_KB_CHAR as _MAX_INPUT_KB_CHAR
+from meshtastic.node_runtime.shared import MAX_INPUT_TOUCH_X as _MAX_INPUT_TOUCH_X
+from meshtastic.node_runtime.shared import MAX_INPUT_TOUCH_Y as _MAX_INPUT_TOUCH_Y
+from meshtastic.node_runtime.shared import _delete_file_path_error
 
 
 class _ArgcompleteModule(Protocol):
@@ -367,7 +365,7 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "--get",
         help=(
             "Get a preferences field. Use --list-fields to print all available fields"
-            " from current protobuf schemas. Can use either snake_case or camelCase"
+            " and --describe-field for schema metadata. Can use either snake_case or camelCase"
             " format. (ex: 'power.ls_secs' or 'power.lsSecs')"
         ),
         nargs=1,
@@ -378,16 +376,27 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     group.add_argument(
         "--list-fields",
         help=(
-            "List all configurable fields discovered from protobuf schemas and exit."
-            " Includes compatibility aliases for renamed fields."
+            "List configurable fields from protobuf schemas and exit. Includes"
+            " compatibility aliases. Use --describe-field for schema metadata."
         ),
         action="store_true",
+    )
+
+    group.add_argument(
+        "--describe-field",
+        metavar="FIELD",
+        help=(
+            "Describe a configurable field from the current protobuf schema and exit."
+            " Shows type information plus any schema-provided labels, bounds, flags,"
+            " keywords, and enum value metadata."
+        ),
     )
 
     group.add_argument(
         "--set",
         help=(
             "Set a preferences field. Can use either snake_case or camelCase format."
+            " Use --describe-field to inspect schema bounds and enum choices."
             " (ex: 'power.ls_secs' or 'power.lsSecs'). May be less reliable when"
             " setting properties from more than one configuration section."
         ),
