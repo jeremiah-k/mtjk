@@ -4,14 +4,11 @@ on:
     branches:
       - develop
   pull_request:
-    branches:
-      - develop
-      - "**-review"
-      # Stack bases: PRs layered on maint/refactor/experiment branches are
-      # part of a review stack and need the same validation as develop PRs.
-      - maint/**
-      - refactor/**
-      - experiment/**
+    # This fork develops on `develop`; stacked PRs may target any temporary
+    # work branch. Run the same validation for every non-master PR base so a
+    # new branch prefix cannot silently skip CI.
+    branches-ignore:
+      - master
   workflow_dispatch: {}
 
 permissions:

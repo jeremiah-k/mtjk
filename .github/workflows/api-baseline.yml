@@ -2,9 +2,10 @@ name: API Baseline
 
 on:
   pull_request:
-    branches:
-      - develop
-      - "**-review"
+    # Match the main CI workflow: stacked PRs may target any temporary work
+    # branch, while master remains the upstream-tracking branch.
+    branches-ignore:
+      - master
   workflow_dispatch: {}
 
 permissions:
