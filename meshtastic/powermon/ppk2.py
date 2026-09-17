@@ -51,11 +51,11 @@ def _ppk2_port_from_entry(entry: object) -> str | None:
         The serial-port path, or None for entries that match neither shape.
     """
     if isinstance(entry, str):
-        return entry
+        return entry or None
     if isinstance(entry, (tuple, list)) and entry:
         port = entry[0]
         if isinstance(port, str):
-            return port
+            return port or None
     return None
 
 
@@ -104,14 +104,17 @@ class PPK2PowerSupply(PowerSupply):
             If multiple PPK2 devices are found when portName is None.
         """
         if portName is None:
-            devs = ppk2_api.PPK2_API.list_devices()
+            devs = ppk2_api.PPK2_API.list_devices() or []
             # Normalize both the 0.9.2 shape (port strings) and the unreleased
-            # upstream shape ((port, serial-prefix) tuples).
-            ports = [
-                port
-                for port in (_ppk2_port_from_entry(dev) for dev in devs)
-                if port is not None
-            ]
+            # upstream shape ((port, serial-prefix) tuples). Preserve discovery
+            # order while de-duplicating the same physical serial port.
+            ports = list(
+                dict.fromkeys(
+                    port
+                    for port in (_ppk2_port_from_entry(dev) for dev in devs)
+                    if port is not None
+                )
+            )
             if not ports:
                 raise PowerError("No PPK2 devices found")  # noqa: TRY003
             if len(ports) > 1:
