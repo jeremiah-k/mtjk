@@ -48,5 +48,14 @@ unavoidable:
    X.Y").
 
 Current Git dependencies: `riden` (pinned SHA
-`27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9`, geeksville/riden; reconsider
-`riden-modbus` when mtjk's Python floor reaches 3.12 — it requires >=3.12).
+`27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9`, geeksville/riden).
+
+- Why Git is required: the powermon Riden power-supply backend is written
+  against geeksville's fork, and neither that fork nor an equivalent client
+  is published on PyPI, so no registry pin exists today.
+- Behavior coverage: `meshtastic/tests/test_powermon_riden.py` pins the
+  adapter behavior any new source revision must preserve.
+- Upstream tracking: none filed yet; open an issue on geeksville/riden (or
+  the successor client) before changing this pin.
+- Exit condition: move to `riden-modbus` once mtjk's Python floor reaches
+  3.12 (it requires >=3.12), or to any PyPI-published compatible client.
