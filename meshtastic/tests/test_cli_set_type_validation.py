@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
+import meshtastic.cli.preference_runtime as preference_runtime
 from meshtastic.__main__ import main, setPref
+from meshtastic.cli.schema_metadata import _SchemaMetadata
 from meshtastic.protobuf import config_pb2, localonly_pb2
 
 from .cli_validation_test_helpers import _mock_tcp_interface_with_channels
@@ -285,3 +287,135 @@ def test_cli_invalid_repeated_value_exits_without_mutation_or_write(
     out, err = capsys.readouterr()
     assert "expected integer" in err
     assert "Traceback" not in out + err
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_schema_metadata_numeric_bounds(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Schema presentation bounds reject values the firmware would reject."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.hop_limit", "8") is False
+    assert config.lora.hop_limit == 0
+
+    out, err = capsys.readouterr()
+    assert "Invalid value 8 for lora.hop_limit; expected between 0 and 7." in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ("0", "7"))
+def test_set_pref_accepts_schema_metadata_boundaries(value: str) -> None:
+    """Inclusive schema bounds remain valid preference values."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.hop_limit", value) is True
+    assert config.lora.hop_limit == int(value)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_cli_out_of_metadata_bounds_exits_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI preflight rejects out-of-range metadata values before device writes."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "meshtastic",
+            "--host",
+            "meshtastic.local",
+            "--set",
+            "lora.hop_limit",
+            "8",
+        ],
+    )
+    interface, node = _mock_tcp_interface_with_channels()
+
+    with patch("meshtastic.tcp_interface.TCPInterface", return_value=interface):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+    node.writeConfig.assert_not_called()
+    out, err = capsys.readouterr()
+    assert "expected between 0 and 7" in err
+    assert "Traceback" not in out + err
+
+
+@pytest.mark.unit
+def test_metadata_bounds_use_fatal_preflight_policy() -> None:
+    """Configure preflight receives bounds failures through the shared fatal path."""
+    from meshtastic.cli.preference_runtime import (
+        PreferenceValueError,
+        fatal_preference_value_errors,
+    )
+
+    config = localonly_pb2.LocalConfig()
+
+    with fatal_preference_value_errors():
+        with pytest.raises(PreferenceValueError, match=r"expected between 0 and 7"):
+            setPref(config, "lora.hop_limit", "8")
+
+    assert config.lora.hop_limit == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "value", "expected"),
+    (
+        (_SchemaMetadata(min_value=1.0), "0", "at least 1"),
+        (_SchemaMetadata(max_value=1.0), "2", "at most 1"),
+    ),
+)
+def test_set_pref_reports_one_sided_metadata_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata: _SchemaMetadata,
+    value: str,
+    expected: str,
+) -> None:
+    """One-sided schema bounds retain precise validation diagnostics."""
+    monkeypatch.setattr(
+        preference_runtime, "_get_field_metadata", lambda _field: metadata
+    )
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "power.adc_multiplier_override", value) is False
+
+    out, err = capsys.readouterr()
+    assert expected in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "value"),
+    (
+        (_SchemaMetadata(min_value=0.0, max_value=1.0), "nan"),
+        (_SchemaMetadata(min_value=0.0), "inf"),
+        (_SchemaMetadata(max_value=1.0), "-inf"),
+    ),
+)
+def test_set_pref_rejects_non_finite_values_for_bounded_float_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata: _SchemaMetadata,
+    value: str,
+) -> None:
+    """NaN and infinities cannot bypass finite schema presentation bounds."""
+    monkeypatch.setattr(
+        preference_runtime, "_get_field_metadata", lambda _field: metadata
+    )
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "power.adc_multiplier_override", value) is False
+    assert config.power.adc_multiplier_override == 0.0
+
+    out, err = capsys.readouterr()
+    assert "Invalid value" in out
+    assert "power.adc_multiplier_override" in out
+    assert err == ""

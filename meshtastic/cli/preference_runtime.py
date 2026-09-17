@@ -11,6 +11,7 @@ import contextlib
 import contextvars
 import json
 import logging
+import math
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -19,6 +20,7 @@ from google.protobuf.json_format import ParseDict, ParseError
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
+from meshtastic.cli.schema_metadata import _get_field_metadata
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
 
@@ -295,6 +297,74 @@ def _converted_pref_value(
             cli_print=cli_print,
         )
         return False, None
+
+
+def _format_metadata_bound(value: float) -> str:
+    """Format a protobuf metadata bound without unnecessary decimal noise."""
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _validate_metadata_bounds(
+    pref: FieldDescriptor,
+    value: Any,
+    *,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Reject numeric CLI values outside schema-declared presentation bounds."""
+    metadata = _get_field_metadata(pref)
+    if metadata is None or not metadata._has_bounds:
+        return True
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        # Preserve the existing protobuf type-error path for non-numeric input.
+        return True
+
+    minimum = metadata.min_value
+    maximum = metadata.max_value
+    non_finite = isinstance(value, float) and not math.isfinite(value)
+    below = minimum is not None and value < minimum
+    above = maximum is not None and value > maximum
+    if not (non_finite or below or above):
+        return True
+
+    if minimum is not None and maximum is not None:
+        expected = (
+            f"between {_format_metadata_bound(minimum)} and "
+            f"{_format_metadata_bound(maximum)}"
+        )
+    elif minimum is not None:
+        expected = f"at least {_format_metadata_bound(minimum)}"
+    else:
+        assert maximum is not None
+        expected = f"at most {_format_metadata_bound(maximum)}"
+    display_value = redact_pref_value(field_path, repr(value))
+    return _reject_pref_validation_message(
+        f"Invalid value {display_value} for {field_path}; expected {expected}.",
+        cli_print=cli_print,
+    )
+
+
+def _validate_pref_before_assignment(
+    pref: FieldDescriptor,
+    value: Any,
+    *,
+    snake_name: str,
+    raw_value: Any,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Run the pre-assignment checks that reject one scalar preference value."""
+    if not _validate_metadata_bounds(
+        pref, value, field_path=field_path, cli_print=cli_print
+    ):
+        return False
+    if snake_name == "wifi_psk" and len(str(raw_value)) < 8:
+        report_pref_validation(
+            "Warning: network.wifi_psk must be 8 or more characters.",
+            cli_print=cli_print,
+        )
+        return False
+    return True
 
 
 def _resolve_enum_value(
@@ -615,11 +685,14 @@ def set_pref(
         return False
     logger.debug("val:%s", redact_pref_value(normalized, meshtastic.util.toStr(value)))
 
-    if snake_name == "wifi_psk" and len(str(raw_value)) < 8:
-        report_pref_validation(
-            "Warning: network.wifi_psk must be 8 or more characters.",
-            cli_print=cli_print,
-        )
+    if not _validate_pref_before_assignment(
+        pref,
+        value,
+        snake_name=snake_name,
+        raw_value=raw_value,
+        field_path=normalized,
+        cli_print=cli_print,
+    ):
         return False
 
     if (
