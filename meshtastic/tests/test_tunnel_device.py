@@ -35,7 +35,7 @@ def fake_kernel_device(
 
     def fake_ioctl(_fd: int, request: int, ifr: bytes) -> bytes:
         ioctl_calls.append((request, ifr))
-        return _resolved_name_buffer("mesh")
+        return _resolved_name_buffer("mesh0")
 
     monkeypatch.setattr(tunnel_device.os, "open", lambda *_args, **_kwargs: _FAKE_FD)
     monkeypatch.setattr(tunnel_device.fcntl, "ioctl", fake_ioctl)
@@ -66,7 +66,7 @@ def test_open_requests_tun_device_without_packet_info(
 
     device = LinuxTunDevice(name="mesh")
 
-    assert device.name == "mesh"
+    assert device.name == "mesh0"
     assert len(ioctl_calls) == 1
     request, ifr = ioctl_calls[0]
     assert request == TUNSETIFF
@@ -74,26 +74,29 @@ def test_open_requests_tun_device_without_packet_info(
     # zero padding) so the kernel's fixed-size copy stays in bounds.
     assert len(ifr) == 40
     name_bytes, flags = struct.unpack("16sH", ifr[:18])
-    assert name_bytes.rstrip(b"\x00") == b"mesh"
+    assert name_bytes.rstrip(b"\x00") == b"mesh%d"
     assert flags == IFF_TUN | IFF_NO_PI
     assert ifr[18:] == b"\x00" * 22
 
 
 @pytest.mark.unit
-def test_open_resolves_kernel_assigned_name(
-    fake_kernel_device: tuple[list[Any], list[Any]],
+def test_open_without_name_requests_historical_tun_pattern(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty requested name should adopt the kernel-assigned interface name."""
-    monkeypatch.setattr(
-        tunnel_device.fcntl,
-        "ioctl",
-        lambda *_args: _resolved_name_buffer("tun0"),
-    )
+    """The default constructor should preserve PyTap2's ``tun%d`` request."""
+    requests: list[bytes] = []
+    monkeypatch.setattr(tunnel_device.os, "open", lambda *_a, **_k: _FAKE_FD)
 
-    device = LinuxTunDevice(name="")
+    def fake_ioctl(_fd: int, _request: int, ifr: bytes) -> bytes:
+        requests.append(ifr)
+        return _resolved_name_buffer("tun0")
+
+    monkeypatch.setattr(tunnel_device.fcntl, "ioctl", fake_ioctl)
+
+    device = LinuxTunDevice()
 
     assert device.name == "tun0"
+    assert struct.unpack("16sH", requests[0][:18])[0].rstrip(b"\x00") == b"tun%d"
 
 
 @pytest.mark.unit
@@ -126,7 +129,7 @@ def test_up_uses_modern_ip_link_command(
 
     device.up()
 
-    assert ip_commands == [["ip", "link", "set", "dev", "mesh", "up"]]
+    assert ip_commands == [["ip", "link", "set", "dev", "mesh0", "up"]]
 
 
 @pytest.mark.unit
@@ -140,10 +143,27 @@ def test_ifconfig_converts_netmask_to_prefix_length(
     device.ifconfig(address="10.115.248.28", netmask="255.255.0.0", mtu=233)
 
     assert ip_commands == [
-        ["ip", "addr", "add", "10.115.248.28/16", "dev", "mesh"],
-        ["ip", "link", "set", "dev", "mesh", "mtu", "233"],
+        ["ip", "addr", "add", "10.115.248.28/16", "dev", "mesh0"],
+        ["ip", "link", "set", "dev", "mesh0", "mtu", "233"],
     ]
     assert device.mtu == 233
+
+
+@pytest.mark.unit
+def test_ifconfig_applies_mtu_even_when_it_matches_constructor_value(
+    fake_kernel_device: tuple[list[Any], list[Any]],
+    ip_commands: list[list[str]],
+) -> None:
+    """A constructor MTU is only recorded; ifconfig must still apply it to Linux."""
+    device = LinuxTunDevice(name="mesh", mtu=200)
+
+    device.ifconfig(address="10.115.1.2", netmask="255.255.0.0", mtu=200)
+
+    assert ip_commands == [
+        ["ip", "addr", "add", "10.115.1.2/16", "dev", "mesh0"],
+        ["ip", "link", "set", "dev", "mesh0", "mtu", "200"],
+    ]
+    assert device.mtu == 200
 
 
 @pytest.mark.unit
@@ -156,7 +176,7 @@ def test_ifconfig_without_mtu_keeps_current_mtu(
 
     device.ifconfig(address="10.115.1.2", netmask="255.255.0.0")
 
-    assert ip_commands == [["ip", "addr", "add", "10.115.1.2/16", "dev", "mesh"]]
+    assert ip_commands == [["ip", "addr", "add", "10.115.1.2/16", "dev", "mesh0"]]
     assert device.mtu == 200
 
 

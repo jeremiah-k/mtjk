@@ -57,14 +57,15 @@ class LinuxTunDevice:
     as a drop-in replacement.
     """
 
-    def __init__(self, *, name: str = "mesh", mtu: int = DEFAULT_MTU) -> None:
+    def __init__(self, *, name: str | None = None, mtu: int = DEFAULT_MTU) -> None:
         """Open ``/dev/net/tun`` and attach a new TUN interface.
 
         Parameters
         ----------
-        name : str
-            Requested interface name. If empty, the kernel assigns the next
-            free ``tunN`` name. (Default value = "mesh")
+        name : str | None
+            Historical PyTap2-style interface prefix. ``None`` requests
+            ``tun%d``; a value such as ``"mesh"`` requests ``mesh%d`` so the
+            kernel assigns the numeric suffix. (Default value = None)
         mtu : int
             Initial MTU recorded for the device. (Default value = 1500)
 
@@ -75,15 +76,20 @@ class LinuxTunDevice:
             ioctl is rejected (typically missing ``CAP_NET_ADMIN``).
         """
         self.mtu = mtu
-        self.name = name
+        self.name = ""
         self._fd: int | None = None
         fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR)
         try:
+            # Preserve PyTap2's naming contract: a supplied name is a prefix
+            # and the kernel chooses the numeric suffix ("mesh" -> "mesh0").
+            request_name = "tun%d" if name is None else f"{name}%d"
             # Full 40-byte struct ifreq: 16-byte name + 2-byte flags (at the
             # union offset) + padding, so the kernel's fixed-size copy never
             # reads past our buffer.
             request = struct.pack(
-                "16sH22x", name.encode("ascii")[: IFNAMSIZ - 1], IFF_TUN | IFF_NO_PI
+                "16sH22x",
+                request_name.encode("ascii")[: IFNAMSIZ - 1],
+                IFF_TUN | IFF_NO_PI,
             )
             resolved = fcntl.ioctl(fd, TUNSETIFF, request)
         except BaseException:
@@ -142,7 +148,10 @@ class LinuxTunDevice:
         self._require_open()
         interface = ipaddress.IPv4Interface(f"{address}/{netmask}")
         _run_ip("addr", "add", str(interface), "dev", self.name)
-        if mtu is not None and mtu != self.mtu:
+        if mtu is not None:
+            # The constructor only records the desired MTU; it does not apply
+            # it to the kernel. Always issue the command when requested, even
+            # when the value equals the recorded constructor value.
             _run_ip("link", "set", "dev", self.name, "mtu", str(mtu))
             # Record the MTU only after the interface accepted it so a failed
             # command never desynchronizes self.mtu from the kernel state.
