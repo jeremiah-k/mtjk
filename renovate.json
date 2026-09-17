@@ -38,9 +38,9 @@
       "allowedVersions": "<3"
     },
     {
-      "description": "Release-sparse but source-active dependency, manually reviewed 2026-09-16: segno's PyPI releases lag its active source repo; suppress the release-age abandonment signal",
+      "description": "Manually reviewed 2026-09-16 (see DEPENDENCY_POLICY.md): release-sparse but source-active dependencies; suppress the release-age abandonment signal",
       "matchManagers": ["poetry"],
-      "matchPackageNames": ["segno"],
+      "matchPackageNames": ["pyserial", "segno"],
       "abandonmentThreshold": null
     },
     {

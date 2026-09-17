@@ -235,9 +235,9 @@ The CLI is in `meshtastic/__main__.py`. When adding new CLI commands:
 
 ### Optional (extras)
 
-- `cli` extra: `pyqrcode`, `print-color`, `dotmap`, `argcomplete`, `wcwidth`
-- `tunnel` extra: `pytap2`
+- `cli` extra: `segno`, `print-color`, `argcomplete`, `wcwidth`
 - `analysis` extra: `dash`, `dash-bootstrap-components`, `pandas`, `pandas-stubs`
+- tunnel support is built in (in-tree `LinuxTunDevice`, stdlib only)
 - `powermon` extra: `platformdirs` for platform-specific user data/cache directory resolution
 
 ## Important Notes

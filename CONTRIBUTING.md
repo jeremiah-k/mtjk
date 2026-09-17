@@ -15,6 +15,8 @@ current project rather than creating new refactor journals or one-off checklists
 - `ARCHITECTURE.md` — current internal boundaries and ownership model;
 - `COMPATIBILITY.md` — public compatibility policy and alias inventory;
 - `CONTRIBUTING.md` — maintenance workflow and validation commands;
+- `DEPENDENCY_POLICY.md` — dependency health policy: Renovate abandonment
+  exceptions (with revisit dates) and the rules for Git source dependencies;
 - `BLE.md` — detailed BLE architecture and integration contracts;
 - subsystem contract documents under `meshtastic/` where the contract belongs
   next to the implementation.
@@ -102,7 +104,7 @@ Historical required BLE wrappers and warning policy are tracked in
 ## Local setup and validation
 
 Install the repository environment with Poetry. For the broadest local check,
-include the optional CLI/analysis/tunnel extras and power-monitor group:
+include the optional CLI/analysis extras and power-monitor group:
 
 ```bash
 poetry install --all-extras --with dev,powermon
