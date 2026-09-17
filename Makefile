@@ -80,7 +80,7 @@ install:
 # in protobuf 6) and spews per-module stub-parsing errors; excluding the
 # generated modules keeps the run clean.
 docs:
-	$(POETRY_RUN) pdoc --no-search -d numpy --output-dir docs meshtastic '!meshtastic\.protobuf'
+	$(POETRY_RUN) pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
 
 # lint the codebase (same command as CI)
 lint:
