@@ -1953,9 +1953,9 @@ class Config(_message.Message):
         """
         bandwidth: _builtins.int
         """
-        Bandwidth in MHz
+        Bandwidth in kHz
         Certain bandwidth numbers are 'special' and will be converted to the
-        appropriate floating point value: 31 -> 31.25MHz
+        appropriate floating point value: 31 -> 31.25kHz
         """
         spread_factor: _builtins.int
         """

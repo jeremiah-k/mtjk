@@ -305,6 +305,21 @@ def test_set_pref_enforces_schema_metadata_numeric_bounds(
 
 
 @pytest.mark.unit
+def test_set_pref_enforces_expanded_schema_metadata_bounds(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bounds added by later upstream annotation expansions activate too."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.tx_power", "31") is False
+    assert config.lora.tx_power == 0
+
+    out, err = capsys.readouterr()
+    assert "Invalid value 31 for lora.tx_power; expected between 0 and 30." in out
+    assert err == ""
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("value", ("0", "7"))
 def test_set_pref_accepts_schema_metadata_boundaries(value: str) -> None:
     """Inclusive schema bounds remain valid preference values."""
