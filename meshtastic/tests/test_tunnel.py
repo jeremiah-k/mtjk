@@ -15,12 +15,7 @@ from meshtastic import mt_config
 from ..mesh_interface import MeshInterface
 from ..protobuf import mesh_pb2, portnums_pb2
 from ..tcp_interface import TCPInterface
-
-try:
-    # Depends upon pytap2, not installed by default
-    from ..tunnel import TUN_MTU, Tunnel, onTunnelReceive
-except ImportError:
-    pytest.skip("Can't import Tunnel or onTunnelReceive", allow_module_level=True)
+from ..tunnel import TUN_MTU, Tunnel, onTunnelReceive
 
 pytestmark = pytest.mark.usefixtures("platform_socket_mocks")
 
@@ -117,17 +112,17 @@ def test_Tunnel_with_interface(
     with caplog.at_level(logging.WARNING):
         with _managed_tunnel(iface) as tun:
             assert tun == mt_config.tunnel_instance
-    assert re.search(r"Not creating a TapDevice\(\)", caplog.text, re.MULTILINE)
+    assert re.search(r"Not creating a TUN device", caplog.text, re.MULTILINE)
     assert re.search(r"Not starting TUN reader", caplog.text, re.MULTILINE)
 
 
 @pytest.mark.unit
-def test_tunnel_creates_tap_device_when_proto_enabled(
+def test_tunnel_creates_tun_device_when_proto_enabled(
     platform_socket_mocks: tuple[MagicMock, MagicMock],
     iface_with_nodes: MeshInterface,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tunnel should create and configure TapDevice when protocol handling is enabled."""
+    """Tunnel should create and configure the TUN device when protocol handling is enabled."""
     mock_platform_system, _ = platform_socket_mocks
     mock_platform_system.return_value = "Linux"
     iface = iface_with_nodes
@@ -136,9 +131,9 @@ def test_tunnel_creates_tap_device_when_proto_enabled(
     iface.noProto = False
     events: list[tuple[object, ...]] = []
 
-    class _FakeTapDevice:
+    class _FakeTunDevice:
         def __init__(self, *, name: str) -> None:
-            """Record TapDevice construction."""
+            """Record TUN device construction."""
             events.append(("init", name))
 
         def up(self) -> None:
@@ -150,7 +145,7 @@ def test_tunnel_creates_tap_device_when_proto_enabled(
             events.append(("ifconfig", address, netmask, mtu))
 
         def close(self) -> None:
-            """Record interface close calls."""
+            """Record device close calls."""
             events.append(("close",))
 
     class _FakeThread:
@@ -166,7 +161,7 @@ def test_tunnel_creates_tap_device_when_proto_enabled(
             """Report the fake thread as already stopped."""
             return False
 
-    monkeypatch.setattr("meshtastic.tunnel.TapDevice", _FakeTapDevice)
+    monkeypatch.setattr("meshtastic.tunnel.LinuxTunDevice", _FakeTunDevice)
     monkeypatch.setattr(
         "meshtastic.tunnel.threading.Thread",
         lambda *_args, **_kwargs: _FakeThread(),

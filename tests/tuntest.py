@@ -4,11 +4,10 @@ This script intentionally lives in tests/ for historical reasons, but it is not 
 pytest-driven unit test.
 """
 
-# Note python-pytuntap was too buggy
-# using pip3 install pytap2
+# Uses the in-tree LinuxTunDevice adapter (replaces the abandoned PyTap2 package).
 # make sure to "sudo setcap cap_net_admin+eip /usr/bin/python3.10" so python can
 # access tun device without being root
-# sudo ip tuntap del mode tun tun0
+# sudo ip link delete mesh
 
 # TODO: set MTU correctly (issue #9001)
 # TODO: select local ip address based on nodeid (issue #9002)
@@ -17,7 +16,7 @@ pytest-driven unit test.
 import logging
 import threading
 
-from pytap2 import TapDevice
+from meshtastic.tunnel_device import LinuxTunDevice
 
 # A set of chatty UDP services we should never accidentally
 # forward to our slow network.
@@ -98,13 +97,13 @@ def _internet_checksum(payload: bytes) -> int:
     return (~checksum) & 0xFFFF
 
 
-def _readtest(tap: TapDevice) -> None:
-    """Read packets from a TapDevice and log/filter protocol details.
+def _readtest(tap: LinuxTunDevice) -> None:
+    """Read packets from a TUN device and log/filter protocol details.
 
     Parameters
     ----------
-    tap : TapDevice
-        The TUN/TAP device to read packets from.
+    tap : LinuxTunDevice
+        The TUN device to read packets from.
     """
     while True:
         p = bytes(tap.read())
@@ -204,11 +203,13 @@ def _readtest(tap: TapDevice) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    tun = TapDevice(mtu=200)
+    tun = LinuxTunDevice(mtu=200)
     try:
         # tun.create()
         tun.up()
-        tun.ifconfig(address="10.115.1.2", netmask="255.255.0.0")
+        # mtu is passed explicitly: the constructor value is only recorded,
+        # it is not applied to the interface by itself.
+        tun.ifconfig(address="10.115.1.2", netmask="255.255.0.0", mtu=200)
 
         reader_thread = threading.Thread(target=_readtest, args=(tun,), daemon=True)
         reader_thread.start()

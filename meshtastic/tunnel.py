@@ -1,9 +1,9 @@
 """Code for IP tunnel over a mesh.
 
-# Note python-pytuntap was too buggy
-# using pip3 install pytap2
+# The tunnel uses the in-tree LinuxTunDevice adapter (meshtastic/tunnel_device.py),
+# which replaced the abandoned PyTap2 dependency.
 # make sure to "sudo setcap cap_net_admin+eip /usr/bin/python3.10" so python can access tun device without being root
-# sudo ip tuntap del mode tun tun0
+# sudo ip link delete mesh
 # sudo bin/run.sh --port /dev/ttyUSB0 --setch-shortfast
 # sudo bin/run.sh --port /dev/ttyUSB0 --tunnel --debug
 # ssh -Y root@192.168.10.151 (or dietpi), default password p
@@ -21,10 +21,10 @@ from contextlib import suppress
 from typing import Any
 
 from pubsub import pub
-from pytap2 import TapDevice
 
 from meshtastic import mt_config
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
+from meshtastic.tunnel_device import LinuxTunDevice
 from meshtastic.util import ipstr, readnet_u16
 
 logger = logging.getLogger(__name__)
@@ -135,8 +135,8 @@ class Tunnel:
 
         Creates and configures tunnel state, registers this instance as the global
         mt_config.tunnel_instance, and conditionally creates and brings up a TUN
-        (TapDevice) and a background reader thread unless the mesh interface has
-        noProto enabled.
+        device (LinuxTunDevice) and a background reader thread unless the mesh
+        interface has noProto enabled.
 
         Parameters
         ----------
@@ -206,14 +206,14 @@ class Tunnel:
             # pinned to the generated firmware/protobuf payload contract.
             if self.iface.noProto:
                 logger.warning(
-                    "Not creating a TapDevice() because it is disabled by noProto"
+                    "Not creating a TUN device because it is disabled by noProto"
                 )
             else:
                 logger.debug("creating TUN device with MTU=%d", TUN_MTU)
                 logger.info(
-                    "Creating TapDevice; CAP_NET_ADMIN or root is typically required."
+                    "Creating TUN device; CAP_NET_ADMIN or root is typically required."
                 )
-                self.tun = TapDevice(name="mesh")
+                self.tun = LinuxTunDevice(name="mesh")
                 self.tun.up()
                 self.tun.ifconfig(address=myAddr, netmask=netmask, mtu=TUN_MTU)
 
