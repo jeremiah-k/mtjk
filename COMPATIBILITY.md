@@ -77,6 +77,16 @@ example, the analysis web application binds to loopback by default rather than
 all network interfaces. Such differences should be documented when they are
 observable to callers.
 
+### `meshtastic.test.DotMap` is always the in-tree implementation
+
+The third-party `dotmap` package was removed as a dependency
+(2026-09). `meshtastic.test.DotMap` now always refers to the in-tree
+attribute-access mapping that previously served as its fallback, even in
+environments where `dotmap` happens to be installed. The in-tree subset covers
+everything `meshtastic.test` uses (attribute access, nested auto-vivification,
+dict wrapping); features unique to the third-party class (such as `toDict()` or
+its copy/plug-in behaviors) are intentionally not reproduced.
+
 ## CLI Compatibility
 
 CLI branding is intentionally separate from the Python import namespace:
@@ -305,6 +315,7 @@ compatibility/patching and are not recommended public surface.
 | `meshtastic.__main__` | `_PREFERENCE_FIELD_ALIASES` legacy keys | canonical protobuf preference names    |
 | `meshtastic.version`  | `get_active_version()`                  | `getActiveVersion()`                   |
 | `meshtastic.test`     | `subscribe()`                           | `subscribeToNodeUpdates()`             |
+| `meshtastic.test`     | `_FallbackDotMap`                       | `DotMap` (in-tree)                     |
 
 ### Runtime Module Compatibility Exports
 

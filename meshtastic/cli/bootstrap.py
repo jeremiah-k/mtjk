@@ -154,7 +154,7 @@ def _run_preconnect_action(
     if hooks.test_module is None:
         _terminate_cli(
             hooks,
-            "Test module could not be imported. Ensure you have the 'dotmap' module installed.",
+            "Test module could not be imported.",
             1,
         )
     result = hooks.test_module.testAll()

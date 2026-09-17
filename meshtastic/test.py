@@ -17,15 +17,21 @@ from meshtastic.serial_interface import SerialInterface
 from meshtastic.tcp_interface import TCPInterface
 
 
-class _FallbackDotMap(dict[str, Any]):
-    """Lightweight fallback used when dotmap is unavailable."""
+class DotMap(dict[str, Any]):
+    """Attribute-access mapping used by the test helpers.
+
+    This is mtjk's canonical implementation. It historically served as the
+    fallback when the third-party ``dotmap`` package was absent; that
+    dependency was removed in favor of this in-tree behavior-compatible
+    subset (dependency health audit 2026-09-16).
+    """
 
     def __getattr__(self, key: str) -> Any:
         """Provide attribute-style access to dictionary keys.
 
-        If the key exists and its value is a dict, return a _FallbackDotMap wrapping that dict.
+        If the key exists and its value is a dict, return a DotMap wrapping that dict.
         If the key exists and its value is not a dict, return the value unchanged.
-        If the key is missing, create and store an empty _FallbackDotMap.
+        If the key is missing, create and store an empty DotMap.
 
         Parameters
         ----------
@@ -35,7 +41,7 @@ class _FallbackDotMap(dict[str, Any]):
         Returns
         -------
         Any
-            The value stored under `key`, or a `_FallbackDotMap` for nested dicts or missing keys.
+            The value stored under `key`, or a `DotMap` for nested dicts or missing keys.
 
         Raises
         ------
@@ -49,11 +55,11 @@ class _FallbackDotMap(dict[str, Any]):
             value = self[key]
         except KeyError:
             # Match real DotMap's permissive behavior by auto-vivifying and persisting children.
-            child = _FallbackDotMap()
+            child = DotMap()
             self[key] = child
             return child
-        if isinstance(value, dict) and not isinstance(value, _FallbackDotMap):
-            wrapped = _FallbackDotMap(value)
+        if isinstance(value, dict) and not isinstance(value, DotMap):
+            wrapped = DotMap(value)
             self[key] = wrapped
             return wrapped
         return value
@@ -68,7 +74,7 @@ class _FallbackDotMap(dict[str, Any]):
         Parameters
         ----------
         key : str
-            Attribute name to store as a mapping key.
+            Attribute name to store under.
         value : Any
             Value to assign.
         """
@@ -103,13 +109,8 @@ class _FallbackDotMap(dict[str, Any]):
             raise AttributeError(key) from None
 
 
-DotMap: type[Any]
-try:
-    from dotmap import DotMap as _ImportedDotMap  # type: ignore[import-untyped]
-except ImportError:
-    DotMap = _FallbackDotMap
-else:
-    DotMap = _ImportedDotMap
+# COMPAT_STABLE_SHIM: historical name for the in-tree DotMap implementation.
+_FallbackDotMap = DotMap
 
 TEXT_MESSAGE_APP_PORTNUM = "TEXT_MESSAGE_APP"
 WAIT_LOOP_MAX_SECONDS = 60
