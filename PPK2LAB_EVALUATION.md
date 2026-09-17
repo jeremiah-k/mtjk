@@ -2,7 +2,7 @@
 
 Status: **experiment — no production switch.** This branch only records an
 evaluation plan. The production powermon backend remains `ppk2-api` 0.9.2 from
-PyPI (see `maint/ppk2-backend-compatibility` for adapter hardening).
+PyPI (see https://github.com/jeremiah-k/mtjk/pull/526 for adapter hardening).
 
 Context: dependency health audit, 2026-09-16. `ppk2-api`'s PyPI release has been
 stuck at 0.9.2 (June 2023) while upstream master carries unreleased behavior
@@ -62,6 +62,6 @@ ad hoc). Record firmware revision of the PPK2 unit under test.
 
 ## Results
 
-| Date | PPK2 firmware | Procedures passed | Notes |
-| ---- | ------------- | ----------------- | ----- |
+| Date | PPK2 firmware | Procedures passed | Notes       |
+| ---- | ------------- | ----------------- | ----------- |
 | —    | —             | —                 | Not yet run |
