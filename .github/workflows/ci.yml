@@ -131,6 +131,20 @@ jobs:
       - *install_local_step
       - name: Check types with mypy
         run: poetry run mypy meshtastic/
+  docs:
+    name: Docs generation (py3.13)
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: "3.13"
+      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+    steps:
+      - *checkout_step
+      - *setup_python_step
+      - *cache_poetry_step
+      - *install_dependencies_step
+      - *install_local_step
+      - name: Smoke-test documentation generation
+        run: make docs
   shellcheck:
     name: Shellcheck
     runs-on: ubuntu-latest
