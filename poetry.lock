@@ -4578,22 +4578,6 @@ files = [
 ]
 
 [[package]]
-name = "pyqrcode"
-version = "1.2.1"
-description = "A QR code generator written purely in Python with SVG, EPS, PNG and terminal output."
-optional = true
-python-versions = "*"
-groups = ["main"]
-markers = "extra == \"cli\""
-files = [
-    {file = "PyQRCode-1.2.1.tar.gz", hash = "sha256:fdbf7634733e56b72e27f9bce46e4550b75a3a2c420414035cae9d9d26b234d5"},
-    {file = "PyQRCode-1.2.1.zip", hash = "sha256:1b2812775fa6ff5c527977c4cd2ccb07051ca7d0bc0aecf937a43864abe5eff6"},
-]
-
-[package.extras]
-png = ["pypng (>=0.0.13)"]
-
-[[package]]
 name = "pyserial"
 version = "3.5"
 description = "Python Serial Port Extension"
@@ -5311,6 +5295,19 @@ files = [
     {file = "rpds_py-2026.6.3-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:ca6546b66be9dc4738b1b043d5ebd5488c66c578c5ff0fd0e8065313fe3afb76"},
     {file = "rpds_py-2026.6.3-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:8e65860d238379ed982fd9ba690579b5e95af2f4840f99c772816dbe573cb826"},
     {file = "rpds_py-2026.6.3.tar.gz", hash = "sha256:1cebd1337c242e4ec2293e541f712b2da849b29f48f0c293684b71c0632625d4"},
+]
+
+[[package]]
+name = "segno"
+version = "1.6.6"
+description = "QR Code and Micro QR Code generator for Python"
+optional = true
+python-versions = ">=3.5"
+groups = ["main"]
+markers = "extra == \"cli\""
+files = [
+    {file = "segno-1.6.6-py3-none-any.whl", hash = "sha256:28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7"},
+    {file = "segno-1.6.6.tar.gz", hash = "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3"},
 ]
 
 [[package]]
@@ -6154,10 +6151,10 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [extras]
 analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs", "plotly"]
-cli = ["argcomplete", "dotmap", "print-color", "pyqrcode", "wcwidth"]
+cli = ["argcomplete", "dotmap", "print-color", "segno", "wcwidth"]
 tunnel = ["pytap2"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10,<3.15"
-content-hash = "a7056d51107f32d51e889fd35617579670b038f1c41e52e0461081e6d0fe4531"
+content-hash = "bb3744b863a5467d2fce3c484e47da8622a9a77786f40b6c7c1326475ab97ac4"

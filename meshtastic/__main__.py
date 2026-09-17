@@ -29,6 +29,7 @@ import meshtastic.cli.dispatch as cli_dispatch
 import meshtastic.cli.invocation as cli_invocation
 import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
 import meshtastic.cli.preference_runtime as cli_preference_runtime
+import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
 import meshtastic.ota
 import meshtastic.serial_interface
@@ -134,14 +135,6 @@ try:
     import argcomplete as _argcomplete
 
     argcomplete = _argcomplete
-except ImportError:
-    pass
-
-pyqrcode: ModuleType | None = None
-try:
-    import pyqrcode as _pyqrcode  # type: ignore[import-untyped]
-
-    pyqrcode = _pyqrcode
 except ImportError:
     pass
 
@@ -1322,7 +1315,7 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
         print_channel_field_choices=_print_channel_field_choices,
         is_local_destination=_is_local_destination,
         modem_preset_shorthands=_MODEM_PRESET_SHORTHANDS,
-        qr_create=pyqrcode.create if pyqrcode is not None else None,
+        qr_render=(cli_qr.renderTerminalQr if cli_qr.segno is not None else None),
     )
     configure_hooks = cli_configure_actions.ConfigureActionHooks(
         handle_set_command=_handle_set_command,

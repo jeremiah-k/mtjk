@@ -781,13 +781,15 @@ def test_main_qr(
     sys.argv = ["", "--qr"]
     mt_config.args = sys.argv  # type: ignore[assignment]
 
-    qr = MagicMock()
-    qr.terminal.return_value = "<qr-terminal>"
-    qr_factory = MagicMock(return_value=qr)
+    qr_render = MagicMock(return_value="<qr-terminal>")
     monkeypatch.setattr(
-        main_module,
-        "pyqrcode",
-        SimpleNamespace(create=qr_factory),
+        "meshtastic.cli.qr.segno",
+        SimpleNamespace(make=MagicMock()),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "meshtastic.cli.qr.renderTerminalQr",
+        qr_render,
         raising=True,
     )
 
@@ -804,8 +806,7 @@ def test_main_qr(
     assert f"Primary channel URL: {expected_url}" in out
     assert "<qr-terminal>" in out
     assert err == ""
-    qr_factory.assert_called_once_with(expected_url)
-    qr.terminal.assert_called_once_with()
+    qr_render.assert_called_once_with(expected_url)
     mo.assert_called()
 
 
@@ -836,9 +837,13 @@ def test_main_onConnected_exception(
         raise Exception("Fake exception.")  # pylint: disable=W0719
 
     monkeypatch.setattr(
-        main_module,
-        "pyqrcode",
-        SimpleNamespace(create=_throw_an_exception),
+        "meshtastic.cli.qr.segno",
+        SimpleNamespace(make=MagicMock()),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "meshtastic.cli.qr.renderTerminalQr",
+        _throw_an_exception,
         raising=True,
     )
     iface = MagicMock(autospec=SerialInterface)

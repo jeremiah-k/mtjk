@@ -59,12 +59,15 @@ def test_argcomplete_import_error_handling() -> None:
 
 
 @pytest.mark.unit
-def test_pyqrcode_import_error_handling() -> None:
-    """Test pyqrcode ImportError handling (lines 54-55).
+def test_segno_import_error_handling() -> None:
+    """Test segno ImportError handling in the QR renderer module.
 
-    When pyqrcode is not available, the module should set pyqrcode to None.
+    When segno is not available, the module should set segno to None so the
+    CLI falls back to the install hint instead of the terminal QR renderer.
     """
-    assert main_module.pyqrcode is None or hasattr(main_module.pyqrcode, "create")
+    from meshtastic.cli import qr as cli_qr
+
+    assert cli_qr.segno is None or hasattr(cli_qr.segno, "make")
 
 
 @pytest.mark.unit
