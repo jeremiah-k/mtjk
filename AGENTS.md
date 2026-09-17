@@ -245,4 +245,4 @@ make api-baseline-master
   - Requires an `upstream` remote pointing at `meshtastic/python` (`git remote add upstream https://github.com/meshtastic/python.git` if missing).
   - A nightly workflow (`.github/workflows/sync-upstream-master.yml`) refreshes the committed snapshot and opens a PR against `develop` when the upstream surface changes. Note: CI cannot mirror `upstream/master` to a fork branch because `GITHUB_TOKEN` cannot push trees containing workflow files; local runs fetch `upstream` directly.
 
-Running without poetry may miss modules like `slog` and `tunnel` that depend on optional packages.
+Running without poetry may miss modules like `slog` that depend on optional packages. (The mesh tunnel is in-tree and stdlib-only.)

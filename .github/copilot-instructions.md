@@ -233,12 +233,12 @@ The CLI is in `meshtastic/__main__.py`. When adding new CLI commands:
 - `requests` - HTTP requests
 - `packaging` - Version parsing and comparison helpers
 
-### Optional (extras)
+### Optional dependencies
 
-- `cli` extra: `pyqrcode`, `print-color`, `dotmap`, `argcomplete`, `wcwidth`
-- `tunnel` extra: `pytap2`
-- `analysis` extra: `dash`, `dash-bootstrap-components`, `pandas`, `pandas-stubs`
-- `powermon` extra: `platformdirs` for platform-specific user data/cache directory resolution
+- `cli` extra: `segno`, `print-color`, `argcomplete`, `wcwidth`
+- `analysis` extra: `dash`, `dash-bootstrap-components`, `plotly`, `pandas`, `pandas-stubs`
+- tunnel support is built in (in-tree `LinuxTunDevice`, stdlib only)
+- `powermon` Poetry group (`--with powermon`): `riden`, `ppk2-api`, `parse`, `pyarrow`, `platformdirs`
 
 ## Important Notes
 
