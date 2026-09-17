@@ -971,6 +971,33 @@ def test_main_unmatched_constraint_does_not_rewrite(
     assert "ERROR: no field matched 'M.missing'" in capsys.readouterr().err
 
 
+@pytest.mark.unit
+def test_main_allowlisted_unmatched_constraint_warns_and_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A known-unmatched stale entry warns but does not block the write."""
+    opts = _write_options(
+        tmp_path,
+        "*MyNodeInfo.firmware_version max_size:18\nM.x int_size:8\n",
+    )
+    proto = tmp_path / "test.proto"
+    proto.write_text('syntax = "proto3";\nmessage M {\n  uint32 x = 1;\n}\n')
+    monkeypatch.setattr(
+        sys, "argv", ["inject_nanopb_options.py", str(opts), str(proto)]
+    )
+
+    assert _inj.main() == 0
+    out, err = capsys.readouterr()
+    assert (
+        "WARNING: no field matched 'MyNodeInfo.firmware_version' "
+        "(known-unmatched stale upstream entry)" in out
+    )
+    assert err == ""
+    # the matching constraint was still applied and committed to disk
+    assert "x = 1 [(nanopb).int_size = IS_8];" in proto.read_text()
+    assert "Injected 1 specific + 0 wildcard option(s)" in out
+
+
 # ===========================================================================
 # Part 2 — Descriptor integration tests
 # Verify that regen-protobufs.sh produced _pb2.py files with nanopb options
