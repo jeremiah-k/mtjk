@@ -54,18 +54,18 @@ historical request-ID callback behavior remains available.
 
 The current named mappings are:
 
-| Request field | Expected response field |
-| --- | --- |
-| `get_channel_request` | `get_channel_response` |
-| `get_owner_request` | `get_owner_response` |
-| `get_config_request` | `get_config_response` |
-| `get_module_config_request` | `get_module_config_response` |
+| Request field                                | Expected response field                       |
+| -------------------------------------------- | --------------------------------------------- |
+| `get_channel_request`                        | `get_channel_response`                        |
+| `get_owner_request`                          | `get_owner_response`                          |
+| `get_config_request`                         | `get_config_response`                         |
+| `get_module_config_request`                  | `get_module_config_response`                  |
 | `get_canned_message_module_messages_request` | `get_canned_message_module_messages_response` |
-| `get_device_metadata_request` | `get_device_metadata_response` |
-| `get_ringtone_request` | `get_ringtone_response` |
-| `get_device_connection_status_request` | `get_device_connection_status_response` |
-| `get_node_remote_hardware_pins_request` | `get_node_remote_hardware_pins_response` |
-| `get_ui_config_request` | `get_ui_config_response` |
+| `get_device_metadata_request`                | `get_device_metadata_response`                |
+| `get_ringtone_request`                       | `get_ringtone_response`                       |
+| `get_device_connection_status_request`       | `get_device_connection_status_response`       |
+| `get_node_remote_hardware_pins_request`      | `get_node_remote_hardware_pins_response`      |
+| `get_ui_config_request`                      | `get_ui_config_response`                      |
 
 The mapping is explicit by protobuf field name. Descriptor field order is not used as
 an enum-to-field mapping because descriptor ordering is not a compatibility contract.

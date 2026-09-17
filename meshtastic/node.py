@@ -49,7 +49,6 @@ from meshtastic.node_runtime.seturl_runtime import (
     _SetUrlParser,
     _SetUrlTransactionCoordinator,
 )
-from meshtastic.node_runtime.shared import _delete_file_path_error
 from meshtastic.node_runtime.shared import EMPTY_LONG_NAME_MSG as _EMPTY_LONG_NAME_MSG
 from meshtastic.node_runtime.shared import EMPTY_SHORT_NAME_MSG as _EMPTY_SHORT_NAME_MSG
 from meshtastic.node_runtime.shared import (
@@ -69,7 +68,10 @@ from meshtastic.node_runtime.shared import MAX_INPUT_TOUCH_Y as _MAX_INPUT_TOUCH
 from meshtastic.node_runtime.shared import MAX_LONG_NAME_LEN as _MAX_LONG_NAME_LEN
 from meshtastic.node_runtime.shared import MAX_RINGTONE_LENGTH as _MAX_RINGTONE_LENGTH
 from meshtastic.node_runtime.shared import MAX_SHORT_NAME_LEN as _MAX_SHORT_NAME_LEN
-from meshtastic.node_runtime.shared import METADATA_STDOUT_COMPAT_WAIT_SECONDS
+from meshtastic.node_runtime.shared import (
+    METADATA_STDOUT_COMPAT_WAIT_SECONDS,
+    _delete_file_path_error,
+)
 from meshtastic.node_runtime.transport_runtime import (
     _NodeAckNakRuntime,
     _NodeAdminSessionRuntime,
