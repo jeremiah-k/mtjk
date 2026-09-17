@@ -2858,6 +2858,7 @@ class CasevacReport(_message.Message):
     non_us_military: _builtins.int
     non_us_civilian: _builtins.int
     epw: _builtins.int
+    """enemy prisoner of war"""
     child: _builtins.int
     terrain_flags: _builtins.int
     """

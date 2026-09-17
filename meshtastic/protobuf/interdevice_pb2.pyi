@@ -160,10 +160,13 @@ class FileTransfer(_message.Message):
     operation: Global___FileOperation.ValueType
     """File operation (GET, POST, PUT, DELETE)"""
     filepath: _builtins.str
+    """Path of the file on the SD card"""
     filedata: _builtins.bytes
+    """Chunk content (POST/PUT request, GET response)"""
     status: Global___FileStatus.ValueType
     """Response: outcome of the operation"""
     message: _builtins.str
+    """Response: human readable detail, may be empty"""
     offset: _builtins.int
     """Byte offset of this chunk within the file (ranged GET/PUT)"""
     length: _builtins.int
@@ -206,9 +209,11 @@ class DirectoryListing(_message.Message):
     OFFSET_FIELD_NUMBER: _builtins.int
     TOTAL_COUNT_FIELD_NUMBER: _builtins.int
     directory: _builtins.str
+    """Path of the directory"""
     status: Global___FileStatus.ValueType
     """Response: outcome of the operation"""
     message: _builtins.str
+    """Response: human readable detail, may be empty"""
     offset: _builtins.int
     """Request: skip this many entries (paging)"""
     total_count: _builtins.int
@@ -255,6 +260,7 @@ class I2CTransaction(_message.Message):
     address: _builtins.int
     """7-bit device address"""
     write_data: _builtins.bytes
+    """Bytes to write, may be empty"""
     read_len: _builtins.int
     """Number of bytes to read after the write, 0 = write-only. Bounded by
     the read_data max_size of I2CResult (see interdevice.options); larger
@@ -410,6 +416,7 @@ class I2CResult(_message.Message):
     READ_DATA_FIELD_NUMBER: _builtins.int
     status: Global___I2CResult.Status.ValueType
     read_data: _builtins.bytes
+    """Data read from the device, empty for write-only transactions"""
     def __init__(
         self,
         *,
@@ -454,6 +461,7 @@ class InterdeviceMessage(_message.Message):
     i2c_scan: _builtins.bool
     """Request: scan the secondary I2C bus"""
     i2c_scan_result: _builtins.bytes
+    """Response: 7-bit addresses of discovered devices"""
     get_sd_info: _builtins.bool
     """Request: SD card statistics"""
     ping: Global___InterdeviceVersion.ValueType
