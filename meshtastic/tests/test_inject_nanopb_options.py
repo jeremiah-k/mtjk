@@ -328,7 +328,7 @@ def test_inject_adds_option_to_plain_field():
 
 
 @pytest.mark.unit
-def test_inject_merges_with_single_line_schema_annotation():
+def test_inject_merges_with_single_line_schema_annotation() -> None:
     """A field carrying a single-line field_metadata annotation still merges."""
     proto = """\
         syntax = "proto3";
@@ -345,7 +345,7 @@ def test_inject_merges_with_single_line_schema_annotation():
 
 
 @pytest.mark.unit
-def test_inject_completes_multiline_compact_annotation_field():
+def test_inject_completes_multiline_compact_annotation_field() -> None:
     """Options on a multi-line annotation field (compact "}];" closer) land."""
     proto = """\
         syntax = "proto3";
@@ -362,7 +362,7 @@ def test_inject_completes_multiline_compact_annotation_field():
 
 
 @pytest.mark.unit
-def test_inject_completes_multiline_expanded_annotation_field():
+def test_inject_completes_multiline_expanded_annotation_field() -> None:
     """Options land when the option-list closer "]" is on its own line."""
     proto = """\
         syntax = "proto3";
@@ -382,7 +382,7 @@ def test_inject_completes_multiline_expanded_annotation_field():
 
 
 @pytest.mark.unit
-def test_inject_annotation_closer_does_not_pop_message_context():
+def test_inject_annotation_closer_does_not_pop_message_context() -> None:
     """A "}];" annotation closer must not close the enclosing message."""
     proto = """\
         syntax = "proto3";
@@ -401,7 +401,7 @@ def test_inject_annotation_closer_does_not_pop_message_context():
 
 
 @pytest.mark.unit
-def test_inject_annotation_closer_does_not_close_enum_early():
+def test_inject_annotation_closer_does_not_close_enum_early() -> None:
     """Annotation closers inside an enum must not end the enum body early."""
     proto = """\
         syntax = "proto3";
@@ -424,7 +424,7 @@ def test_inject_annotation_closer_does_not_close_enum_early():
 
 
 @pytest.mark.unit
-def test_inject_ignores_brackets_inside_comments_and_strings():
+def test_inject_ignores_brackets_inside_comments_and_strings() -> None:
     """Brackets in doc comments and strings must not affect option-block depth."""
     proto = """\
         syntax = "proto3";
@@ -444,7 +444,83 @@ def test_inject_ignores_brackets_inside_comments_and_strings():
 
 
 @pytest.mark.unit
-def test_inject_multiline_field_keeps_options_afterwards():
+def test_inject_multiline_closer_allows_semicolon_on_following_line() -> None:
+    """A valid split ``]`` / ``;`` closer must rewrite the intended field."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message M {
+          uint32 constrained = 1 [
+            (meshtastic.protobuf.field_metadata) = {label: "Constrained"}
+          ]
+          ;
+          uint32 other = 2 [
+            (meshtastic.protobuf.field_metadata) = {label: "Other"}
+          ];
+        }
+    """
+    result = _inject(proto, specific={("M", "constrained"): {"int_size": 8}})
+    constrained = result.split("uint32 constrained", 1)[1].split("uint32 other", 1)[0]
+    other = result.split("uint32 other", 1)[1]
+    assert "(nanopb).int_size = IS_8" in constrained
+    assert "(nanopb).int_size = IS_8" not in other
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("quote", ('"', "'"))
+def test_inject_ignores_brackets_in_single_line_quoted_options(quote: str) -> None:
+    """Closing brackets inside either proto string style are not structural."""
+    field_line = (
+        "  uint32 constrained = 1 "
+        f"[(meshtastic.protobuf.field_metadata) = {{description: {quote}] example{quote}}}];"
+    )
+    proto = "\n".join(
+        (
+            'syntax = "proto3";',
+            'import "meshtastic/protobuf/channel.proto";',
+            "message M {",
+            field_line,
+            "}",
+        )
+    )
+    result = _inject(proto, specific={("M", "constrained"): {"int_size": 8}})
+    assert "(nanopb).int_size = IS_8" in result
+    assert f"description: {quote}] example{quote}" in result
+
+
+@pytest.mark.unit
+def test_inject_ignores_structural_tokens_inside_block_comments() -> None:
+    """Commented-out message openers must not change the active message path."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message Outer {
+          /*
+          message Fake {
+          */
+          uint32 constrained = 1;
+        }
+    """
+    result = _inject(proto, specific={("Outer", "constrained"): {"int_size": 8}})
+    assert "constrained = 1 [(nanopb).int_size = IS_8];" in result
+
+
+@pytest.mark.unit
+def test_inject_rejects_unterminated_constrained_option_block() -> None:
+    """Applied bookkeeping cannot succeed when the actual rewrite cannot finish."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message M {
+          uint32 constrained = 1 [
+            (meshtastic.protobuf.field_metadata) = {label: "Missing closer"}
+    """
+    with pytest.raises(ValueError, match="unterminated option block.*constrained"):
+        _inject(proto, specific={("M", "constrained"): {"int_size": 8}})
+
+
+@pytest.mark.unit
+def test_inject_multiline_field_keeps_options_afterwards() -> None:
     """Fields following a multi-line annotated field still get options."""
     proto = """\
         syntax = "proto3";
@@ -854,6 +930,47 @@ def test_inject_multiple_close_braces_on_one_line():
     assert "value = 1 [(nanopb).max_size = 30]" in result
 
 
+@pytest.mark.unit
+def test_main_parser_failure_is_clean_and_does_not_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Malformed option blocks fail without modifying the input proto."""
+    opts = _write_options(tmp_path, "M.x int_size:8\n")
+    proto = tmp_path / "test.proto"
+    original = """\
+syntax = "proto3";
+message M {
+  uint32 x = 1 [
+    (meta) = {label: "unterminated"}
+"""
+    proto.write_text(original)
+    monkeypatch.setattr(
+        sys, "argv", ["inject_nanopb_options.py", str(opts), str(proto)]
+    )
+
+    assert _inj.main() == 1
+    assert proto.read_text() == original
+    assert "ERROR: unterminated option block" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_main_unmatched_constraint_does_not_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unexpected unmatched constraint fails atomically before writing."""
+    opts = _write_options(tmp_path, "M.missing int_size:8\n")
+    proto = tmp_path / "test.proto"
+    original = 'syntax = "proto3";\nmessage M {\n  uint32 x = 1;\n}\n'
+    proto.write_text(original)
+    monkeypatch.setattr(
+        sys, "argv", ["inject_nanopb_options.py", str(opts), str(proto)]
+    )
+
+    assert _inj.main() == 1
+    assert proto.read_text() == original
+    assert "ERROR: no field matched 'M.missing'" in capsys.readouterr().err
+
+
 # ===========================================================================
 # Part 2 — Descriptor integration tests
 # Verify that regen-protobufs.sh produced _pb2.py files with nanopb options
@@ -935,7 +1052,7 @@ def test_descriptor_nested_deviceconfig_tzdef():
 
 
 @pytest.mark.unit
-def test_descriptor_lora_tx_power_keeps_int_size_with_metadata():
+def test_descriptor_lora_tx_power_keeps_int_size_with_metadata() -> None:
     """tx_power now carries multi-line schema metadata; nanopb options survive."""
     config = config_pb2.DESCRIPTOR.message_types_by_name["Config"]
     opts = _field_opts(config, "LoRaConfig", "tx_power")
@@ -943,7 +1060,7 @@ def test_descriptor_lora_tx_power_keeps_int_size_with_metadata():
 
 
 @pytest.mark.unit
-def test_descriptor_ambient_lighting_keeps_int_size_with_metadata():
+def test_descriptor_ambient_lighting_keeps_int_size_with_metadata() -> None:
     """Ambient lighting fields carry multi-line metadata plus int_size."""
     opts = _field_opts(
         module_config_pb2.DESCRIPTOR.message_types_by_name["ModuleConfig"],
@@ -954,7 +1071,7 @@ def test_descriptor_ambient_lighting_keeps_int_size_with_metadata():
 
 
 @pytest.mark.unit
-def test_descriptor_audio_ptt_pin_keeps_int_size_with_metadata():
+def test_descriptor_audio_ptt_pin_keeps_int_size_with_metadata() -> None:
     """ptt_pin carries multi-line metadata plus int_size."""
     opts = _field_opts(
         module_config_pb2.DESCRIPTOR.message_types_by_name["ModuleConfig"],
