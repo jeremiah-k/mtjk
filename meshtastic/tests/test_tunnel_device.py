@@ -120,6 +120,42 @@ def test_open_failure_closes_control_device(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "machine",
+    ["x86_64", "amd64", "i686", "aarch64", "armv7l", "riscv64", "loongarch64", "sh4"],
+)
+def test_asm_generic_architectures_are_accepted(
+    monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    """Architectures using the asm-generic ioctl encoding should pass the guard."""
+    monkeypatch.setattr(tunnel_device.platform, "machine", lambda: machine)
+    tunnel_device._require_asm_generic_ioctl()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "machine", ["mips64", "ppc64le", "powerpc", "sparc64", "parisc64", "alpha"]
+)
+def test_other_architectures_are_rejected(
+    monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    """Architectures with different ioctl encodings must fail clearly."""
+    monkeypatch.setattr(tunnel_device.platform, "machine", lambda: machine)
+
+    with pytest.raises(OSError, match="asm-generic"):
+        LinuxTunDevice(name="mesh")
+
+
+@pytest.mark.unit
+def test_constructor_rejects_missing_fcntl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On platforms without fcntl, construction must fail with a clear error."""
+    monkeypatch.setattr(tunnel_device, "fcntl", None)
+
+    with pytest.raises(OSError, match="fcntl"):
+        LinuxTunDevice(name="mesh")
+
+
+@pytest.mark.unit
 def test_up_uses_modern_ip_link_command(
     fake_kernel_device: tuple[list[Any], list[Any]],
     ip_commands: list[list[str]],

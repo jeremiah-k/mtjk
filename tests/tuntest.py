@@ -5,8 +5,8 @@ pytest-driven unit test.
 """
 
 # Uses the in-tree LinuxTunDevice adapter (replaces the abandoned PyTap2 package).
-# make sure to "sudo setcap cap_net_admin+eip /usr/bin/python3.10" so python can
-# access tun device without being root
+# run with root/sudo, or via a launcher granting CAP_NET_ADMIN only to this
+# script -- do not setcap the shared Python interpreter
 # sudo ip link delete tun0
 
 # TODO: set MTU correctly (issue #9001)

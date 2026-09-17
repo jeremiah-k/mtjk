@@ -2,7 +2,8 @@
 
 # The tunnel uses the in-tree LinuxTunDevice adapter (meshtastic/tunnel_device.py),
 # which replaced the abandoned PyTap2 dependency.
-# make sure to "sudo setcap cap_net_admin+eip /usr/bin/python3.10" so python can access tun device without being root
+# run the tunnel with root/sudo, or via a launcher granting CAP_NET_ADMIN only
+# to the tunnel process -- do not setcap the shared Python interpreter
 # sudo ip link delete mesh0
 # sudo bin/run.sh --port /dev/ttyUSB0 --setch-shortfast
 # sudo bin/run.sh --port /dev/ttyUSB0 --tunnel --debug

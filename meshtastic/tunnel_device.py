@@ -7,33 +7,98 @@ needs: open ``/dev/net/tun``, attach with ``TUNSETIFF`` using
 interface with the modern ``ip`` command instead of the obsolete
 net-tools ``ifconfig`` (which current distributions may not install).
 
-Creating a TUN device requires ``CAP_NET_ADMIN`` (or root). Grant it to the
-interpreter with e.g. ``sudo setcap cap_net_admin+eip $(which python3)``.
+Creating a TUN device requires ``CAP_NET_ADMIN`` (typically via root or
+sudo). Run only the tunnel invocation with the necessary privileges, or use a
+dedicated service/launcher that grants ``CAP_NET_ADMIN`` solely to the tunnel
+process. Do not grant the capability to the shared Python interpreter: that
+gives every script run by that interpreter network-administration privileges.
 """
 
 from __future__ import annotations
 
-import fcntl
 import ipaddress
 import logging
 import os
+import platform
 import struct
 import subprocess
+from types import ModuleType
 from typing import Final
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - fcntl is Unix-only (e.g. Windows)
+    _fcntl = None  # type: ignore[assignment]
+
+# Import-optional so ``meshtastic.tunnel`` stays importable on non-Unix
+# platforms; LinuxTunDevice refuses to construct when it is missing.
+fcntl: ModuleType | None = _fcntl
 
 logger = logging.getLogger(__name__)
 
 TUN_CONTROL_DEVICE: Final[str] = "/dev/net/tun"
-# ioctl request for TUNSETIFF from <linux/if_tun.h>, asm-generic encoding
-# (x86, arm64, riscv; matches the value PyTap2 historically used). Some other
-# architectures encode _IOW differently and would need their own value.
+# ioctl request for TUNSETIFF from <linux/if_tun.h> using the asm-generic
+# _IOW encoding (matches the value PyTap2 historically used). Architectures
+# with different ioctl encodings (mips, powerpc, sparc, ...) would need their
+# own value; constructing the device there is rejected explicitly below.
 TUNSETIFF: Final[int] = 0x400454CA
+# platform.machine() values known to use the asm-generic ioctl encoding:
+# exact matches below, plus prefix families in _ASM_GENERIC_MACHINE_PREFIXES.
+# Extend these only after checking the kernel's uapi ioctl headers for the
+# architecture in question.
+_ASM_GENERIC_MACHINES: Final[frozenset[str]] = frozenset(
+    {
+        "amd64",
+        "x86_64",
+        "i386",
+        "i486",
+        "i586",
+        "i686",
+        "aarch64",
+        "arm64",
+        "s390",
+        "s390x",
+        "m68k",
+        "csky",
+        "openrisc",
+        "nios2",
+        "hexagon",
+    }
+)
+_ASM_GENERIC_MACHINE_PREFIXES: Final[tuple[str, ...]] = (
+    "arm",
+    "aarch64",
+    "riscv",
+    "loongarch",
+    "sh",
+)
 IFF_TUN: Final[int] = 0x0001
 IFF_NO_PI: Final[int] = 0x1000
 IFNAMSIZ: Final[int] = 16
 DEFAULT_MTU: Final[int] = 1500
 # One os.read() returns a single packet; buffer for the largest IPv4 datagram.
 MAX_IP_PACKET_SIZE: Final[int] = 65535
+
+
+def _require_asm_generic_ioctl() -> None:
+    """Reject architectures whose ioctl encoding differs from asm-generic.
+
+    Raises
+    ------
+    OSError
+        If ``platform.machine()`` is not known to encode ``_IOW`` the
+        asm-generic way (for example mips, powerpc, or sparc).
+    """
+    machine = platform.machine().lower()
+    if machine in _ASM_GENERIC_MACHINES or machine.startswith(
+        _ASM_GENERIC_MACHINE_PREFIXES
+    ):
+        return
+    raise OSError(
+        f"LinuxTunDevice requires an architecture using the asm-generic "
+        f"ioctl encoding for TUNSETIFF; {machine!r} is not supported "
+        f"(mips/powerpc/sparc and friends encode _IOW differently)"
+    )
 
 
 def _run_ip(*args: str) -> None:
@@ -55,6 +120,11 @@ class LinuxTunDevice:
     Mirrors the small PyTap2 ``TapDevice`` surface the tunnel historically
     used (``up``/``ifconfig``/``read``/``write``/``close``) so it can serve
     as a drop-in replacement.
+
+    Note that a blocking :meth:`read` is not interrupted by :meth:`close`
+    called from another thread (close does not reliably wake a blocked
+    reader on Linux). The tunnel keeps its reader on a daemon thread with a
+    join timeout, matching the historical PyTap2-based shutdown behavior.
     """
 
     def __init__(self, *, name: str | None = None, mtu: int = DEFAULT_MTU) -> None:
@@ -72,9 +142,16 @@ class LinuxTunDevice:
         Raises
         ------
         OSError
-            If the TUN control device cannot be opened or the ``TUNSETIFF``
-            ioctl is rejected (typically missing ``CAP_NET_ADMIN``).
+            If the fcntl module is unavailable (non-Unix platform), the
+            architecture uses a non-asm-generic ioctl encoding, the TUN
+            control device cannot be opened, or the ``TUNSETIFF`` ioctl is
+            rejected (typically missing ``CAP_NET_ADMIN``).
         """
+        if fcntl is None:  # pragma: no cover - exercised via monkeypatch
+            raise OSError(
+                "LinuxTunDevice requires Linux (the fcntl module is unavailable)"
+            )
+        _require_asm_generic_ioctl()
         self.mtu = mtu
         self.name = ""
         self._fd: int | None = None
