@@ -7,6 +7,11 @@ on:
     branches:
       - develop
       - "**-review"
+      # Stack bases: PRs layered on maint/refactor/experiment branches are
+      # part of a review stack and need the same validation as develop PRs.
+      - maint/**
+      - refactor/**
+      - experiment/**
   workflow_dispatch: {}
 
 permissions:
