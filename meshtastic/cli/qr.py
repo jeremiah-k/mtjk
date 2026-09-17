@@ -6,15 +6,22 @@ renderer so the CLI's QR behavior stays independent of the QR library.
 
 from __future__ import annotations
 
+import importlib
 import io
 from types import ModuleType
 
-try:
-    import segno as _segno
-except ImportError:  # pragma: no cover - depends on optional cli extra
-    _segno = None  # type: ignore[assignment]
 
-segno: ModuleType | None = _segno
+def _load_segno() -> ModuleType | None:
+    """Import the optional Segno dependency when it is installed."""
+    try:
+        return importlib.import_module("segno")
+    except ModuleNotFoundError as exc:
+        if exc.name != "segno":
+            raise
+        return None
+
+
+segno: ModuleType | None = _load_segno()
 # Match PyQRCode's effective defaults: maximum error correction, never
 # Micro QR, and no silent error-correction boosting.
 QR_ERROR_CORRECTION = "H"

@@ -24,6 +24,37 @@ def _require_segno() -> None:
 
 
 @pytest.mark.unit
+def test_load_segno_returns_none_when_optional_dependency_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The loader should turn an optional-dependency ImportError into None."""
+
+    def missing_segno(name: str) -> object:
+        assert name == "segno"
+        raise ModuleNotFoundError("segno unavailable", name="segno")
+
+    monkeypatch.setattr(cli_qr.importlib, "import_module", missing_segno)
+
+    assert cli_qr._load_segno() is None
+
+
+@pytest.mark.unit
+def test_load_segno_does_not_hide_broken_transitive_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken Segno installation should surface instead of looking absent."""
+
+    def broken_segno(name: str) -> object:
+        assert name == "segno"
+        raise ModuleNotFoundError("dependency unavailable", name="segno_dependency")
+
+    monkeypatch.setattr(cli_qr.importlib, "import_module", broken_segno)
+
+    with pytest.raises(ModuleNotFoundError, match="dependency unavailable"):
+        cli_qr._load_segno()
+
+
+@pytest.mark.unit
 def test_render_terminal_qr_pins_segno_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
