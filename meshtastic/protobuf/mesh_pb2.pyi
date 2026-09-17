@@ -643,6 +643,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Lilygo T-CONNECT PRO
     """
+    AXIOMETA_GENESIS_MINI: _HardwareModel.ValueType  # 148
+    """
+    Axiometa Axiometa Genesis Mini
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1263,6 +1267,10 @@ Seeed Studio MeshPager X2
 T_CONNECT_PRO: HardwareModel.ValueType  # 147
 """
 Lilygo T-CONNECT PRO
+"""
+AXIOMETA_GENESIS_MINI: HardwareModel.ValueType  # 148
+"""
+Axiometa Axiometa Genesis Mini
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
