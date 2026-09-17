@@ -60,9 +60,24 @@ def test_enum_value_metadata_reads_current_label_annotations() -> None:
 @pytest.mark.unit
 def test_unannotated_field_has_no_metadata() -> None:
     """Unannotated schema fields do not synthesize metadata defaults."""
-    field = config_pb2.Config.LoRaConfig.DESCRIPTOR.fields_by_name["tx_power"]
+    field = config_pb2.Config.LoRaConfig.DESCRIPTOR.fields_by_name["frequency_offset"]
 
     assert _get_field_metadata(field) is None
+
+
+@pytest.mark.unit
+def test_expanded_schema_annotations_reach_normalized_metadata() -> None:
+    """Later upstream annotation expansions flow through unchanged plumbing."""
+    field = config_pb2.Config.LoRaConfig.DESCRIPTOR.fields_by_name["tx_power"]
+
+    metadata = _get_field_metadata(field)
+
+    assert metadata is not None
+    assert metadata.label == "Transmit Power"
+    assert metadata.unit == "dBm"
+    assert metadata.min_value == 0.0
+    assert metadata.max_value == 30.0
+    assert metadata.keywords == ("tx", "power", "dbm", "output", "gain")
 
 
 @pytest.mark.unit

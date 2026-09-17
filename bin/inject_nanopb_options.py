@@ -145,16 +145,58 @@ def message_path_matches(
     return len(msg_names) >= n and tuple(msg_names[-n:]) == msg_path
 
 
+def _collect_field_options(
+    fname: str,
+    context_stack: list[tuple[str, str]],
+    specific: dict[tuple[str, ...], dict[str, Any]],
+    wildcard: dict[str, dict[str, Any]],
+    applied_specific: set[tuple[str, ...]] | None,
+    applied_wildcard: set[str] | None,
+) -> dict[str, Any]:
+    """Collect the nanopb options that apply to one field, recording matches."""
+    # Wildcard < specific: more-specific paths override less-specific ones
+    extra: dict[str, Any] = {}
+
+    # 1. Wildcard: any field with this name in this proto file
+    if fname in wildcard:
+        extra.update(wildcard[fname])
+        if applied_wildcard is not None:
+            applied_wildcard.add(fname)
+
+    # 2. Specific: merge ALL matching keys, shortest path first,
+    matching_specific = sorted(
+        (
+            (key, opts)
+            for key, opts in specific.items()
+            if key[-1] == fname and message_path_matches(context_stack, key[:-1])
+        ),
+        key=lambda item: len(item[0]),
+    )
+    for key, opts in matching_specific:
+        extra.update(opts)
+        if applied_specific is not None:
+            applied_specific.add(key)
+
+    return extra
+
+
 def inject_into_proto(
     content: str,
     specific: dict[tuple[str, ...], dict[str, Any]],
     wildcard: dict[str, dict[str, Any]],
     nanopb_import_path: str,
+    *,
+    applied_specific: set[tuple[str, ...]] | None = None,
+    applied_wildcard: set[str] | None = None,
 ) -> str:
     """Inject nanopb field options into a proto file's text content.
 
     Adds an import for nanopb.proto if not already present.
     Returns the modified content.
+
+    When ``applied_specific``/``applied_wildcard`` sets are provided they are
+    filled with the option keys that actually triggered a rewrite, so callers
+    can detect constraints that no longer match any field.
     """
     if not specific and not wildcard:
         return content
@@ -181,12 +223,18 @@ def inject_into_proto(
     context_stack: list[tuple[str, str]] = []  # ('message'|'oneof'|'enum', name)
     result: list[str] = []
     import_added = nanopb_already_imported
+    # Formatted nanopb options awaiting the closing line of a multi-line
+    # field option block.
+    pending_nanopb: str | None = None
+    # Open "[...]" option-block depth across lines; while positive, lines are
+    # annotation/option content and must not affect structural tracking.
+    options_depth = 0
 
     # Patterns for proto structural elements
     message_re = re.compile(r"^(\s*)message\s+(\w+)\s*\{")
     oneof_re = re.compile(r"^(\s*)oneof\s+(\w+)\s*\{")
     enum_re = re.compile(r"^(\s*)enum\s+(\w+)\s*\{")
-    close_re = re.compile(r"^\s*\}")
+    close_re = re.compile(r"^\s*\}\s*$")
 
     # Pattern for field declarations:
     #   indent  [optional|repeated]  type  name  =  number  [options]  ;
@@ -202,6 +250,67 @@ def inject_into_proto(
         r"\s*;"  # trailing semicolon
     )
 
+    # Same prefix, for fields whose option block is not closed on this line
+    # (e.g. "uint32 x = 1 [(meshtastic.field_metadata) = {"). The declaration
+    # continues over multiple lines, so the rewrite is completed on the line
+    # that closes the option block instead of here.
+    field_open_re = re.compile(
+        r"^(\s*)"
+        r"(optional\s+|repeated\s+)?"
+        r"([\w.]+)\s+"
+        r"(\w+)\s*"
+        r"=\s*(\d+)"
+        r"\s*\["
+    )
+
+    # String literals and comments must not contribute brackets.
+    def _code_part(text: str, in_block: bool) -> tuple[str, bool]:
+        out: list[str] = []
+        s = text
+        while s:
+            if in_block:
+                end = s.find("*/")
+                if end < 0:
+                    return "".join(out), True
+                s = s[end + 2 :]
+                in_block = False
+                continue
+            markers = [
+                (i, t)
+                for i, t in (
+                    (s.find("/*"), "/*"),
+                    (s.find("//"), "//"),
+                    (s.find('"'), '"'),
+                )
+                if i >= 0
+            ]
+            if not markers:
+                out.append(s)
+                return "".join(out), in_block
+            i, t = min(markers)
+            if t == '"':
+                j = i + 1
+                while j < len(s):
+                    if s[j] == "\\":
+                        j += 2
+                        continue
+                    if s[j] == '"':
+                        break
+                    j += 1
+                out.append(s[:i])
+                out.append('""')
+                s = s[min(j + 1, len(s)) :]
+            elif t == "/*":
+                out.append(s[:i])
+                in_block = True
+                s = s[i + 2 :]
+            else:  # line comment
+                out.append(s[:i])
+                return "".join(out), in_block
+        return "".join(out), in_block
+
+    in_block_comment = False
+
     for i, line in enumerate(lines):
         # Insert nanopb import right after the last existing import line.
         # Only do this when there IS an existing import (last_import_idx >= 0);
@@ -210,76 +319,97 @@ def inject_into_proto(
             result.append(f'import "{nanopb_import_path}";')
             import_added = True
 
-        # --- Track message/oneof/enum nesting ---
-        m = message_re.match(line)
-        if m:
-            context_stack.append(("message", m.group(2)))
-            result.append(line)
+        code, in_block_comment = _code_part(line, in_block_comment)
+        line_opens = code.count("[")
+        line_closes = code.count("]")
+        in_options = options_depth > 0
+
+        # Complete a pending multi-line field rewrite on the line that closes
+        # its option block: insert the nanopb options before the final "]".
+        closes_block = in_options and options_depth + line_opens - line_closes == 0
+        if pending_nanopb is not None and closes_block and "]" in code and ";" in code:
+            head, _, tail = line.rpartition("]")
+            result.append(f"{head}, {pending_nanopb}]{tail}")
+            pending_nanopb = None
+            options_depth += line_opens - line_closes
             continue
 
-        m = oneof_re.match(line)
-        if m:
-            context_stack.append(("oneof", m.group(2)))
-            result.append(line)
-            continue
+        if not in_options:
+            # --- Track message/oneof/enum nesting ---
+            m = message_re.match(line)
+            if m:
+                context_stack.append(("message", m.group(2)))
+                result.append(line)
+                options_depth += line_opens - line_closes
+                continue
 
-        m = enum_re.match(line)
-        if m:
-            context_stack.append(("enum", m.group(2)))
-            result.append(line)
-            continue
+            m = oneof_re.match(line)
+            if m:
+                context_stack.append(("oneof", m.group(2)))
+                result.append(line)
+                options_depth += line_opens - line_closes
+                continue
 
-        if close_re.match(line) and context_stack:
-            context_stack.pop()
-            result.append(line)
-            continue
+            m = enum_re.match(line)
+            if m:
+                context_stack.append(("enum", m.group(2)))
+                result.append(line)
+                options_depth += line_opens - line_closes
+                continue
 
-        # Skip field injection inside enum bodies (enum values look like fields
-        # but should not have nanopb options added)
-        in_enum = bool(context_stack) and context_stack[-1][0] == "enum"
+            if close_re.match(line) and context_stack:
+                context_stack.pop()
+                result.append(line)
+                options_depth += line_opens - line_closes
+                continue
 
-        # --- Try to match and modify a field declaration ---
-        m = field_re.match(line)
-        if m and not in_enum:
-            indent = m.group(1)
-            qualifier = m.group(2) or ""
-            ftype = m.group(3)
-            fname = m.group(4)
-            fnum = m.group(5)
-            existing_opts = m.group(6) or ""
+            # Skip field injection inside enum bodies (enum values look like
+            # fields but should not have nanopb options added)
+            in_enum = bool(context_stack) and context_stack[-1][0] == "enum"
 
-            # Collect applicable nanopb options (wildcard < specific)
-            extra: dict[str, Any] = {}
+            # --- Try to match and modify a field declaration ---
+            m = field_re.match(line)
+            if m and not in_enum:
+                existing_opts = m.group(6) or ""
+                extra = _collect_field_options(
+                    m.group(4),
+                    context_stack,
+                    specific,
+                    wildcard,
+                    applied_specific,
+                    applied_wildcard,
+                )
 
-            # 1. Wildcard: any field with this name in this proto file
-            if fname in wildcard:
-                extra.update(wildcard[fname])
-
-            # 2. Specific: merge ALL matching keys, shortest path first,
-            #    so more-specific paths override less-specific ones
-            matching_specific = sorted(
-                (
-                    (key, opts)
-                    for key, opts in specific.items()
-                    if key[-1] == fname
-                    and message_path_matches(context_stack, key[:-1])
-                ),
-                key=lambda item: len(item[0]),
-            )
-            for _, opts in matching_specific:
-                extra.update(opts)
-
-            if extra:
-                nanopb_str = format_nanopb_opts(extra)
-                if existing_opts.strip():
-                    opts_block = f"[{existing_opts}, {nanopb_str}]"
-                else:
-                    opts_block = f"[{nanopb_str}]"
-                qual = qualifier.rstrip()
-                sep = " " if qual else ""
-                line = f"{indent}{qual}{sep}{ftype} {fname} = {fnum} {opts_block};"
+                if extra:
+                    nanopb_str = format_nanopb_opts(extra)
+                    if existing_opts.strip():
+                        opts_block = f"[{existing_opts}, {nanopb_str}]"
+                    else:
+                        opts_block = f"[{nanopb_str}]"
+                    qual = (m.group(2) or "").rstrip()
+                    sep = " " if qual else ""
+                    line = (
+                        f"{m.group(1)}{qual}{sep}{m.group(3)} "
+                        f"{m.group(4)} = {m.group(5)} {opts_block};"
+                    )
+            elif not in_enum:
+                # Field whose option block continues on later lines: remember
+                # the injected options until the block closes.
+                m_open = field_open_re.match(line)
+                if m_open and line_opens > line_closes:
+                    extra = _collect_field_options(
+                        m_open.group(4),
+                        context_stack,
+                        specific,
+                        wildcard,
+                        applied_specific,
+                        applied_wildcard,
+                    )
+                    if extra:
+                        pending_nanopb = format_nanopb_opts(extra)
 
         result.append(line)
+        options_depth += line_opens - line_closes
 
     # Edge case: if there were no import lines, add nanopb import after syntax line
     if not import_added:
@@ -289,6 +419,23 @@ def inject_into_proto(
                 break
 
     return "\n".join(result)
+
+
+# Options entries that matched no field even in the last known-good binding
+# regeneration. They are stale upstream (fields removed, or paths naming a
+# field instead of its message type) and are reported as warnings instead of
+# failing the build. Anything else that stops matching fails loudly.
+KNOWN_UNMATCHED = frozenset(
+    {
+        ("MyNodeInfo", "air_period_rx"),
+        ("MyNodeInfo", "air_period_tx"),
+        ("MyNodeInfo", "firmware_version"),
+        ("MeshBeacon", "offer_channel", "name"),
+        ("MeshBeacon", "offer_channel", "psk"),
+        ("MeshBeaconConfig", "broadcast_offer_channel", "name"),
+        ("MeshBeaconConfig", "broadcast_offer_channel", "psk"),
+    }
+)
 
 
 def main() -> int:
@@ -323,8 +470,44 @@ def main() -> int:
     # After regen-protobufs.sh's namespace fixup, the nanopb import path is:
     nanopb_import_path = "meshtastic/protobuf/nanopb.proto"
 
-    modified = inject_into_proto(content, specific, wildcard, nanopb_import_path)
+    applied_specific: set[tuple[str, ...]] = set()
+    applied_wildcard: set[str] = set()
+    modified = inject_into_proto(
+        content,
+        specific,
+        wildcard,
+        nanopb_import_path,
+        applied_specific=applied_specific,
+        applied_wildcard=applied_wildcard,
+    )
     proto_path.write_text(modified, encoding="utf-8")
+
+    # A constraint that matched no field means either the schema moved or the
+    # injector could not parse the field declaration; fail loudly either way so
+    # silent wire-contract loss cannot ship.
+    missing_specific = sorted(set(specific) - applied_specific)
+    missing_wildcard = sorted(set(wildcard) - applied_wildcard)
+    failed = False
+    for key in missing_specific:
+        if key in KNOWN_UNMATCHED:
+            print(
+                f"  [{opts_path.name}] WARNING: no field matched "
+                f"'{'.'.join(key)}' (known-unmatched stale upstream entry)"
+            )
+            continue
+        print(
+            f"  [{opts_path.name}] ERROR: no field matched '{'.'.join(key)}'",
+            file=sys.stderr,
+        )
+        failed = True
+    for name in missing_wildcard:
+        print(
+            f"  [{opts_path.name}] ERROR: no field matched '*.{name}'",
+            file=sys.stderr,
+        )
+        failed = True
+    if failed:
+        return 1
 
     print(
         f"  [{opts_path.name}] Injected {len(specific)} specific + "

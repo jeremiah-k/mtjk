@@ -328,6 +328,148 @@ def test_inject_adds_option_to_plain_field():
 
 
 @pytest.mark.unit
+def test_inject_merges_with_single_line_schema_annotation():
+    """A field carrying a single-line field_metadata annotation still merges."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message DeviceConfig {
+          string tzdef = 11 [(meshtastic.protobuf.field_metadata) = {label: "Time Zone"}];
+        }
+    """
+    result = _inject(proto, specific={("DeviceConfig", "tzdef"): {"max_size": 65}})
+    assert (
+        '(meshtastic.protobuf.field_metadata) = {label: "Time Zone"}, '
+        "(nanopb).max_size = 65];" in result
+    )
+
+
+@pytest.mark.unit
+def test_inject_completes_multiline_compact_annotation_field():
+    """Options on a multi-line annotation field (compact "}];" closer) land."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message AudioConfig {
+          uint32 ptt_pin = 2 [(meshtastic.protobuf.field_metadata) = {
+            label: "PTT Pin"
+            description: "Push-to-talk GPIO pin number."
+          }];
+        }
+    """
+    result = _inject(proto, specific={("AudioConfig", "ptt_pin"): {"int_size": 8}})
+    assert "}, (nanopb).int_size = IS_8];" in result
+
+
+@pytest.mark.unit
+def test_inject_completes_multiline_expanded_annotation_field():
+    """Options land when the option-list closer "]" is on its own line."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message AudioConfig {
+          uint32 ptt_pin = 2 [
+            (meshtastic.protobuf.field_metadata) = {
+              label: "PTT Pin"
+            }
+          ];
+        }
+    """
+    result = _inject(proto, specific={("AudioConfig", "ptt_pin"): {"int_size": 8}})
+    # the option list continues after the annotation literal, comma-separated
+    assert "(nanopb).int_size = IS_8];" in result
+    assert "(nanopb).int_size = IS_8" in result.split("ptt_pin = 2 [", 1)[1]
+
+
+@pytest.mark.unit
+def test_inject_annotation_closer_does_not_pop_message_context():
+    """A "}];" annotation closer must not close the enclosing message."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message Outer {
+          message Inner {
+            uint32 annotated = 1 [(meshtastic.protobuf.field_metadata) = {
+              label: "Annotated"
+            }];
+            uint32 constrained = 2;
+          }
+        }
+    """
+    result = _inject(proto, specific={("Inner", "constrained"): {"max_size": 12}})
+    assert "constrained = 2 [(nanopb).max_size = 12];" in result
+
+
+@pytest.mark.unit
+def test_inject_annotation_closer_does_not_close_enum_early():
+    """Annotation closers inside an enum must not end the enum body early."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message M {
+          enum Kind {
+            KIND_A = 0 [(meshtastic.protobuf.enum_value_metadata) = {
+              label: "A"
+            }];
+            KIND_B = 1;
+          }
+          uint32 constrained = 2;
+        }
+    """
+    result = _inject(proto, specific={("M", "constrained"): {"max_size": 12}})
+    # constrained must still resolve against M even after the annotated enum
+    assert "constrained = 2 [(nanopb).max_size = 12];" in result
+    # enum values must never receive field options
+    assert "KIND_B = 1 [(nanopb)" not in result
+
+
+@pytest.mark.unit
+def test_inject_ignores_brackets_inside_comments_and_strings():
+    """Brackets in doc comments and strings must not affect option-block depth."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message M {
+          /*
+           * slice [0..8) of the HMAC, see https://example.com/x[1]
+           */
+          uint32 annotated = 1 [(meshtastic.protobuf.field_metadata) = {
+            description: "range [a..b) and url https://example.com//path"
+          }];
+          uint32 constrained = 2;
+        }
+    """
+    result = _inject(proto, specific={("M", "constrained"): {"max_size": 12}})
+    assert "constrained = 2 [(nanopb).max_size = 12];" in result
+
+
+@pytest.mark.unit
+def test_inject_multiline_field_keeps_options_afterwards():
+    """Fields following a multi-line annotated field still get options."""
+    proto = """\
+        syntax = "proto3";
+        import "meshtastic/protobuf/channel.proto";
+        message Ambient {
+          uint32 red = 3 [(meshtastic.protobuf.field_metadata) = {
+            label: "Red"
+            min_value: 0
+            max_value: 255
+          }];
+          uint32 green = 4;
+        }
+    """
+    result = _inject(
+        proto,
+        specific={
+            ("Ambient", "red"): {"int_size": 8},
+            ("Ambient", "green"): {"int_size": 8},
+        },
+    )
+    assert "}, (nanopb).int_size = IS_8];" in result
+    assert "green = 4 [(nanopb).int_size = IS_8];" in result
+
+
+@pytest.mark.unit
 def test_inject_merges_with_existing_options():
     """Nanopb annotation is appended after existing field options."""
     proto = """\
@@ -722,6 +864,7 @@ from meshtastic.protobuf import (  # noqa: E402  (after local helpers)
     atak_pb2,
     config_pb2,
     mesh_pb2,
+    module_config_pb2,
     nanopb_pb2,
     telemetry_pb2,
 )
@@ -789,6 +932,36 @@ def test_descriptor_nested_deviceconfig_tzdef():
     config = config_pb2.DESCRIPTOR.message_types_by_name["Config"]
     opts = _field_opts(config, "DeviceConfig", "tzdef")
     assert opts.max_size == 65
+
+
+@pytest.mark.unit
+def test_descriptor_lora_tx_power_keeps_int_size_with_metadata():
+    """tx_power now carries multi-line schema metadata; nanopb options survive."""
+    config = config_pb2.DESCRIPTOR.message_types_by_name["Config"]
+    opts = _field_opts(config, "LoRaConfig", "tx_power")
+    assert opts.int_size == nanopb_pb2.IS_8
+
+
+@pytest.mark.unit
+def test_descriptor_ambient_lighting_keeps_int_size_with_metadata():
+    """Ambient lighting fields carry multi-line metadata plus int_size."""
+    opts = _field_opts(
+        module_config_pb2.DESCRIPTOR.message_types_by_name["ModuleConfig"],
+        "AmbientLightingConfig",
+        "red",
+    )
+    assert opts.int_size == nanopb_pb2.IS_8
+
+
+@pytest.mark.unit
+def test_descriptor_audio_ptt_pin_keeps_int_size_with_metadata():
+    """ptt_pin carries multi-line metadata plus int_size."""
+    opts = _field_opts(
+        module_config_pb2.DESCRIPTOR.message_types_by_name["ModuleConfig"],
+        "AudioConfig",
+        "ptt_pin",
+    )
+    assert opts.int_size == nanopb_pb2.IS_8
 
 
 @pytest.mark.unit
