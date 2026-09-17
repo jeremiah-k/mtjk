@@ -35,7 +35,7 @@ def mock_ppk2_api_class() -> Generator[type[Any], None, None]:
     class MockPPK2API:
         """Mock implementation of PPK2_API for testing."""
 
-        _list_devices_result: list[str] = []
+        _list_devices_result: list[Any] = []
 
         def __init__(self, port_name: str):
             """Initialize mock API with port name."""
@@ -77,7 +77,7 @@ def mock_ppk2_api_class() -> Generator[type[Any], None, None]:
             """Mock close method."""
 
         @classmethod
-        def list_devices(cls) -> list[str]:
+        def list_devices(cls) -> list[Any]:
             """Mock list_devices classmethod."""
             return cls._list_devices_result
 
@@ -186,6 +186,116 @@ def test_constructor_skips_auto_discovery_with_port_name(
 
     ppk = PPK2PowerSupply(portName="COM3")
     assert not list_devices_called[0]
+    ppk.close()
+
+
+# =============================================================================
+# list_devices() Shape Contract Tests (ppk2-api 0.9.2 vs unreleased master)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ("/dev/ttyACM0", "/dev/ttyACM0"),
+        (("/dev/ttyACM0", "PPK2-serial-1"), "/dev/ttyACM0"),
+        (["/dev/ttyACM0", "PPK2-serial-1"], "/dev/ttyACM0"),
+        (("/dev/ttyACM0",), "/dev/ttyACM0"),
+        ((), None),
+        ((123, "PPK2-serial-1"), None),
+        (None, None),
+        (123, None),
+    ],
+)
+def test_ppk2_port_from_entry_normalizes_supported_shapes(
+    entry: Any, expected: str | None
+) -> None:
+    """Both the 0.9.2 string shape and upstream's tuple shape must resolve."""
+    from meshtastic.powermon.ppk2 import (  # pylint: disable=import-outside-toplevel
+        _ppk2_port_from_entry,
+    )
+
+    assert _ppk2_port_from_entry(entry) == expected
+
+
+@pytest.mark.unit
+def test_constructor_auto_selects_single_tuple_device(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_ppk2_api_class: type[Any],  # noqa
+) -> None:
+    """A single (port, serial) tuple entry should auto-select its port."""
+
+    mock_ppk2_api_class._list_devices_result = [("/dev/ttyACM0", "PPK2-serial-1")]
+
+    monkeypatch.setattr(
+        "meshtastic.powermon.ppk2.ppk2_api.PPK2_API",
+        mock_ppk2_api_class,
+    )
+
+    ppk = PPK2PowerSupply(portName=None)
+    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
+    ppk.close()
+
+
+@pytest.mark.unit
+def test_constructor_multiple_tuple_devices_raises_error(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_ppk2_api_class: type[Any],  # noqa
+) -> None:
+    """Multiple tuple entries should raise the same ambiguity error as strings."""
+
+    mock_ppk2_api_class._list_devices_result = [
+        ("/dev/ttyUSB0", "PPK2-serial-1"),
+        ("/dev/ttyUSB1", "PPK2-serial-2"),
+    ]
+
+    monkeypatch.setattr(
+        "meshtastic.powermon.ppk2.ppk2_api.PPK2_API",
+        mock_ppk2_api_class,
+    )
+
+    with pytest.raises(PowerError, match="Multiple PPK2 devices found"):
+        PPK2PowerSupply(portName=None)
+
+
+@pytest.mark.unit
+def test_constructor_ignores_unusable_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_ppk2_api_class: type[Any],  # noqa
+) -> None:
+    """Entries matching neither supported shape should not become port names."""
+
+    mock_ppk2_api_class._list_devices_result = [(123, "junk"), None, 42]
+
+    monkeypatch.setattr(
+        "meshtastic.powermon.ppk2.ppk2_api.PPK2_API",
+        mock_ppk2_api_class,
+    )
+
+    with pytest.raises(PowerError, match="No PPK2 devices found"):
+        PPK2PowerSupply(portName=None)
+
+
+@pytest.mark.unit
+def test_constructor_mixed_shapes_select_single_valid_port(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_ppk2_api_class: type[Any],  # noqa
+) -> None:
+    """A mix of old and new shapes should still count devices consistently."""
+
+    mock_ppk2_api_class._list_devices_result = [
+        (123, "junk"),
+        ("/dev/ttyACM0", "PPK2-serial-1"),
+    ]
+
+    monkeypatch.setattr(
+        "meshtastic.powermon.ppk2.ppk2_api.PPK2_API",
+        mock_ppk2_api_class,
+    )
+
+    ppk = PPK2PowerSupply(portName=None)
+    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
     ppk.close()
 
 
