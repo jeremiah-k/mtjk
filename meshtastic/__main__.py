@@ -1315,7 +1315,7 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
         print_channel_field_choices=_print_channel_field_choices,
         is_local_destination=_is_local_destination,
         modem_preset_shorthands=_MODEM_PRESET_SHORTHANDS,
-        qr_render=(cli_qr.render_terminal_qr if cli_qr.segno is not None else None),
+        qr_render=(cli_qr.renderTerminalQr if cli_qr.segno is not None else None),
     )
     configure_hooks = cli_configure_actions.ConfigureActionHooks(
         handle_set_command=_handle_set_command,

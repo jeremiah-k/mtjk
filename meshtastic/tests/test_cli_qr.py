@@ -55,7 +55,7 @@ def test_load_segno_does_not_hide_broken_transitive_import(
 
 
 @pytest.mark.unit
-def test_render_terminal_qr_pins_segno_parameters(
+def test_renderTerminalQr_pins_segno_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The renderer should request full QR codes with fixed ECC and border settings."""
@@ -74,7 +74,7 @@ def test_render_terminal_qr_pins_segno_parameters(
 
     monkeypatch.setattr(cli_qr, "segno", _StubSegno())
 
-    rendered = cli_qr.render_terminal_qr("https://meshtastic.org/e/#abc")
+    rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
 
     assert rendered == "<stub-terminal-qr>\n"
     assert len(make_calls) == 1
@@ -92,26 +92,26 @@ def test_render_terminal_qr_pins_segno_parameters(
 
 
 @pytest.mark.unit
-def test_render_terminal_qr_raises_without_segno(
+def test_renderTerminalQr_raises_without_segno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A missing segno dependency should raise instead of returning empty output."""
     monkeypatch.setattr(cli_qr, "segno", None)
 
     with pytest.raises(RuntimeError, match="segno"):
-        cli_qr.render_terminal_qr("https://meshtastic.org/e/#abc")
+        cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
 
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("_require_segno")
-def test_render_terminal_qr_output_is_terminal_text() -> None:
+def test_renderTerminalQr_output_is_terminal_text() -> None:
     """Rendered output should be newline-terminated ANSI terminal text.
 
     Do not assert exact matrix bytes: valid QR mask choices may differ between
     library versions. Structure (row count, charset) is the stable contract.
     """
     value = "https://meshtastic.org/e/#deterministic-primary"
-    rendered = cli_qr.render_terminal_qr(value)
+    rendered = cli_qr.renderTerminalQr(value)
 
     assert rendered.endswith("\n")
     assert set(rendered) <= _TERMINAL_ALLOWED_CHARS
@@ -121,7 +121,7 @@ def test_render_terminal_qr_output_is_terminal_text() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("_require_segno")
-def test_render_terminal_qr_matches_full_qr_geometry() -> None:
+def test_renderTerminalQr_matches_full_qr_geometry() -> None:
     """Rendered rows should match the equivalent full (non-micro) QR geometry."""
     import segno  # pylint: disable=import-outside-toplevel
 
@@ -135,7 +135,7 @@ def test_render_terminal_qr_matches_full_qr_geometry() -> None:
     )
     assert not code.is_micro
 
-    rendered = cli_qr.render_terminal_qr(value)
+    rendered = cli_qr.renderTerminalQr(value)
     module_rows = len(code.matrix)
     module_cols = len(code.matrix[0])
     quiet = 2 * cli_qr.QR_BORDER_MODULES
@@ -153,7 +153,7 @@ def test_render_terminal_qr_matches_full_qr_geometry() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("_require_segno")
-def test_render_terminal_qr_uses_high_error_correction() -> None:
+def test_renderTerminalQr_uses_high_error_correction() -> None:
     """The equivalent segno construction should select error level H."""
     import segno  # pylint: disable=import-outside-toplevel
 

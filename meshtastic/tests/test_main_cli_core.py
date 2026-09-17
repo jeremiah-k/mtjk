@@ -788,7 +788,7 @@ def test_main_qr(
         raising=True,
     )
     monkeypatch.setattr(
-        "meshtastic.cli.qr.render_terminal_qr",
+        "meshtastic.cli.qr.renderTerminalQr",
         qr_render,
         raising=True,
     )
@@ -842,7 +842,7 @@ def test_main_onConnected_exception(
         raising=True,
     )
     monkeypatch.setattr(
-        "meshtastic.cli.qr.render_terminal_qr",
+        "meshtastic.cli.qr.renderTerminalQr",
         _throw_an_exception,
         raising=True,
     )

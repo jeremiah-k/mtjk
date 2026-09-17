@@ -29,7 +29,7 @@ QR_ERROR_CORRECTION = "H"
 QR_BORDER_MODULES = 4
 
 
-def render_terminal_qr(value: str) -> str:
+def renderTerminalQr(value: str) -> str:
     """Render ``value`` as a QR code suitable for printing to a terminal.
 
     Parameters
@@ -49,9 +49,7 @@ def render_terminal_qr(value: str) -> str:
         If the optional ``segno`` dependency is not installed.
     """
     if segno is None:
-        raise RuntimeError(
-            "render_terminal_qr requires the optional 'segno' dependency"
-        )
+        raise RuntimeError("renderTerminalQr requires the optional 'segno' dependency")
     out = io.StringIO()
     segno.make(
         value,
