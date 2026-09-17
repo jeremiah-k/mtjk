@@ -72,8 +72,15 @@ install:
 	poetry install
 
 # generate the docs (for local use)
+# -d numpy: project docstrings use numpy-style parameter sections
+# --no-search: pdoc 16.0.0's Node-based search-index build is broken upstream
+# (CommonJS require in an ESM-scoped package) and fails the run; drop search.
+# !meshtastic\.protobuf: pdoc 16.0.0 cannot evaluate the generated
+# mypy-protobuf .pyi stubs (they reference private protobuf internals removed
+# in protobuf 6) and spews per-module stub-parsing errors; excluding the
+# generated modules keeps the run clean.
 docs:
-	$(POETRY_RUN) pdoc3 --html -f --output-dir docs meshtastic
+	$(POETRY_RUN) pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
 
 # lint the codebase (same command as CI)
 lint:
