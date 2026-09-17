@@ -5057,7 +5057,7 @@ pyserial = "^3.5"
 [package.source]
 type = "git"
 url = "https://github.com/geeksville/riden.git"
-reference = "HEAD"
+reference = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9"
 resolved_reference = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9"
 
 [[package]]
@@ -6160,4 +6160,4 @@ tunnel = ["pytap2"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10,<3.15"
-content-hash = "e2faa484d695bec1ea14137ad2ab0fb0014e64ccdefa8a2a3c9781aaab42d1c9"
+content-hash = "a7056d51107f32d51e889fd35617579670b038f1c41e52e0461081e6d0fe4531"

@@ -58,7 +58,13 @@ pyarrow-stubs = "^20.0.0.20251215"
 optional = true
 
 [tool.poetry.group.powermon.dependencies]
-riden = { git = "https://github.com/geeksville/riden.git#1.2.1" }
+# Git dependency: pinned to an immutable commit SHA. The historical
+# "#1.2.1" URL fragment is not a safe pin: the committed lock recorded
+# reference = "HEAD" (resolved to 27fd58f0, master at the time), while the
+# 1.2.1 tag points at a different commit -- either way, regenerating the
+# lock would silently move this dependency. Verify any new pin against
+# https://github.com/geeksville/riden before changing it.
+riden = { git = "https://github.com/geeksville/riden.git", rev = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9" }
 ppk2-api = "^0.9.2"
 parse = "^1.20.2"
 pyarrow = "^25.0.0"
