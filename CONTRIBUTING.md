@@ -16,6 +16,9 @@ current project rather than creating new refactor journals or one-off checklists
 - `COMPATIBILITY.md` — public compatibility policy and alias inventory;
 - `CONTRIBUTING.md` — maintenance workflow and validation commands;
 - `BLE.md` — detailed BLE architecture and integration contracts;
+- `PPK2LAB_EVALUATION.md` — living evaluation plan for a possible ppk2lab
+  powermon backend; retire it into git history once the backend decision is
+  made;
 - subsystem contract documents under `meshtastic/` where the contract belongs
   next to the implementation.
 
