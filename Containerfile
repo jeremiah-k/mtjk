@@ -32,7 +32,7 @@ COPY pyproject.toml poetry.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/poetry/bin/poetry export \
     --format requirements.txt \
-    --extras cli --extras tunnel --extras analysis \
+    --extras cli --extras analysis \
     --with powermon \
     --without dev \
     --without-hashes \
