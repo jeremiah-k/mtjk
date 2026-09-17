@@ -1371,19 +1371,6 @@ graph = ["objgraph (>=1.7.2)"]
 profile = ["gprof2dot (>=2022.7.29)"]
 
 [[package]]
-name = "dotmap"
-version = "1.3.30"
-description = "ordered, dynamically-expandable dot-access dictionary"
-optional = true
-python-versions = "*"
-groups = ["main"]
-markers = "extra == \"cli\""
-files = [
-    {file = "dotmap-1.3.30-py3-none-any.whl", hash = "sha256:bd9fa15286ea2ad899a4d1dc2445ed85a1ae884a42effb87c89a6ecce71243c6"},
-    {file = "dotmap-1.3.30.tar.gz", hash = "sha256:5821a7933f075fb47563417c0e92e0b7c031158b4c9a6a7e56163479b658b368"},
-]
-
-[[package]]
 name = "exceptiongroup"
 version = "1.3.1"
 description = "Backport of PEP 654 (exception groups)"
@@ -6151,10 +6138,10 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [extras]
 analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs", "plotly"]
-cli = ["argcomplete", "dotmap", "print-color", "segno", "wcwidth"]
+cli = ["argcomplete", "print-color", "segno", "wcwidth"]
 tunnel = ["pytap2"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10,<3.15"
-content-hash = "bb3744b863a5467d2fce3c484e47da8622a9a77786f40b6c7c1326475ab97ac4"
+content-hash = "6f496985f2d320d75de7f85c3ac8e590378ac72470a5f9512939f434b031dfd5"
