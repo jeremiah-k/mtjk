@@ -1,4 +1,17 @@
-"""Classes for logging power consumption of meshtastic devices."""
+"""Classes for logging power consumption of meshtastic devices.
+
+PPK2 backend contract notes (dependency health audit 2026-09-16):
+
+- mtjk pins PyPI ppk2-api 0.9.2. Upstream master carries unreleased behavior
+  changes while still reporting 0.9.2, including ``PPK2_API.list_devices()``
+  returning ``(port, serial-prefix)`` tuples instead of plain port strings.
+  The device-selection path below normalizes both shapes so a future
+  ppk2-api release (or a temporary master pin) cannot silently break
+  auto-discovery.
+- The measurement-path methods used here (``get_data``/``get_samples``/
+  ``set_source_voltage``/``use_*_meter``/``toggle_DUT_power``) match the
+  0.9.2 released API.
+"""
 
 import logging
 import math
@@ -18,6 +31,32 @@ SUBSEQUENT_POLL_TIMEOUT_S: Final[float] = 0.001  # Subsequent poll timeout (1ms)
 THREAD_JOIN_TIMEOUT_S: Final[float] = 5.0  # Join timeout for measurement thread.
 STABILIZATION_DELAY_S: Final[float] = 0.2  # Delay to discard initial FIFO readings.
 READ_ERROR_RETRY_DELAY_S: Final[float] = 0.05  # Backoff after transient read errors.
+
+
+def _ppk2_port_from_entry(entry: object) -> str | None:
+    """Extract the serial port from one ``PPK2_API.list_devices()`` entry.
+
+    ppk2-api 0.9.2 returns plain port strings; unreleased upstream master
+    returns ``(port, serial-prefix)`` tuples. Accept both shapes until a
+    newer release ships.
+
+    Parameters
+    ----------
+    entry : object
+        A single device entry as returned by ``list_devices()``.
+
+    Returns
+    -------
+    str | None
+        The serial-port path, or None for entries that match neither shape.
+    """
+    if isinstance(entry, str):
+        return entry or None
+    if isinstance(entry, (tuple, list)) and entry:
+        port = entry[0]
+        if isinstance(port, str):
+            return port or None
+    return None
 
 
 def _close_ppk2_transport(api: object) -> None:
@@ -59,19 +98,30 @@ class PPK2PowerSupply(PowerSupply):
         Raises
         ------
         PowerError
-            If no PPK2 devices are found when portName is None.
+            If no usable PPK2 device port is found when portName is None
+            (no devices attached, or none exposing a recognizable port shape).
         PowerError
             If multiple PPK2 devices are found when portName is None.
         """
         if portName is None:
-            devs = ppk2_api.PPK2_API.list_devices()
-            if not devs:
+            devs = ppk2_api.PPK2_API.list_devices() or []
+            # Normalize both the 0.9.2 shape (port strings) and the unreleased
+            # upstream shape ((port, serial-prefix) tuples). Preserve discovery
+            # order while de-duplicating the same physical serial port.
+            ports = list(
+                dict.fromkeys(
+                    port
+                    for port in (_ppk2_port_from_entry(dev) for dev in devs)
+                    if port is not None
+                )
+            )
+            if not ports:
                 raise PowerError("No PPK2 devices found")  # noqa: TRY003
-            if len(devs) > 1:
+            if len(ports) > 1:
                 raise PowerError(  # noqa: TRY003
                     "Multiple PPK2 devices found, please specify the portName"
                 )
-            portName = devs[0]
+            portName = ports[0]
 
         self.measuring: bool = False
         self.current_max: int = 0
