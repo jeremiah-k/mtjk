@@ -477,7 +477,9 @@ def test_find_device_raises_when_no_peripherals_found_no_address(
     iface = _build_minimal_interface()
     iface._discovery_manager = FailingDiscoveryManager()
 
-    with pytest.raises(BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND) as exc_info:
+    with pytest.raises(
+        BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND
+    ) as exc_info:
         iface.findDevice(None)
 
     assert exc_info.value.kind == BLEInterface.BLEError.DEVICE_NOT_FOUND
@@ -490,7 +492,9 @@ def test_find_device_raises_when_no_peripherals_found_with_name(
     iface = _build_minimal_interface()
     iface._discovery_manager = FailingDiscoveryManager()
 
-    with pytest.raises(BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND) as exc_info:
+    with pytest.raises(
+        BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND
+    ) as exc_info:
         iface.findDevice("some-device-name")
 
     assert exc_info.value.kind == BLEInterface.BLEError.DEVICE_NOT_FOUND

@@ -195,7 +195,7 @@ Please do not file `mtjk`-specific issues with upstream maintainers.
 ## Release notes for maintainers
 
 - Versions follow the upstream version with a `.postN` suffix, for example
-  `2.7.11.post6`.
+  `2.7.11.post7`.
 - Publish a GitHub release with tag `vX.Y.Z[.postN]` (or the same version without
   the leading `v`).
 - The PyPI workflow verifies that the release tag matches `pyproject.toml`, runs

@@ -2,7 +2,7 @@
 [tool.poetry]
 # Keep this static install-time identity synchronized with meshtastic/_branding.py.
 name = "mtjk"
-version = "2.7.11.post6"
+version = "2.7.11.post7"
 description = "Python API & client shell for talking to Meshtastic devices"
 authors = ["Meshtastic Developers (upstream project authors)"]
 maintainers = ["Jeremiah K. <jeremiahk@gmx.com>"]
