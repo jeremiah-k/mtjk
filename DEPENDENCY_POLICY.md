@@ -27,8 +27,8 @@ classification has been recorded in the table below (with a revisit date).
 - `ppk2-api`: the source repo is active, so "abandoned" is inaccurate — but the
   PyPI release has been stuck at 0.9.2 (2023-06) while unreleased behavior
   changes accumulate. Keep the dashboard reminder until the backend decision
-  (see the ppk2lab evaluation plan on the `experiment/ppk2lab-backend` branch
-  and the ppk2 adapter compatibility work) is made.
+  (see the ppk2lab evaluation plan in PR #527 and the ppk2 adapter
+  compatibility work in PR #526) is made.
 
 ## Source (Git) dependencies
 
