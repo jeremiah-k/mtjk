@@ -36,7 +36,7 @@ def _hooks(**overrides: Any) -> ChannelContactHooks:
         "print_channel_field_choices": MagicMock(),
         "is_local_destination": MagicMock(return_value=True),
         "modem_preset_shorthands": (),
-        "qr_create": None,
+        "qr_render": None,
     }
     values.update(overrides)
     return ChannelContactHooks(**values)
@@ -230,17 +230,35 @@ def test_region_display_uses_numeric_fallbacks_for_future_firmware_values() -> N
 
 @pytest.mark.unit
 def test_qr_without_optional_dependency_prints_install_guidance() -> None:
-    """Missing pyqrcode should still emit the URL and an actionable installation hint."""
+    """Missing segno should still emit the URL and an actionable installation hint."""
     cli_print = MagicMock()
     actions._print_qr(
         "https://example.invalid/#abc",
         description="Primary channel URL",
-        qr_create=None,
+        qr_render=None,
         cli_print=cli_print,
     )
 
     assert cli_print.call_count == 2
-    cli_print.assert_any_call("Install pyqrcode to view a QR code printed to terminal.")
+    cli_print.assert_any_call("Install segno to view a QR code printed to terminal.")
+
+
+@pytest.mark.unit
+def test_qr_with_renderer_prints_rendered_qr() -> None:
+    """An installed renderer should be invoked with the URL and its output printed."""
+    cli_print = MagicMock()
+    qr_render = MagicMock(return_value="<qr-terminal>")
+
+    actions._print_qr(
+        "https://example.invalid/#abc",
+        description="Primary channel URL",
+        qr_render=qr_render,
+        cli_print=cli_print,
+    )
+
+    qr_render.assert_called_once_with("https://example.invalid/#abc")
+    cli_print.assert_any_call("Primary channel URL: https://example.invalid/#abc")
+    cli_print.assert_any_call("<qr-terminal>")
 
 
 @pytest.mark.unit

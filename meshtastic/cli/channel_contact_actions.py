@@ -29,7 +29,7 @@ class ChannelContactHooks:
     print_channel_field_choices: Callable[[Any, str], None]
     is_local_destination: Callable[[Any, str], bool]
     modem_preset_shorthands: tuple[tuple[tuple[str, ...], str, str, str], ...]
-    qr_create: Callable[[str], Any] | None = None
+    qr_render: Callable[[str], str] | None = None
 
 
 def _handle_contact_import(context: CliContext) -> None:
@@ -384,15 +384,15 @@ def _print_qr(
     url: str,
     *,
     description: str,
-    qr_create: Callable[[str], Any] | None,
+    qr_render: Callable[[str], str] | None,
     cli_print: Callable[[str], None],
 ) -> None:
     """Render a channel/contact URL and optional terminal QR through CLI reporting."""
     cli_print(f"{description}: {url}")
-    if qr_create is None:
-        cli_print("Install pyqrcode to view a QR code printed to terminal.")
+    if qr_render is None:
+        cli_print("Install segno to view a QR code printed to terminal.")
         return
-    cli_print(qr_create(url).terminal())
+    cli_print(qr_render(url))
 
 
 def _handle_channel_contact_display(
@@ -415,7 +415,7 @@ def _handle_channel_contact_display(
         _print_qr(
             url,
             description=description,
-            qr_create=hooks.qr_create,
+            qr_render=hooks.qr_render,
             cli_print=hooks.cli_print,
         )
 
@@ -429,6 +429,6 @@ def _handle_channel_contact_display(
         _print_qr(
             url,
             description="Contact URL",
-            qr_create=hooks.qr_create,
+            qr_render=hooks.qr_render,
             cli_print=hooks.cli_print,
         )
