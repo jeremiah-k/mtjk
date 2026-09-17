@@ -77,10 +77,10 @@ def test_dotmap_scalar_readback() -> None:
 
 @pytest.mark.unit
 def test_dotmap_dunder_setattr_delegates_to_object() -> None:
-    """Dunder setattr should not create dictionary entries."""
+    """Dunder setattr should delegate to object attributes, not dict entries."""
     dmap = DotMap()
 
-    object.__setattr__(dmap, "__custom__", 1)
+    dmap.__custom__ = 1
 
     assert "__custom__" not in dmap
 
