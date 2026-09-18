@@ -2185,9 +2185,9 @@ class Nau7802Config(_message.Message):
 Global___Nau7802Config: _TypeAlias = Nau7802Config  # noqa: Y015
 
 @_typing.final
-class AS3935Config(_message.Message):
+class AS3935State(_message.Message):
     """
-    AS3935 lightning sensor configuration, for saving to flash
+    AS3935 lightning sensor state, for saving to flash
     """
 
     DESCRIPTOR: _descriptor.Descriptor
@@ -2209,7 +2209,7 @@ class AS3935Config(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___AS3935Config: _TypeAlias = AS3935Config  # noqa: Y015
+Global___AS3935State: _TypeAlias = AS3935State  # noqa: Y015
 
 @_typing.final
 class SEN5XState(_message.Message):
