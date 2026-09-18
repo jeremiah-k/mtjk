@@ -145,11 +145,10 @@ or, for the unreleased `develop` branch:
 mtjk @ git+https://github.com/jeremiah-k/mtjk.git@develop
 ```
 
-The optional CLI extras can be requested in the usual way:
-
-```text
-mtjk[cli]
-```
+The CLI niceties (`segno` for `--qr`, `print-color`, `argcomplete`,
+`wcwidth`) are core dependencies — a plain `mtjk` install gets the full
+CLI, including QR rendering. The `cli` extra is still accepted as a
+no-op, so `mtjk[cli]` keeps working for existing scripts.
 
 Python code continues to use the familiar imports:
 
