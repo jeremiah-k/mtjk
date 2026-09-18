@@ -1,6 +1,6 @@
 """Terminal QR rendering for channel and contact URLs.
 
-Wraps the ``segno`` package (optional ``cli`` extra) behind a single
+Wraps the ``segno`` package behind a single
 renderer so the CLI's QR behavior stays independent of the QR library.
 """
 
@@ -46,10 +46,10 @@ def renderTerminalQr(value: str) -> str:
     Raises
     ------
     RuntimeError
-        If the optional ``segno`` dependency is not installed.
+        If ``segno`` is not installed.
     """
     if segno is None:
-        raise RuntimeError("renderTerminalQr requires the optional 'segno' dependency")
+        raise RuntimeError("renderTerminalQr requires the 'segno' dependency")
     out = io.StringIO()
     segno.make(
         value,

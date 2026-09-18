@@ -62,10 +62,9 @@ files = [
 name = "argcomplete"
 version = "3.7.2"
 description = "Bash tab completion for argparse"
-optional = true
+optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"cli\""
 files = [
     {file = "argcomplete-3.7.2-py3-none-any.whl", hash = "sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19"},
     {file = "argcomplete-3.7.2.tar.gz", hash = "sha256:aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9"},
@@ -3968,10 +3967,9 @@ pyserial = "*"
 name = "print-color"
 version = "0.4.8"
 description = "A simple package to print in color to the terminal"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"cli\""
 files = [
     {file = "print_color-0.4.8-py3-none-any.whl", hash = "sha256:8eaa5b8a9ee39e9e4dbfe1efef463ff9c91b5606c520fe9a9ededb3c26d74472"},
     {file = "print_color-0.4.8.tar.gz", hash = "sha256:20e4c7c565c0359d980513a9e0cde4a59a468e5ffee904b5e4614c721319c8a3"},
@@ -5259,10 +5257,9 @@ files = [
 name = "segno"
 version = "1.6.6"
 description = "QR Code and Micro QR Code generator for Python"
-optional = true
+optional = false
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "extra == \"cli\""
 files = [
     {file = "segno-1.6.6-py3-none-any.whl", hash = "sha256:28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7"},
     {file = "segno-1.6.6.tar.gz", hash = "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3"},
@@ -5687,7 +5684,6 @@ files = [
     {file = "wcwidth-0.8.3-py3-none-any.whl", hash = "sha256:d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4"},
     {file = "wcwidth-0.8.3.tar.gz", hash = "sha256:d128512515fbf4612e0ff21fd6380399210318b7b54a9af59dff8454cf9730eb"},
 ]
-markers = {main = "extra == \"cli\""}
 
 [[package]]
 name = "webcolors"
@@ -6109,9 +6105,9 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [extras]
 analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs", "plotly"]
-cli = ["argcomplete", "print-color", "segno", "wcwidth"]
+cli = []
 
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10,<3.15"
-content-hash = "33401a6c8274b7a25622b099d028eedd09ef260e979618f92d460ca1a068826e"
+content-hash = "ec06057f957e1b00ade96b1fa83731af6aade0edad5da600ec0f6e9c925d1023"
