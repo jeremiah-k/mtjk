@@ -69,6 +69,14 @@ class FieldMetadata(_message.Message):
     catalog. Do not put machine-readable values (regexes, identifiers, format
     codes) in a string attribute; they would be handed to translators.
 
+    The exception is a short, named set of MACHINE-READABLE string attributes -
+    currently `since_firmware` and `deprecated_since` - which the generators emit
+    as plain literals. A firmware version is compared rather than read, and a
+    translated one would compare wrongly at runtime. The set is deliberately
+    closed and lives in the generators (`machineReadableAttributes`); adding to it
+    is a generator change and should stay rare, because every entry is a string a
+    translator will never see and therefore a place display text can hide.
+
     To tag a field, set the option on it, e.g.
       uint32 rx_gpio = 8 [(meshtastic.field_metadata) = { diy_only: true }];
 
@@ -93,6 +101,8 @@ class FieldMetadata(_message.Message):
     LABEL_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
     KEYWORDS_FIELD_NUMBER: _builtins.int
+    SINCE_FIRMWARE_FIELD_NUMBER: _builtins.int
+    DEPRECATED_SINCE_FIELD_NUMBER: _builtins.int
     diy_only: _builtins.bool
     """
     Field is only relevant to DIY hardware builds. Apps may hide it when
@@ -149,6 +159,52 @@ class FieldMetadata(_message.Message):
     ignored. "|" is used rather than "," because a keyword may itself contain a
     comma. Source string for localization.
     """
+    since_firmware: _builtins.str
+    """
+    The first firmware version that has this field, e.g. "2.7.12".
+
+    A client showing a control for a field the connected node does not have
+    offers a setting that will be ignored; one hiding a field the node does
+    have loses a setting that works. Today each client answers that from a
+    version constant written into its own UI, so the same boundary is stated
+    independently in each of them - and when firmware adds a field, every
+    client has to learn the number separately.
+
+    MACHINE-READABLE (see the note on string attributes above): a version is
+    compared, not read, and is emitted as a plain literal rather than as
+    localizable text.
+
+    Presentation metadata, like `min_value`: firmware still has to defend
+    itself, since an older client can always write a field a newer firmware
+    ignores, and a newer client a field an older one does not know.
+
+    Unset means "as long as anyone needs to care", which is the common case -
+    annotate a field only where a client genuinely has to make this decision.
+    """
+    deprecated_since: _builtins.str
+    """
+    The first firmware version that no longer honours this field, e.g. "2.7.1"
+    on `compass_north_top`: `compass_orientation` replaced it in 2.3.13, but
+    firmware went on reading the old field until 2.7.1. The replacement's
+    arrival and the old field's removal are different releases, which is the
+    whole reason this is worth writing down.
+
+    Distinct from `deprecated`, which says only THAT a field is superseded.
+    That is enough to stop offering it on new firmware but not enough to keep
+    offering it where it still works: a node below this version needs the field,
+    and a client that hides it on the strength of the boolean alone takes a
+    working setting away. Both clients do exactly that today.
+
+    So the intended rule is: show the field below this version; at or above it,
+    treat it as `deprecated` does - hidden unless the node holds a non-default
+    value, which keeps a stale setting visible rather than silently saved.
+
+    Deprecated is not removed. A field firmware has stopped reading entirely is
+    a different statement and wants its own annotation rather than this one.
+
+    MACHINE-READABLE, and presentation metadata, on the same terms as
+    `since_firmware`.
+    """
     def __init__(
         self,
         *,
@@ -161,10 +217,12 @@ class FieldMetadata(_message.Message):
         label: _builtins.str | None = ...,
         description: _builtins.str | None = ...,
         keywords: _builtins.str | None = ...,
+        since_firmware: _builtins.str | None = ...,
+        deprecated_since: _builtins.str | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "unit", b"unit"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "unit", b"unit"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
