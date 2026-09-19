@@ -52,12 +52,39 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive
 
+      - name: Restore cached nanopb
+        id: nanopb_cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: nanopb-${{ env.NANOPB_VERSION }}
+          key: nanopb-${{ env.NANOPB_VERSION }}-${{ env.NANOPB_SHA256 }}
+
       - name: Download nanopb
+        if: steps.nanopb_cache.outputs.cache-hit != 'true'
         run: |
-          curl -fsSL -o nanopb-${NANOPB_VERSION}-linux-x86.tar.gz https://jpa.kapsi.fi/nanopb/download/nanopb-${NANOPB_VERSION}-linux-x86.tar.gz
-          echo "${NANOPB_SHA256}  nanopb-${NANOPB_VERSION}-linux-x86.tar.gz" | sha256sum -c -
-          tar xzf nanopb-${NANOPB_VERSION}-linux-x86.tar.gz
-          mv nanopb-${NANOPB_VERSION}-linux-x86 nanopb-${NANOPB_VERSION}
+          set -euo pipefail
+          tarball="nanopb-${NANOPB_VERSION}-linux-x86.tar.gz"
+          mirrors=(
+            "https://github.com/nanopb/nanopb/releases/download/nanopb-${NANOPB_VERSION}/${tarball}"
+            "https://jpa.kapsi.fi/nanopb/download/${tarball}"
+          )
+          downloaded=0
+          for url in "${mirrors[@]}"; do
+            echo "Trying ${url}"
+            rm -f "${tarball}"
+            if curl -fsSL --retry 3 --retry-delay 5 -o "${tarball}" "${url}" \
+              && echo "${NANOPB_SHA256}  ${tarball}" | sha256sum -c --status -; then
+              downloaded=1
+              break
+            fi
+            echo "Mirror failed or checksum mismatch: ${url}" >&2
+          done
+          if [ "${downloaded}" -ne 1 ]; then
+            echo "All nanopb mirrors failed for ${NANOPB_VERSION}" >&2
+            exit 1
+          fi
+          tar xzf "${tarball}"
+          mv "nanopb-${NANOPB_VERSION}-linux-x86" "nanopb-${NANOPB_VERSION}"
 
       - name: Install Python dependencies
         run: poetry install --with dev
