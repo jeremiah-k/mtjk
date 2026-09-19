@@ -226,6 +226,22 @@ def _on_response_traceroute(
                 request_id=request_id,
             )
             return None
+        # A successful routing ack proves delivery but carries no route
+        # payload: parsing its Routing body as RouteDiscovery fails the wire
+        # type check. Firmware acks reliable traceroute requests before the
+        # actual response arrives, so re-arm the one-shot response handler and
+        # leave the wait pending for the real RouteDiscovery response.
+        if request_id is not None:
+            interface._add_response_handler(
+                request_id,
+                lambda packet: _on_response_traceroute(
+                    interface,
+                    packet,
+                    emit_summary=emit_summary,
+                    on_result=on_result,
+                ),
+            )
+        return None
 
     route_discovery = mesh_pb2.RouteDiscovery()
     try:

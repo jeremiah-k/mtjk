@@ -1187,6 +1187,86 @@ def test_on_response_traceroute_parse_failures_surface_to_waiters() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_request_traceroute_routing_ack_does_not_consume_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful routing ack must not be parsed as a route nor block the response.
+
+    Firmware acks reliable traceroute requests (ROUTING_APP, Routing body)
+    before the actual RouteDiscovery response arrives. The ack previously
+    consumed the one-shot response handler and its body failed to parse as a
+    RouteDiscovery, surfacing 'Wire format was corrupt' to the waiter.
+    """
+    with MeshInterface(noProto=True) as iface:
+        iface.currentPacketId = 0
+        iface.nodesByNum = {20: {"num": 20}, 21: {"num": 21}}
+        iface.nodes = {"!14": {"num": 20}, "!15": {"num": 21}}
+
+        def _fake_send(
+            meshPacket: mesh_pb2.MeshPacket, *_args: Any, **_kwargs: Any
+        ) -> mesh_pb2.MeshPacket:
+            return meshPacket
+
+        monkeypatch.setattr(iface, "_send_packet", _fake_send)
+        request_finished = threading.Event()
+        outcome: dict[str, object] = {}
+
+        def _request() -> None:
+            try:
+                outcome["result"] = iface.requestTraceRoute(dest=21, hopLimit=3)
+            except Exception as exc:  # noqa: BLE001 - asserted below
+                outcome["error"] = exc
+            finally:
+                request_finished.set()
+
+        request_thread = threading.Thread(target=_request, daemon=True)
+        request_thread.start()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not iface.responseHandlers:
+            time.sleep(0.005)
+        assert iface.responseHandlers, "traceroute request never registered its handler"
+        request_id = next(iter(iface.responseHandlers))
+        _wait_for_scoped_wait_registration(
+            iface, acknowledgment_attr=WAIT_ATTR_TRACEROUTE, request_id=request_id
+        )
+
+        # The routing ack arrives before the trace response.
+        ack = mesh_pb2.MeshPacket()
+        setattr(ack, "from", 21)
+        ack.to = 20
+        ack.decoded.portnum = portnums_pb2.PortNum.ROUTING_APP
+        ack.decoded.request_id = request_id
+        routing = mesh_pb2.Routing()
+        routing.error_reason = mesh_pb2.Routing.Error.NONE
+        ack.decoded.payload = routing.SerializeToString()
+        iface._handle_packet_from_radio(ack, hack=True)
+
+        # The ack is not the route: the wait stays pending and the response
+        # handler was re-armed for the real response.
+        assert not request_finished.is_set()
+        assert request_id in iface.responseHandlers
+
+        reply = mesh_pb2.MeshPacket()
+        setattr(reply, "from", 21)
+        reply.to = 20
+        reply.decoded.portnum = portnums_pb2.PortNum.TRACEROUTE_APP
+        reply.decoded.request_id = request_id
+        response = mesh_pb2.RouteDiscovery()
+        response.route.extend([11])
+        response.snr_towards.extend([8, 12])
+        reply.decoded.payload = response.SerializeToString()
+        iface._handle_packet_from_radio(reply, hack=True)
+        request_finished.wait(timeout=1.0)
+
+    assert not request_thread.is_alive()
+    assert "error" not in outcome
+    result = cast(TraceRouteResult, outcome["result"])
+    assert result.request_id == request_id
+    assert [hop.node_num for hop in result.route_towards] == [20, 11, 21]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_send_telemetry_supported_and_fallback_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
