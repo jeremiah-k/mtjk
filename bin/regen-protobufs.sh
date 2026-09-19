@@ -5,7 +5,8 @@ set -e
 NANOPB_VERSION="${NANOPB_VERSION:-0.4.9.2}"
 NANOPB_DIR="${NANOPB_DIR:-./nanopb-${NANOPB_VERSION}}"
 NANOPB_LINUX_DIR="${NANOPB_LINUX_DIR:-./nanopb-${NANOPB_VERSION}-linux-x86}"
-NANOPB_DOWNLOAD_URL="${NANOPB_DOWNLOAD_URL:-https://jpa.kapsi.fi/nanopb/download/nanopb-${NANOPB_VERSION}-linux-x86.tar.gz}"
+NANOPB_DOWNLOAD_URL="${NANOPB_DOWNLOAD_URL:-https://github.com/nanopb/nanopb/releases/download/nanopb-${NANOPB_VERSION}/nanopb-${NANOPB_VERSION}-linux-x86.tar.gz}"
+NANOPB_DOWNLOAD_FALLBACK_URL="${NANOPB_DOWNLOAD_FALLBACK_URL:-https://jpa.kapsi.fi/nanopb/download/nanopb-${NANOPB_VERSION}-linux-x86.tar.gz}"
 
 #Uncomment to run hack
 #gsed -i 's/import "\//import ".\//g' ./protobufs/meshtastic/*
@@ -47,6 +48,7 @@ Unable to find a protoc compiler.
 
 Set PROTOC=/path/to/protoc, set ALLOW_SYSTEM_PROTOC=1 to use protoc from PATH, or download nanopb:
   curl -fsSL -o nanopb-${NANOPB_VERSION}-linux-x86.tar.gz ${NANOPB_DOWNLOAD_URL}
+  curl -fsSL -o nanopb-${NANOPB_VERSION}-linux-x86.tar.gz ${NANOPB_DOWNLOAD_FALLBACK_URL}
   tar xzf nanopb-${NANOPB_VERSION}-linux-x86.tar.gz
   mv nanopb-${NANOPB_VERSION}-linux-x86 nanopb-${NANOPB_VERSION}
 

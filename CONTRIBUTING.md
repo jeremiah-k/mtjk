@@ -123,12 +123,13 @@ make protobufs-update
 ```
 
 The generator needs a `protoc` compiler. The CI workflow uses the `protoc`
-binary bundled with nanopb's Linux release package from
-<https://jpa.kapsi.fi/nanopb/download/>:
+binary bundled with nanopb's Linux release package. It is fetched from the
+GitHub release first, with the upstream download page
+(<https://jpa.kapsi.fi/nanopb/download/>) as a fallback:
 
 ```bash
 curl -fsSL -o nanopb-0.4.9.2-linux-x86.tar.gz \
-  https://jpa.kapsi.fi/nanopb/download/nanopb-0.4.9.2-linux-x86.tar.gz
+  https://github.com/nanopb/nanopb/releases/download/nanopb-0.4.9.2/nanopb-0.4.9.2-linux-x86.tar.gz
 printf '%s  %s\n' \
   7e05f5908f0dff5d91cb90d11ca487876de8ec274695887959b3903e4b307887 \
   nanopb-0.4.9.2-linux-x86.tar.gz | sha256sum -c -
