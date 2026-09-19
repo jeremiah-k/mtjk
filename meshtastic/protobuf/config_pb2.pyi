@@ -1959,8 +1959,10 @@ class Config(_message.Message):
         """
         spread_factor: _builtins.int
         """
-        A number from 7 to 12.
+        A number from 5 to 12, which the firmware clamps to that range.
         Indicates number of chirps per symbol as 1<<spread_factor.
+        RF95 radios additionally reject 5 and 6; that exclusion is per hardware
+        and so is not expressible as a bound here.
         """
         coding_rate: _builtins.int
         """
