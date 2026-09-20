@@ -2067,11 +2067,26 @@ def test_to_node_num_hypothesis_roundtrip(n: int) -> None:
                 "NETWORK_CONFIG",
             ],
         ),
-        (_EXCLUDED_MODULES, 0x8000, ["UNKNOWN_ADDITIONAL_FLAGS(32768)"]),
+        (_EXCLUDED_MODULES, 0x8000, ["STATUSMESSAGE_CONFIG"]),
         (
             _EXCLUDED_MODULES,
             0x8001,
-            ["MQTT_CONFIG", "UNKNOWN_ADDITIONAL_FLAGS(32768)"],
+            ["MQTT_CONFIG", "STATUSMESSAGE_CONFIG"],
+        ),
+        (
+            _EXCLUDED_MODULES,
+            0x38000,
+            [
+                "STATUSMESSAGE_CONFIG",
+                "TRAFFICMANAGEMENT_CONFIG",
+                "TAK_CONFIG",
+            ],
+        ),
+        (_EXCLUDED_MODULES, 0x100000, ["UNKNOWN_ADDITIONAL_FLAGS(1048576)"]),
+        (
+            _EXCLUDED_MODULES,
+            0x100001,
+            ["MQTT_CONFIG", "UNKNOWN_ADDITIONAL_FLAGS(1048576)"],
         ),
         (_POSITION_FLAGS, 0, []),
         (_POSITION_FLAGS, 0x09, ["ALTITUDE", "DOP"]),
