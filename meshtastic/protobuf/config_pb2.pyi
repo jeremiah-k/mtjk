@@ -1021,7 +1021,8 @@ class Config(_message.Message):
 
         class DeprecatedGpsCoordinateFormat(_DeprecatedGpsCoordinateFormat, metaclass=_DeprecatedGpsCoordinateFormatEnumTypeWrapper):
             """
-            Deprecated in 2.7.4: Unused
+            Unused. Kept so the deprecated gps_format field still has a type; when
+            firmware stopped reading that field is recorded on the field itself.
             """
 
         UNUSED: Config.DisplayConfig.DeprecatedGpsCoordinateFormat.ValueType  # 0
@@ -1253,7 +1254,6 @@ class Config(_message.Message):
         @_deprecated("""This field has been marked as deprecated using proto field options.""")
         def gps_format(self) -> Global___Config.DisplayConfig.DeprecatedGpsCoordinateFormat.ValueType:
             """
-            Deprecated in 2.7.4: Unused
             How the GPS coordinates are formatted on the OLED screen.
             """
 
@@ -1261,7 +1261,6 @@ class Config(_message.Message):
         @_deprecated("""This field has been marked as deprecated using proto field options.""")
         def gps_format(self, value: Global___Config.DisplayConfig.DeprecatedGpsCoordinateFormat.ValueType) -> None:
             """
-            Deprecated in 2.7.4: Unused
             How the GPS coordinates are formatted on the OLED screen.
             """
 
