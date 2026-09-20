@@ -1618,6 +1618,22 @@ class _ExcludedModulesEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Exclu
     """
     Network config (not technically a module, but used to indicate network capabilities)
     """
+    STATUSMESSAGE_CONFIG: _ExcludedModules.ValueType  # 32768
+    """
+    Status Message module
+    """
+    TRAFFICMANAGEMENT_CONFIG: _ExcludedModules.ValueType  # 65536
+    """
+    Traffic Management module
+    """
+    TAK_CONFIG: _ExcludedModules.ValueType  # 131072
+    """
+    TAK module
+    """
+    MESHBEACON_CONFIG: _ExcludedModules.ValueType  # 262144
+    """
+    Mesh Beacon module
+    """
 
 class ExcludedModules(_ExcludedModules, metaclass=_ExcludedModulesEnumTypeWrapper):
     """
@@ -1689,6 +1705,22 @@ Bluetooth config (not technically a module, but used to indicate bluetooth capab
 NETWORK_CONFIG: ExcludedModules.ValueType  # 16384
 """
 Network config (not technically a module, but used to indicate network capabilities)
+"""
+STATUSMESSAGE_CONFIG: ExcludedModules.ValueType  # 32768
+"""
+Status Message module
+"""
+TRAFFICMANAGEMENT_CONFIG: ExcludedModules.ValueType  # 65536
+"""
+Traffic Management module
+"""
+TAK_CONFIG: ExcludedModules.ValueType  # 131072
+"""
+TAK module
+"""
+MESHBEACON_CONFIG: ExcludedModules.ValueType  # 262144
+"""
+Mesh Beacon module
 """
 Global___ExcludedModules: _TypeAlias = ExcludedModules  # noqa: Y015
 
