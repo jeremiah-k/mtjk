@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.0"
+          python -m pip install "poetry==2.5.1"
       - name: Install configured CLI from local
         run: |
           poetry install ${{ env.POETRY_INSTALL_ARGS }}
@@ -88,7 +88,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.0"
+          python -m pip install "poetry==2.5.1"
       - name: Install configured CLI from local
         run: |
           poetry install ${{ env.POETRY_INSTALL_ARGS }}
