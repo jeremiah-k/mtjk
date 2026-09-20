@@ -21,7 +21,7 @@ WORKDIR /build
 # "already installed", causing missing modules in the runtime image.
 RUN python -m venv /opt/poetry && \
     /opt/poetry/bin/pip install --no-cache-dir \
-    poetry==2.4.3 poetry-plugin-export==1.10.1
+    poetry==2.5.0 poetry-plugin-export==1.10.1
 
 # --- Layer 1: Dependency resolution and install (cached unless lock changes) ---
 COPY pyproject.toml poetry.lock README.md ./
