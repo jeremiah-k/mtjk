@@ -3327,6 +3327,73 @@ class MeshPacket(_message.Message):
     Arrived via Unicast UDP
     """
 
+    class _AckProofStatus:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _AckProofStatusEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[MeshPacket._AckProofStatus.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        ACK_PROOF_ABSENT: MeshPacket._AckProofStatus.ValueType  # 0
+        """
+        No proof was carried. The default, and what every ack from firmware predating
+        Routing.ack_proof looks like, so an absent field and an absent proof read the same.
+        """
+        ACK_PROOF_VALID: MeshPacket._AckProofStatus.ValueType  # 1
+        """
+        A proof was carried and verified against the public key of the node the acknowledged packet
+        was addressed to. The only value that means "the recipient received it".
+
+        Verifying against the key of whoever the ack claims to be from is NOT sufficient: the proof
+        only shows its author holds a pairwise secret with us, and every keyed peer holds one, so
+        any of them could otherwise mint a receipt for a packet addressed to someone else.
+        """
+        ACK_PROOF_INVALID: MeshPacket._AckProofStatus.ValueType  # 2
+        """
+        A proof was carried and did not verify. Someone produced an ack for an outstanding packet
+        without holding the pairwise secret, so this is an attempted forgery rather than a quiet
+        absence, and is worth surfacing differently from ACK_PROOF_ABSENT.
+        """
+        ACK_PROOF_NO_KEY: MeshPacket._AckProofStatus.ValueType  # 3
+        """
+        A proof was carried but no authoritative public key was available to check it against, so
+        the ack is neither proven nor disproven.
+        """
+
+    class AckProofStatus(_AckProofStatus, metaclass=_AckProofStatusEnumTypeWrapper):
+        """
+        Outcome of checking Routing.ack_proof on a received ack or nak.
+
+        Reported, never enforced: an ack without a usable proof is acted on exactly as it was before
+        proofs existed. The value exists so a client can tell a proven delivery receipt from an
+        unproven one, and can tell "nobody proved this" from "somebody tried and failed".
+        """
+
+    ACK_PROOF_ABSENT: MeshPacket.AckProofStatus.ValueType  # 0
+    """
+    No proof was carried. The default, and what every ack from firmware predating
+    Routing.ack_proof looks like, so an absent field and an absent proof read the same.
+    """
+    ACK_PROOF_VALID: MeshPacket.AckProofStatus.ValueType  # 1
+    """
+    A proof was carried and verified against the public key of the node the acknowledged packet
+    was addressed to. The only value that means "the recipient received it".
+
+    Verifying against the key of whoever the ack claims to be from is NOT sufficient: the proof
+    only shows its author holds a pairwise secret with us, and every keyed peer holds one, so
+    any of them could otherwise mint a receipt for a packet addressed to someone else.
+    """
+    ACK_PROOF_INVALID: MeshPacket.AckProofStatus.ValueType  # 2
+    """
+    A proof was carried and did not verify. Someone produced an ack for an outstanding packet
+    without holding the pairwise secret, so this is an attempted forgery rather than a quiet
+    absence, and is worth surfacing differently from ACK_PROOF_ABSENT.
+    """
+    ACK_PROOF_NO_KEY: MeshPacket.AckProofStatus.ValueType  # 3
+    """
+    A proof was carried but no authoritative public key was available to check it against, so
+    the ack is neither proven nor disproven.
+    """
+
     FROM_FIELD_NUMBER: _builtins.int
     TO_FIELD_NUMBER: _builtins.int
     CHANNEL_FIELD_NUMBER: _builtins.int
@@ -3349,6 +3416,7 @@ class MeshPacket(_message.Message):
     TX_AFTER_FIELD_NUMBER: _builtins.int
     TRANSPORT_MECHANISM_FIELD_NUMBER: _builtins.int
     XEDDSA_SIGNED_FIELD_NUMBER: _builtins.int
+    ACK_PROOF_STATUS_FIELD_NUMBER: _builtins.int
     to: _builtins.int
     """
     The (immediate) destination for this packet
@@ -3491,6 +3559,18 @@ class MeshPacket(_message.Message):
     """
     Indicates whether the packet has a valid signature
     """
+    ack_proof_status: Global___MeshPacket.AckProofStatus.ValueType
+    """
+    *Never* sent over the radio links.
+    Set by the firmware on a received ack or nak, reporting whether its Routing.ack_proof proved
+    that the node we addressed is the one acknowledging. Clients are not supposed to set this, and
+    the firmware clears whatever arrives here before evaluating a packet - an inbound value is
+    attacker-controlled, since MQTT and the client API both carry whole MeshPacket protobufs.
+
+    Distinct from xeddsa_signed, which is an identity signature any holder of the sender's public
+    key can check. This is a pairwise MAC that only the original sender can check, and it attests
+    to delivery rather than to authorship.
+    """
     @_builtins.property
     def decoded(self) -> Global___Data:
         """
@@ -3521,10 +3601,11 @@ class MeshPacket(_message.Message):
         tx_after: _builtins.int = ...,
         transport_mechanism: Global___MeshPacket.TransportMechanism.ValueType = ...,
         xeddsa_signed: _builtins.bool = ...,
+        ack_proof_status: Global___MeshPacket.AckProofStatus.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "decoded", b"decoded", "encrypted", b"encrypted", "payload_variant", b"payload_variant", "rx_rssi", b"rx_rssi", "rx_time", b"rx_time"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack", "xeddsa_signed", b"xeddsa_signed"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "ack_proof_status", b"ack_proof_status", "channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack", "xeddsa_signed", b"xeddsa_signed"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__rx_rssi: _TypeAlias = _typing.Literal["rx_rssi"]  # noqa: Y015
     _WhichOneofArgType__rx_rssi: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi"]  # noqa: Y015
