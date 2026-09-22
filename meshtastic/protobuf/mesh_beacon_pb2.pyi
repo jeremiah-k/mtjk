@@ -33,6 +33,7 @@ class MeshBeacon(_message.Message):
     OFFER_CHANNEL_FIELD_NUMBER: _builtins.int
     OFFER_REGION_FIELD_NUMBER: _builtins.int
     OFFER_PRESET_FIELD_NUMBER: _builtins.int
+    OFFER_FREQUENCY_SLOT_FIELD_NUMBER: _builtins.int
     message: _builtins.str
     """
     Human-readable beacon message. Max 100 bytes enforced by firmware on send.
@@ -45,6 +46,16 @@ class MeshBeacon(_message.Message):
     """
     Optional modem preset being advertised.
     Combined with offer_region, tells a client "there is a mesh on this preset/region".
+    """
+    offer_frequency_slot: _builtins.int
+    """
+    Frequency slot this mesh uses, 1-based, matching Config.LoRaConfig.channel_num.
+    OMITTED when a receiver can derive the slot itself from offer_region, offer_channel's
+    name and offer_preset - an unset offer_preset means the region's default preset. That
+    covers both a region with a mandated slot and a mesh on the default name hash.
+    PRESENT means this mesh deliberately deviates from what derivation would produce; a
+    client should still validate the result against its own region before offering to join.
+    Do not send 0 - it is the same as omitting the field.
     """
     @_builtins.property
     def offer_channel(self) -> _channel_pb2.ChannelSettings:
@@ -60,13 +71,19 @@ class MeshBeacon(_message.Message):
         offer_channel: _channel_pb2.ChannelSettings | None = ...,
         offer_region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType = ...,
         offer_preset: _config_pb2.Config.LoRaConfig.ModemPreset.ValueType | None = ...,
+        offer_frequency_slot: _builtins.int | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_offer_preset", b"_offer_preset", "offer_channel", b"offer_channel", "offer_preset", b"offer_preset"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_offer_frequency_slot", b"_offer_frequency_slot", "_offer_preset", b"_offer_preset", "offer_channel", b"offer_channel", "offer_frequency_slot", b"offer_frequency_slot", "offer_preset", b"offer_preset"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_offer_preset", b"_offer_preset", "message", b"message", "offer_channel", b"offer_channel", "offer_preset", b"offer_preset", "offer_region", b"offer_region"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_offer_frequency_slot", b"_offer_frequency_slot", "_offer_preset", b"_offer_preset", "message", b"message", "offer_channel", b"offer_channel", "offer_frequency_slot", b"offer_frequency_slot", "offer_preset", b"offer_preset", "offer_region", b"offer_region"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__offer_frequency_slot: _TypeAlias = _typing.Literal["offer_frequency_slot"]  # noqa: Y015
+    _WhichOneofArgType__offer_frequency_slot: _TypeAlias = _typing.Literal["_offer_frequency_slot", b"_offer_frequency_slot"]  # noqa: Y015
     _WhichOneofReturnType__offer_preset: _TypeAlias = _typing.Literal["offer_preset"]  # noqa: Y015
     _WhichOneofArgType__offer_preset: _TypeAlias = _typing.Literal["_offer_preset", b"_offer_preset"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__offer_frequency_slot) -> _WhichOneofReturnType__offer_frequency_slot | None: ...
+    @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__offer_preset) -> _WhichOneofReturnType__offer_preset | None: ...
 
 Global___MeshBeacon: _TypeAlias = MeshBeacon  # noqa: Y015
