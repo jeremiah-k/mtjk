@@ -1462,6 +1462,7 @@ class ModuleConfig(_message.Message):
             PRESET_FIELD_NUMBER: _builtins.int
             REGION_FIELD_NUMBER: _builtins.int
             CHANNEL_INDEX_FIELD_NUMBER: _builtins.int
+            FREQUENCY_SLOT_FIELD_NUMBER: _builtins.int
             preset: _config_pb2.Config.LoRaConfig.ModemPreset.ValueType
             """
             Modem preset to use for this target.
@@ -1481,27 +1482,40 @@ class ModuleConfig(_message.Message):
             on the node (its key is needed to encrypt). If unset, the default channel for the
             preset is used.
             """
+            frequency_slot: _builtins.int
+            """
+            Frequency slot to transmit this target's beacon on, 1-based, matching
+            Config.LoRaConfig.channel_num. Unset means derive it the way any node on this
+            channel would: the region's override slot if it has one, otherwise the hash of the
+            target channel's name. Do not send 0 - it is the same as unset.
+            """
             def __init__(
                 self,
                 *,
                 preset: _config_pb2.Config.LoRaConfig.ModemPreset.ValueType | None = ...,
                 region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType = ...,
                 channel_index: _builtins.int | None = ...,
+                frequency_slot: _builtins.int | None = ...,
             ) -> None: ...
-            _HasFieldArgType: _TypeAlias = _typing.Literal["_channel_index", b"_channel_index", "_preset", b"_preset", "channel_index", b"channel_index", "preset", b"preset"]  # noqa: Y015
+            _HasFieldArgType: _TypeAlias = _typing.Literal["_channel_index", b"_channel_index", "_frequency_slot", b"_frequency_slot", "_preset", b"_preset", "channel_index", b"channel_index", "frequency_slot", b"frequency_slot", "preset", b"preset"]  # noqa: Y015
             def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-            _ClearFieldArgType: _TypeAlias = _typing.Literal["_channel_index", b"_channel_index", "_preset", b"_preset", "channel_index", b"channel_index", "preset", b"preset", "region", b"region"]  # noqa: Y015
+            _ClearFieldArgType: _TypeAlias = _typing.Literal["_channel_index", b"_channel_index", "_frequency_slot", b"_frequency_slot", "_preset", b"_preset", "channel_index", b"channel_index", "frequency_slot", b"frequency_slot", "preset", b"preset", "region", b"region"]  # noqa: Y015
             def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
             _WhichOneofReturnType__channel_index: _TypeAlias = _typing.Literal["channel_index"]  # noqa: Y015
             _WhichOneofArgType__channel_index: _TypeAlias = _typing.Literal["_channel_index", b"_channel_index"]  # noqa: Y015
+            _WhichOneofReturnType__frequency_slot: _TypeAlias = _typing.Literal["frequency_slot"]  # noqa: Y015
+            _WhichOneofArgType__frequency_slot: _TypeAlias = _typing.Literal["_frequency_slot", b"_frequency_slot"]  # noqa: Y015
             _WhichOneofReturnType__preset: _TypeAlias = _typing.Literal["preset"]  # noqa: Y015
             _WhichOneofArgType__preset: _TypeAlias = _typing.Literal["_preset", b"_preset"]  # noqa: Y015
             @_typing.overload
             def WhichOneof(self, oneof_group: _WhichOneofArgType__channel_index) -> _WhichOneofReturnType__channel_index | None: ...
             @_typing.overload
+            def WhichOneof(self, oneof_group: _WhichOneofArgType__frequency_slot) -> _WhichOneofReturnType__frequency_slot | None: ...
+            @_typing.overload
             def WhichOneof(self, oneof_group: _WhichOneofArgType__preset) -> _WhichOneofReturnType__preset | None: ...
 
         FLAGS_FIELD_NUMBER: _builtins.int
+        BROADCAST_OFFER_FREQUENCY_SLOT_FIELD_NUMBER: _builtins.int
         BROADCAST_MESSAGE_FIELD_NUMBER: _builtins.int
         BROADCAST_OFFER_CHANNEL_FIELD_NUMBER: _builtins.int
         BROADCAST_OFFER_REGION_FIELD_NUMBER: _builtins.int
@@ -1512,9 +1526,20 @@ class ModuleConfig(_message.Message):
         """
         Bitwise-OR of Flags values (listen / broadcast / legacy-split toggles).
         """
+        broadcast_offer_frequency_slot: _builtins.int
+        """
+        Frequency slot to advertise, 1-based, matching Config.LoRaConfig.channel_num.
+        Unset means the receiver derives it from the advertised region, channel name and
+        preset, which covers a region that mandates a slot and a mesh on the default hash.
+        Set it only where the mesh deliberately pins a non-default slot. Do not send 0.
+        """
         broadcast_message: _builtins.str
         """
-        Message to include in each beacon broadcast. Max 100 bytes enforced by firmware.
+        Message to include in each beacon broadcast.
+        Every beacon copy carries this on the air, so it is the largest single cost in both
+        this config and the packet it produces. Held to 60 bytes for that reason. The nanopb
+        max_size is 61 because it counts the terminator, which is what leaves a client a
+        round 60.
         """
         broadcast_offer_region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType
         """
@@ -1550,6 +1575,7 @@ class ModuleConfig(_message.Message):
             self,
             *,
             flags: _builtins.int = ...,
+            broadcast_offer_frequency_slot: _builtins.int | None = ...,
             broadcast_message: _builtins.str = ...,
             broadcast_offer_channel: _channel_pb2.ChannelSettings | None = ...,
             broadcast_offer_region: _config_pb2.Config.LoRaConfig.RegionCode.ValueType = ...,
@@ -1557,12 +1583,17 @@ class ModuleConfig(_message.Message):
             broadcast_interval_secs: _builtins.int = ...,
             broadcast_targets: _abc.Iterable[Global___ModuleConfig.MeshBeaconConfig.BroadcastTarget] | None = ...,
         ) -> None: ...
-        _HasFieldArgType: _TypeAlias = _typing.Literal["_broadcast_offer_preset", b"_broadcast_offer_preset", "broadcast_offer_channel", b"broadcast_offer_channel", "broadcast_offer_preset", b"broadcast_offer_preset"]  # noqa: Y015
+        _HasFieldArgType: _TypeAlias = _typing.Literal["_broadcast_offer_frequency_slot", b"_broadcast_offer_frequency_slot", "_broadcast_offer_preset", b"_broadcast_offer_preset", "broadcast_offer_channel", b"broadcast_offer_channel", "broadcast_offer_frequency_slot", b"broadcast_offer_frequency_slot", "broadcast_offer_preset", b"broadcast_offer_preset"]  # noqa: Y015
         def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-        _ClearFieldArgType: _TypeAlias = _typing.Literal["_broadcast_offer_preset", b"_broadcast_offer_preset", "broadcast_interval_secs", b"broadcast_interval_secs", "broadcast_message", b"broadcast_message", "broadcast_offer_channel", b"broadcast_offer_channel", "broadcast_offer_preset", b"broadcast_offer_preset", "broadcast_offer_region", b"broadcast_offer_region", "broadcast_targets", b"broadcast_targets", "flags", b"flags"]  # noqa: Y015
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["_broadcast_offer_frequency_slot", b"_broadcast_offer_frequency_slot", "_broadcast_offer_preset", b"_broadcast_offer_preset", "broadcast_interval_secs", b"broadcast_interval_secs", "broadcast_message", b"broadcast_message", "broadcast_offer_channel", b"broadcast_offer_channel", "broadcast_offer_frequency_slot", b"broadcast_offer_frequency_slot", "broadcast_offer_preset", b"broadcast_offer_preset", "broadcast_offer_region", b"broadcast_offer_region", "broadcast_targets", b"broadcast_targets", "flags", b"flags"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        _WhichOneofReturnType__broadcast_offer_frequency_slot: _TypeAlias = _typing.Literal["broadcast_offer_frequency_slot"]  # noqa: Y015
+        _WhichOneofArgType__broadcast_offer_frequency_slot: _TypeAlias = _typing.Literal["_broadcast_offer_frequency_slot", b"_broadcast_offer_frequency_slot"]  # noqa: Y015
         _WhichOneofReturnType__broadcast_offer_preset: _TypeAlias = _typing.Literal["broadcast_offer_preset"]  # noqa: Y015
         _WhichOneofArgType__broadcast_offer_preset: _TypeAlias = _typing.Literal["_broadcast_offer_preset", b"_broadcast_offer_preset"]  # noqa: Y015
+        @_typing.overload
+        def WhichOneof(self, oneof_group: _WhichOneofArgType__broadcast_offer_frequency_slot) -> _WhichOneofReturnType__broadcast_offer_frequency_slot | None: ...
+        @_typing.overload
         def WhichOneof(self, oneof_group: _WhichOneofArgType__broadcast_offer_preset) -> _WhichOneofReturnType__broadcast_offer_preset | None: ...
 
     @_typing.final
