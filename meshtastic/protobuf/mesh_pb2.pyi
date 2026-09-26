@@ -3335,8 +3335,14 @@ class MeshPacket(_message.Message):
         DESCRIPTOR: _descriptor.EnumDescriptor
         ACK_PROOF_ABSENT: MeshPacket._AckProofStatus.ValueType  # 0
         """
-        No proof was carried. The default, and what every ack from firmware predating
-        Routing.ack_proof looks like, so an absent field and an absent proof read the same.
+        No verdict. The default, and what every ack from firmware predating Routing.ack_proof looks
+        like, so an absent field and an absent proof read the same.
+
+        Also reported when a proof was carried but not checked: the ack came from a node other than
+        the one the packet was addressed to (a nak from an intermediate, for example), the packet was
+        no longer awaiting an ack, or the proof was malformed. A build without PKI never checks one.
+        A proof is only checked while the packet it acknowledges is still pending, so on a multi-hop
+        path an overheard relay can settle the packet first and leave a genuine receipt reading ABSENT.
         """
         ACK_PROOF_VALID: MeshPacket._AckProofStatus.ValueType  # 1
         """
@@ -3370,8 +3376,14 @@ class MeshPacket(_message.Message):
 
     ACK_PROOF_ABSENT: MeshPacket.AckProofStatus.ValueType  # 0
     """
-    No proof was carried. The default, and what every ack from firmware predating
-    Routing.ack_proof looks like, so an absent field and an absent proof read the same.
+    No verdict. The default, and what every ack from firmware predating Routing.ack_proof looks
+    like, so an absent field and an absent proof read the same.
+
+    Also reported when a proof was carried but not checked: the ack came from a node other than
+    the one the packet was addressed to (a nak from an intermediate, for example), the packet was
+    no longer awaiting an ack, or the proof was malformed. A build without PKI never checks one.
+    A proof is only checked while the packet it acknowledges is still pending, so on a multi-hop
+    path an overheard relay can settle the packet first and leave a genuine receipt reading ABSENT.
     """
     ACK_PROOF_VALID: MeshPacket.AckProofStatus.ValueType  # 1
     """
