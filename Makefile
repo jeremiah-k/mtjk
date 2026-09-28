@@ -1,4 +1,4 @@
-.PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install examples protobufs protobufs-update api-baseline api-baseline-master FORCE
+.PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
 
 POETRY_RUN := poetry run
 API_BASELINE_FILE := meshtastic/tests/api_baselines/api_baseline.json
@@ -25,6 +25,10 @@ ci-base:
 ci:
 	$(MAKE) ci-base
 	$(POETRY_RUN) mypy meshtastic/
+
+# generate the markdown configuration field reference
+field-reference:
+	$(POETRY_RUN) python bin/generate_field_reference.py
 
 # generate API baseline from current working tree
 api-baseline:
