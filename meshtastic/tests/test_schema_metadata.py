@@ -6,6 +6,7 @@ import pytest
 
 from meshtastic.protobuf import config_pb2, localonly_pb2
 from meshtastic.schema_metadata import (
+    _format_numeric_bound,
     _get_enum_value_metadata,
     _get_field_metadata,
     getFieldMetadata,
@@ -148,12 +149,12 @@ def test_get_field_metadata_returns_none_for_unannotated_field() -> None:
 
 @pytest.mark.unit
 def test_field_metadata_has_bounds_property() -> None:
-    """has_bounds reflects either declared numeric bound."""
+    """The hasBounds property reflects either declared numeric bound."""
     bounded = getFieldMetadata("lora.hop_limit")
     unbounded = getFieldMetadata("position.rx_gpio")
 
-    assert bounded is not None and bounded.has_bounds is True
-    assert unbounded is not None and unbounded.has_bounds is False
+    assert bounded is not None and bounded.hasBounds is True
+    assert unbounded is not None and unbounded.hasBounds is False
 
 
 @pytest.mark.unit
@@ -164,3 +165,38 @@ def test_field_metadata_instances_are_immutable() -> None:
     assert metadata is not None
     with pytest.raises(AttributeError):
         metadata.min_value = 1.0  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_get_field_metadata_resolves_nested_field_paths() -> None:
+    """Public lookup walks nested messages inside a section."""
+    metadata = getFieldMetadata("mqtt.map_report_settings.publish_interval_secs")
+
+    assert metadata is not None
+    assert metadata.unit == "s"
+    assert metadata.label == "Map Publish Interval"
+    assert getFieldMetadata("device_ui.node_filter.node_name") is None
+
+
+@pytest.mark.unit
+def test_get_field_metadata_rejects_scalar_intermediate_segments() -> None:
+    """Paths continuing past a leaf field or unknown middle segment return None."""
+    assert getFieldMetadata("lora.hop_limit.deeper") is None
+    assert getFieldMetadata("lora.nosuch.deeper") is None
+
+
+@pytest.mark.unit
+def test_enum_value_without_metadata_returns_none() -> None:
+    """Enum values carrying no annotation options produce no metadata."""
+    value = config_pb2.Config.DeviceConfig.BuzzerMode.DESCRIPTOR.values_by_name[
+        "ALL_ENABLED"
+    ]
+
+    assert _get_enum_value_metadata(value) is None
+
+
+@pytest.mark.unit
+def test_format_numeric_bound_drops_unneeded_decimals() -> None:
+    """Bound formatting keeps decimals only when present."""
+    assert _format_numeric_bound(7.0) == "7"
+    assert _format_numeric_bound(0.5) == "0.5"

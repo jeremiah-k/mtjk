@@ -66,7 +66,7 @@ class FieldMetadata:
     keywords: tuple[str, ...] = ()
 
     @property
-    def has_bounds(self) -> bool:
+    def hasBounds(self) -> bool:
         """Return whether either numeric presentation bound is present."""
         return self.min_value is not None or self.max_value is not None
 
@@ -129,16 +129,15 @@ def _resolve_field_path(
         non-final segment is not a nested message.
     """
     current: FieldDescriptor | None = root.fields_by_name.get(section)
-    for depth, name in enumerate(field_path):
-        if current is None or current.message_type is None:
-            return None
-        if depth == len(field_path) - 1:
-            return current.message_type.fields_by_name.get(name)
+    if current is None or current.message_type is None:
+        return None
+    for name in field_path[:-1]:
+        assert current is not None
         nested = current.message_type.fields_by_name.get(name)
-        if nested is None:
+        if nested is None or nested.message_type is None:
             return None
         current = nested
-    return None
+    return current.message_type.fields_by_name.get(field_path[-1])
 
 
 def _normalize_metadata(

@@ -308,7 +308,7 @@ def _validate_metadata_bounds(
 ) -> bool:
     """Reject numeric CLI values outside schema-declared presentation bounds."""
     metadata = _get_field_metadata(pref)
-    if metadata is None or not metadata.has_bounds:
+    if metadata is None or not metadata.hasBounds:
         return True
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         # Preserve the existing protobuf type-error path for non-numeric input.
