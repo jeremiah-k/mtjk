@@ -567,3 +567,31 @@ def test_set_pref_rejects_unencodable_utf8_string(
     out, err = capsys.readouterr()
     assert "not encodable as UTF-8" in out
     assert err == ""
+def test_set_pref_warns_once_for_deprecated_field(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Writing a deprecated field warns once per process but still assigns."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "device.serial_enabled", "true") is True
+    assert config.device.serial_enabled is True
+    out, _ = capsys.readouterr()
+    assert "Warning: device.serial_enabled is deprecated" in out
+
+    capsys.readouterr()
+    assert setPref(config, "device.serial_enabled", "false") is True
+    out, _ = capsys.readouterr()
+    assert "deprecated" not in out
+
+
+@pytest.mark.unit
+def test_set_pref_does_not_warn_for_undeprecated_field(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fields without a deprecation marker assign without a warning."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.hop_limit", "3") is True
+
+    out, _ = capsys.readouterr()
+    assert "deprecated" not in out

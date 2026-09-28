@@ -12,6 +12,7 @@ import contextvars
 import json
 import logging
 import math
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -342,6 +343,48 @@ def _validate_metadata_bounds(
     return _reject_pref_validation_message(
         f"Invalid value {display_value} for {field_path}; expected {expected}.",
         cli_print=cli_print,
+    )
+
+
+_DEPRECATED_FIELD_WARNINGS: set[str] = set()
+_deprecated_field_warning_lock = threading.Lock()
+
+
+def _warn_deprecated_field(
+    pref: FieldDescriptor,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> None:
+    """Warn once per process when writing a schema-deprecated field.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the preference field being assigned.
+    field_path : str
+        Canonical dotted path used for the diagnostic.
+    cli_print : Callable[..., None]
+        Quiet-aware CLI reporter for the warning message.
+
+    Notes
+    -----
+    The warning is advisory: deprecated fields still assign so existing
+    automation keeps working. Batch and configure preflights rerun the
+    assignment path, so the warning is suppressed in preflight mode and
+    deduplicated per field path per process.
+    """
+    if CONFIGURE_PREFLIGHT_MODE.get():
+        return
+    metadata = _get_field_metadata(pref)
+    if metadata is None or not metadata.deprecated:
+        return
+    with _deprecated_field_warning_lock:
+        if field_path in _DEPRECATED_FIELD_WARNINGS:
+            return
+        _DEPRECATED_FIELD_WARNINGS.add(field_path)
+    cli_print(
+        f"Warning: {field_path} is deprecated in the firmware schema and may "
+        "be removed in a future firmware release."
     )
 
 
@@ -903,6 +946,8 @@ def set_pref(
         cli_print=cli_print,
     ):
         return False
+
+    _warn_deprecated_field(pref, normalized, cli_print)
 
     if (
         is_repeated_field(pref)
