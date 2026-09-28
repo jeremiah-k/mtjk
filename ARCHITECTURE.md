@@ -172,7 +172,10 @@ boundary and is separate from library behavior.
 Generated protobuf code is treated as generated source and is updated through
 the repository's protobuf regeneration workflow. Firmware field widths and
 nanopb limits that are narrower than the Python protobuf representation are
-validated at the Python API/CLI boundary when known.
+validated at the Python API/CLI boundary when known. Schema-declared
+presentation metadata (bounds, units, labels, deprecation) is exposed publicly
+through `meshtastic.schema_metadata`, and the CLI consumes that module for
+`--set` validation and `--describe-field` rendering.
 
 Protocol additions should normally include:
 

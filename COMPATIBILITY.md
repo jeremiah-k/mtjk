@@ -270,12 +270,14 @@ Approved BLE deprecation:
 The following additive APIs are intentionally public and follow the repository's
 normal backwards-compatibility policy.
 
-| Symbol                               | Status    | Notes                                                                     |
-| ------------------------------------ | --------- | ------------------------------------------------------------------------- |
-| `meshtastic.slog.SlogHealthSnapshot` | `PRIMARY` | Immutable structured/power logging health snapshot.                       |
-| `PowerLogger.getHealth()`            | `PRIMARY` | Current power-logging degradation plus cumulative failure history.        |
-| `StructuredLogger.getHealth()`       | `PRIMARY` | Current structured/raw/correlated-power degradation plus failure history. |
-| `LogSet.getHealth()`                 | `PRIMARY` | Aggregate health that remains available after owned loggers close.        |
+| Symbol                                              | Status    | Notes                                                                             |
+| --------------------------------------------------- | --------- | --------------------------------------------------------------------------------- |
+| `meshtastic.slog.SlogHealthSnapshot`                | `PRIMARY` | Immutable structured/power logging health snapshot.                               |
+| `PowerLogger.getHealth()`                           | `PRIMARY` | Current power-logging degradation plus cumulative failure history.                |
+| `StructuredLogger.getHealth()`                      | `PRIMARY` | Current structured/raw/correlated-power degradation plus failure history.         |
+| `LogSet.getHealth()`                                | `PRIMARY` | Aggregate health that remains available after owned loggers close.                |
+| `meshtastic.schema_metadata.FieldMetadata`          | `PRIMARY` | Immutable declared presentation metadata for one schema field.                    |
+| `meshtastic.schema_metadata.getFieldMetadata(path)` | `PRIMARY` | Config-path lookup of declared field metadata (bounds, unit, label, deprecation). |
 
 ## Deprecated Compatibility Aliases
 

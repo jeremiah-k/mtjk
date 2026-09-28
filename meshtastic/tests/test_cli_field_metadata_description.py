@@ -10,7 +10,7 @@ import pytest
 import meshtastic.cli.config_io as config_io
 import meshtastic.cli.preference_runtime as preference_runtime
 from meshtastic.__main__ import main
-from meshtastic.cli.schema_metadata import _SchemaMetadata
+from meshtastic.schema_metadata import FieldMetadata as _SchemaMetadata
 
 
 @pytest.mark.unit
