@@ -503,6 +503,30 @@ def test_set_pref_accepts_repeated_entry_count_boundary(
 
 
 @pytest.mark.unit
+def test_set_pref_enforces_string_limit_after_historical_coercion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Numeric-looking strings are size-checked after string-field coercion."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.ntp_server", "1" * 33) is False
+    assert config.network.ntp_server == ""
+
+    out, err = capsys.readouterr()
+    assert "encoded length 33 bytes exceeds the firmware limit of 32 bytes" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_string_limit_after_historical_coercion_boundary() -> None:
+    """A numeric-looking string at the usable nanopb boundary still assigns."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.ntp_server", "1" * 32) is True
+    assert config.network.ntp_server == "1" * 32
+
+
+@pytest.mark.unit
 def test_set_pref_enforces_repeated_element_size(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

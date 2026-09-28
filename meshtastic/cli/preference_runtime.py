@@ -17,12 +17,14 @@ from typing import Any
 
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.json_format import ParseDict, ParseError
+from google.protobuf.message import Message
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
 from meshtastic.schema_metadata import (
+    FieldLimits,
     _format_numeric_bound,
     _get_field_limits,
     _get_field_metadata,
@@ -375,12 +377,17 @@ def _validate_field_size_limit(
     limits = _get_field_limits(pref)
     if limits is None or limits.max_size is None:
         return True
-    if pref.type == FieldDescriptor.TYPE_STRING and isinstance(value, str):
+    if pref.type == FieldDescriptor.TYPE_STRING:
+        # ``assign_scalar_pref_value`` preserves historical coercion by falling
+        # back to ``str(value)`` when protobuf rejects a non-string input. Apply
+        # the firmware limit to that final stored representation, not merely the
+        # pre-coercion Python type.
+        stored_value = value if isinstance(value, str) else str(value)
         # nanopb reserves one byte of max_size for the NUL terminator.
         usable = limits.max_size - 1
-        encoded = len(value.encode("utf-8", errors="replace"))
+        encoded = len(stored_value.encode("utf-8", errors="replace"))
         if encoded > usable:
-            display_value = redact_pref_value(field_path, repr(value))
+            display_value = redact_pref_value(field_path, repr(stored_value))
             return _reject_pref_validation_message(
                 f"Invalid value {display_value} for {field_path}; encoded length "
                 f"{encoded} bytes exceeds the firmware limit of {usable} bytes.",
@@ -573,6 +580,54 @@ def _parse_repeated_message_value(
     return True, parsed
 
 
+def _validate_message_size_count_limits(
+    message: Message,
+    *,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Validate nanopb size/count limits recursively inside one parsed message.
+
+    Repeated-message ``--set``/``--configure`` values are parsed through
+    ``ParseDict`` rather than the ordinary scalar preference path. Walk the
+    resulting protobuf so nested strings/bytes and nested repeated fields obey
+    the same firmware constraints before the candidate message is committed.
+    """
+    for child_field, child_value in message.ListFields():
+        child_path = f"{field_path}.{child_field.name}"
+        limits = _get_field_limits(child_field)
+        if child_field.is_repeated:
+            if limits is not None:
+                violation = _describe_repeated_limit_violation(
+                    child_field, child_value, limits
+                )
+                if violation is not None:
+                    return _reject_pref_validation_message(
+                        f"Invalid value for {child_path}; {violation}.",
+                        cli_print=cli_print,
+                    )
+            if child_field.message_type is not None:
+                for index, nested in enumerate(child_value):
+                    if not _validate_message_size_count_limits(
+                        nested,
+                        field_path=f"{child_path}[{index}]",
+                        cli_print=cli_print,
+                    ):
+                        return False
+            continue
+        if child_field.message_type is not None:
+            if not _validate_message_size_count_limits(
+                child_value, field_path=child_path, cli_print=cli_print
+            ):
+                return False
+            continue
+        if not _validate_field_size_limit(
+            child_field, child_value, field_path=child_path, cli_print=cli_print
+        ):
+            return False
+    return True
+
+
 def _assign_repeated_message_pref_value(
     target: Any,
     pref: FieldDescriptor,
@@ -618,6 +673,18 @@ def _assign_repeated_message_pref_value(
     if not ok:
         return False, True
 
+    limits = _get_field_limits(pref)
+    if limits is not None:
+        violation = _describe_repeated_limit_violation(pref, elements, limits)
+        if violation is not None:
+            return (
+                _reject_pref_validation_message(
+                    f"Invalid value for {field_path}; {violation}.",
+                    cli_print=cli_print,
+                ),
+                True,
+            )
+
     candidate = type(target)()
     candidate.CopyFrom(target)
     field_container = getattr(candidate, pref.name)
@@ -630,6 +697,12 @@ def _assign_repeated_message_pref_value(
         except ParseError as exc:
             message = f"Invalid value for {field_path}; element {index}: {exc}."
             _reject_pref_validation_message(message, cli_print=cli_print)
+            return False, True
+        if not _validate_message_size_count_limits(
+            submsg,
+            field_path=f"{field_path}[{index}]",
+            cli_print=cli_print,
+        ):
             return False, True
         field_container.append(submsg)
 
@@ -648,7 +721,7 @@ def _assign_repeated_message_pref_value(
 def _describe_repeated_limit_violation(
     pref: FieldDescriptor,
     values: Any,
-    limits: Any,
+    limits: FieldLimits,
 ) -> str | None:
     """Describe the first firmware-limit violation in a repeated assignment.
 
@@ -658,7 +731,7 @@ def _describe_repeated_limit_violation(
         Descriptor of the repeated field being assigned.
     values : Any
         Final element sequence awaiting assignment.
-    limits : Any
+    limits : FieldLimits
         Declared field limits carrying ``max_count`` and ``max_size``.
 
     Returns
