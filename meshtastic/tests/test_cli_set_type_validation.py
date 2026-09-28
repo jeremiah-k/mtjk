@@ -538,8 +538,7 @@ def test_set_pref_enforces_repeated_element_size(
 
     out, err = capsys.readouterr()
     assert (
-        "element encoded length 33 bytes exceeds the firmware limit of 32 bytes"
-        in out
+        "element encoded length 33 bytes exceeds the firmware limit of 32 bytes" in out
     )
     assert err == ""
 
@@ -553,3 +552,18 @@ def test_set_pref_accepts_repeated_element_size_boundary(
 
     assert setPref(config, "security.admin_key", [b"x" * 32]) is True
     assert list(config.security.admin_key) == [b"x" * 32]
+
+
+@pytest.mark.unit
+def test_set_pref_rejects_unencodable_utf8_string(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Strings with lone surrogates are rejected instead of mis-measured."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.wifi_ssid", "ab\ud800cd") is False
+    assert config.network.wifi_ssid == ""
+
+    out, err = capsys.readouterr()
+    assert "not encodable as UTF-8" in out
+    assert err == ""

@@ -496,3 +496,19 @@ def test_repeated_message_element_parse_error_honors_fatal_policy() -> None:
         pytest.raises(preference_runtime.PreferenceValueError, match="element 0"),
     ):
         setPref(config, "mesh_beacon.broadcast_targets", payload)
+
+
+@pytest.mark.unit
+def test_repeated_element_unencodable_utf8_reports_violation() -> None:
+    """Repeated string elements with lone surrogates report a UTF-8 violation."""
+    from meshtastic.cli.preference_runtime import _describe_repeated_limit_violation
+    from meshtastic.protobuf import config_pb2
+    from meshtastic.schema_metadata import _get_field_limits
+
+    field = config_pb2.Config.NetworkConfig.DESCRIPTOR.fields_by_name["wifi_ssid"]
+    limits = _get_field_limits(field)
+    assert limits is not None
+
+    violation = _describe_repeated_limit_violation(field, ["ab\ud800cd"], limits)
+
+    assert violation == "element is not encodable as UTF-8"

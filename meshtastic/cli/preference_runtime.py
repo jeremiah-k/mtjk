@@ -383,9 +383,19 @@ def _validate_field_size_limit(
         # the firmware limit to that final stored representation, not merely the
         # pre-coercion Python type.
         stored_value = value if isinstance(value, str) else str(value)
-        # nanopb reserves one byte of max_size for the NUL terminator.
+        # nanopb reserves one byte of max_size for the NUL terminator. Measure
+        # with strict UTF-8: replacement characters would undercount, letting a
+        # value pass here and fail later at protobuf serialization time.
         usable = limits.max_size - 1
-        encoded = len(stored_value.encode("utf-8", errors="replace"))
+        try:
+            encoded = len(stored_value.encode("utf-8"))
+        except UnicodeEncodeError:
+            display_value = redact_pref_value(field_path, repr(stored_value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; not encodable"
+                " as UTF-8.",
+                cli_print=cli_print,
+            )
         if encoded > usable:
             display_value = redact_pref_value(field_path, repr(stored_value))
             return _reject_pref_validation_message(
@@ -751,7 +761,10 @@ def _describe_repeated_limit_violation(
     usable = max_size - 1 if pref.type == FieldDescriptor.TYPE_STRING else max_size
     for element in values:
         if pref.type == FieldDescriptor.TYPE_STRING and isinstance(element, str):
-            encoded = len(element.encode("utf-8", errors="replace"))
+            try:
+                encoded = len(element.encode("utf-8"))
+            except UnicodeEncodeError:
+                return "element is not encodable as UTF-8"
         elif pref.type == FieldDescriptor.TYPE_BYTES and isinstance(
             element, (bytes, bytearray)
         ):
