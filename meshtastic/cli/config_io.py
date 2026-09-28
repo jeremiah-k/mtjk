@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NoReturn, Protocol
 
 import yaml
-from google.protobuf.descriptor import FieldDescriptor
+from google.protobuf.descriptor import Descriptor, FieldDescriptor
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.message import DecodeError, Message
 
@@ -19,6 +20,7 @@ from meshtastic.protobuf import clientonly_pb2, localonly_pb2
 from meshtastic.schema_metadata import (
     _format_numeric_bound,
     _get_enum_value_metadata,
+    _get_field_limits,
     _get_field_metadata,
 )
 
@@ -119,8 +121,11 @@ def print_available_config_fields(
     camel_case: bool,
     aliases: Mapping[str, str],
     display_pref_name: Callable[[str], str],
+    type_label: Callable[[FieldDescriptor], str],
+    bitfield_enums: Mapping[str, Any],
     local_config_factory: Callable[[], Any] = localonly_pb2.LocalConfig,
     module_config_factory: Callable[[], Any] = localonly_pb2.LocalModuleConfig,
+    as_json: bool = False,
 ) -> None:
     """Print current local/module fields and compatibility aliases.
 
@@ -140,6 +145,31 @@ def print_available_config_fields(
         Factory for the module-configuration wrapper, with the same compatibility
         injection semantics as ``local_config_factory``.
     """
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "config_fields": list(
+                        _iter_config_field_documents(
+                            local_config_factory().DESCRIPTOR,
+                            type_label=type_label,
+                            bitfield_enums=bitfield_enums,
+                        )
+                    ),
+                    "module_config_fields": list(
+                        _iter_config_field_documents(
+                            module_config_factory().DESCRIPTOR,
+                            type_label=type_label,
+                            bitfield_enums=bitfield_enums,
+                        )
+                    ),
+                    "aliases": dict(sorted(aliases.items())),
+                },
+                indent=2,
+            )
+        )
+        return
+
     print("Local config fields:")
     print_config(local_config_factory(), camel_case=camel_case)
     print("")
@@ -206,6 +236,128 @@ def _describe_enum_values(enum_descriptor: Any) -> None:
                 print(f"        Flags: {', '.join(flags)}")
 
 
+def _field_json_document(
+    field: FieldDescriptor,
+    canonical: str,
+    *,
+    type_label: Callable[[FieldDescriptor], str],
+    bitfield_enum: Any = None,
+) -> dict[str, Any]:
+    """Build the machine-readable document for one configuration field.
+
+    Parameters
+    ----------
+    field : FieldDescriptor
+        Descriptor of the configuration field.
+    canonical : str
+        Canonical snake_case dotted path used as the document key.
+    type_label : Callable[[FieldDescriptor], str]
+        Renderer for the human-oriented type name.
+    bitfield_enum : Any, optional
+        Bitfield enum wrapper when the field renders as a bitfield.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-serializable field document carrying declared metadata,
+        firmware limits, and enum value details.
+    """
+    document: dict[str, Any] = {"field": canonical, "type": type_label(field)}
+    metadata = _get_field_metadata(field)
+    if metadata is not None:
+        for key in ("label", "description", "unit"):
+            value = getattr(metadata, key)
+            if value is not None:
+                document[key] = value
+        for key in ("min_value", "max_value", "diy_only", "admin_only", "deprecated"):
+            value = getattr(metadata, key)
+            if value is not None:
+                document[key] = value
+        if metadata.keywords:
+            document["keywords"] = list(metadata.keywords)
+    limits = _get_field_limits(field)
+    if limits is not None:
+        document["limits"] = {
+            key: getattr(limits, key)
+            for key in ("max_size", "max_count", "int_size")
+            if getattr(limits, key) is not None
+        }
+    enum_descriptor = field.enum_type
+    if enum_descriptor is None and bitfield_enum is not None:
+        enum_descriptor = getattr(bitfield_enum, "DESCRIPTOR", None)
+    if enum_descriptor is not None:
+        values = []
+        for value in enum_descriptor.values:
+            entry: dict[str, Any] = {"name": value.name, "number": value.number}
+            value_metadata = _get_enum_value_metadata(value)
+            if value_metadata is not None:
+                for key in ("label", "description"):
+                    text = getattr(value_metadata, key)
+                    if text is not None:
+                        entry[key] = text
+                if value_metadata.deprecated:
+                    entry["deprecated"] = True
+                if value_metadata.keywords:
+                    entry["keywords"] = list(value_metadata.keywords)
+            values.append(entry)
+        document["enum_values"] = values
+    return document
+
+
+def _iter_config_field_documents(
+    config_descriptor: Descriptor,
+    *,
+    type_label: Callable[[FieldDescriptor], str],
+    bitfield_enums: Mapping[str, Any] | None = None,
+    prefix: str = "",
+) -> Iterator[dict[str, Any]]:
+    """Yield one JSON document per field under a configuration root.
+
+    Parameters
+    ----------
+    config_descriptor : Descriptor
+        Descriptor of the configuration root whose fields are walked
+        recursively.
+    type_label : Callable[[FieldDescriptor], str]
+        Renderer for the human-oriented type name.
+    bitfield_enums : Mapping[str, Any], optional
+        Bitfield enum wrappers keyed by canonical field path, so bitfield
+        fields carry the same choices as the describe output.
+    prefix : str, optional
+        Dotted path prefix accumulated from nested message segments.
+
+    Yields
+    ------
+    dict[str, Any]
+        Field documents in schema declaration order. Repeated message
+        fields yield their own document (with count limits) followed by
+        their element fields, which remain addressable by dotted path.
+    """
+    for field in config_descriptor.fields:
+        canonical = f"{prefix}{field.name}"
+        if field.message_type is not None:
+            if field.is_repeated:
+                yield _field_json_document(
+                    field,
+                    canonical,
+                    type_label=type_label,
+                    bitfield_enum=(bitfield_enums or {}).get(canonical),
+                )
+            yield from _iter_config_field_documents(
+                field.message_type,
+                type_label=type_label,
+                bitfield_enums=bitfield_enums,
+                prefix=f"{canonical}.",
+            )
+            continue
+        yield _field_json_document(
+            field,
+            canonical,
+            type_label=type_label,
+            bitfield_enum=(bitfield_enums or {}).get(canonical),
+        )
+
+
 def _describe_config_field(
     field_name: str,
     *,
@@ -215,6 +367,7 @@ def _describe_config_field(
     bitfield_enums: Mapping[str, Any],
     local_config_factory: Callable[[], Any] = localonly_pb2.LocalConfig,
     module_config_factory: Callable[[], Any] = localonly_pb2.LocalModuleConfig,
+    as_json: bool = False,
 ) -> bool:
     """Print schema type and optional Meshtastic metadata for one config field."""
     canonical = normalize_pref_name(field_name)
@@ -225,6 +378,20 @@ def _describe_config_field(
         return False
 
     bitfield_enum = bitfield_enums.get(canonical)
+    if as_json:
+        print(
+            json.dumps(
+                _field_json_document(
+                    field,
+                    canonical,
+                    type_label=type_label,
+                    bitfield_enum=bitfield_enum,
+                ),
+                indent=2,
+            )
+        )
+        return True
+
     field_type = type_label(field)
     if bitfield_enum is not None:
         field_type = f"{field_type} (bitfield)"

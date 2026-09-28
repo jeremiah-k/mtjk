@@ -393,6 +393,16 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
 
     group.add_argument(
+        "--json",
+        help=(
+            "Emit machine-readable JSON for --list-fields and --describe-field"
+            " instead of the text rendering. Field names are canonical"
+            " snake_case."
+        ),
+        action="store_true",
+    )
+
+    group.add_argument(
         "--set",
         help=(
             "Set a preferences field. Can use either snake_case or camelCase format."

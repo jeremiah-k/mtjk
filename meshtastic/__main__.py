@@ -1378,18 +1378,21 @@ def printConfig(config: Any) -> None:
     cli_config_io.print_config(config, camel_case=_current_camel_case())
 
 
-def printAvailableConfigFields() -> None:
+def printAvailableConfigFields(as_json: bool = False) -> None:
     """COMPAT_STABLE_SHIM: print config fields and aliases through the runtime."""
     cli_config_io.print_available_config_fields(
         camel_case=_current_camel_case(),
         aliases=_PREFERENCE_FIELD_ALIASES,
         display_pref_name=_display_pref_name,
+        type_label=cli_preference_runtime.protobuf_field_type_label,
+        bitfield_enums=cli_preference_runtime.BITFIELD_ENUMS,
         local_config_factory=localonly_pb2.LocalConfig,
         module_config_factory=localonly_pb2.LocalModuleConfig,
+        as_json=as_json,
     )
 
 
-def _describe_config_field(field_name: str) -> bool:
+def _describe_config_field(field_name: str, as_json: bool = False) -> bool:
     """Describe one protobuf-backed CLI field without connecting to a device."""
     return cli_config_io._describe_config_field(
         field_name,
@@ -1399,6 +1402,7 @@ def _describe_config_field(field_name: str) -> bool:
         bitfield_enums=cli_preference_runtime.BITFIELD_ENUMS,
         local_config_factory=localonly_pb2.LocalConfig,
         module_config_factory=localonly_pb2.LocalModuleConfig,
+        as_json=as_json,
     )
 
 

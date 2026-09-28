@@ -34,8 +34,8 @@ class BootstrapHooks:  # pylint: disable=too-many-instance-attributes
 
     cli_exit: CliExit
     support_info: Callable[[], None]
-    print_available_config_fields: Callable[[], None]
-    describe_config_field: Callable[[str], bool]
+    print_available_config_fields: Callable[..., None]
+    describe_config_field: Callable[..., bool]
     create_power_meter: Callable[[], None]
     get_power_meter: Callable[[], Any]
     release_power_meter: Callable[[Any], None]
@@ -138,12 +138,13 @@ def _run_preconnect_action(
     if args.support:
         hooks.support_info()
         _terminate_cli(hooks, "", 0)
+    as_json = getattr(args, "json", False)
     if args.list_fields:
-        hooks.print_available_config_fields()
+        hooks.print_available_config_fields(as_json=as_json)
         return True
     describe_field = getattr(args, "describe_field", None)
     if describe_field is not None:
-        if not hooks.describe_config_field(describe_field):
+        if not hooks.describe_config_field(describe_field, as_json=as_json):
             _terminate_cli(hooks, f"Unknown configurable field: {describe_field}", 1)
         return True
     if args.deprecated is not None:
