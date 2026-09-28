@@ -17,12 +17,18 @@ from typing import Any
 
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.json_format import ParseDict, ParseError
+from google.protobuf.message import Message
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
-from meshtastic.schema_metadata import _format_numeric_bound, _get_field_metadata
+from meshtastic.schema_metadata import (
+    FieldLimits,
+    _format_numeric_bound,
+    _get_field_limits,
+    _get_field_metadata,
+)
 
 # Preserve the historical CLI logger name even though implementation moved here.
 # Warning/debug routing is observable through existing logging configuration and tests.
@@ -339,6 +345,78 @@ def _validate_metadata_bounds(
     )
 
 
+def _validate_field_size_limit(
+    pref: FieldDescriptor,
+    value: Any,
+    *,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Reject encoded values the firmware would truncate.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the preference field being assigned.
+    value : Any
+        Converted value awaiting protobuf assignment.
+    field_path : str
+        Canonical dotted path used for diagnostics.
+    cli_print : Callable[..., None]
+        Quiet-aware CLI reporter for the rejection message.
+
+    Returns
+    -------
+    bool
+        ``True`` when the value fits the declared firmware limit.
+    """
+    if pref.is_repeated:
+        # Element sizes are validated where the final element list is known;
+        # the scalar form of a repeated field may carry multiple elements.
+        return True
+    limits = _get_field_limits(pref)
+    if limits is None or limits.max_size is None:
+        return True
+    if pref.type == FieldDescriptor.TYPE_STRING:
+        # ``assign_scalar_pref_value`` preserves historical coercion by falling
+        # back to ``str(value)`` when protobuf rejects a non-string input. Apply
+        # the firmware limit to that final stored representation, not merely the
+        # pre-coercion Python type.
+        stored_value = value if isinstance(value, str) else str(value)
+        # nanopb reserves one byte of max_size for the NUL terminator. Measure
+        # with strict UTF-8: replacement characters would undercount, letting a
+        # value pass here and fail later at protobuf serialization time.
+        usable = limits.max_size - 1
+        try:
+            encoded = len(stored_value.encode("utf-8"))
+        except UnicodeEncodeError:
+            display_value = redact_pref_value(field_path, repr(stored_value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; not encodable"
+                " as UTF-8.",
+                cli_print=cli_print,
+            )
+        if encoded > usable:
+            display_value = redact_pref_value(field_path, repr(stored_value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; encoded length "
+                f"{encoded} bytes exceeds the firmware limit of {usable} bytes.",
+                cli_print=cli_print,
+            )
+    elif pref.type == FieldDescriptor.TYPE_BYTES and isinstance(
+        value, (bytes, bytearray)
+    ):
+        if len(value) > limits.max_size:
+            display_value = redact_pref_value(field_path, repr(value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; encoded length "
+                f"{len(value)} bytes exceeds the firmware limit of "
+                f"{limits.max_size} bytes.",
+                cli_print=cli_print,
+            )
+    return True
+
+
 def _validate_pref_before_assignment(
     pref: FieldDescriptor,
     value: Any,
@@ -350,6 +428,10 @@ def _validate_pref_before_assignment(
 ) -> bool:
     """Run the pre-assignment checks that reject one scalar preference value."""
     if not _validate_metadata_bounds(
+        pref, value, field_path=field_path, cli_print=cli_print
+    ):
+        return False
+    if not _validate_field_size_limit(
         pref, value, field_path=field_path, cli_print=cli_print
     ):
         return False
@@ -508,6 +590,54 @@ def _parse_repeated_message_value(
     return True, parsed
 
 
+def _validate_message_size_count_limits(
+    message: Message,
+    *,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Validate nanopb size/count limits recursively inside one parsed message.
+
+    Repeated-message ``--set``/``--configure`` values are parsed through
+    ``ParseDict`` rather than the ordinary scalar preference path. Walk the
+    resulting protobuf so nested strings/bytes and nested repeated fields obey
+    the same firmware constraints before the candidate message is committed.
+    """
+    for child_field, child_value in message.ListFields():
+        child_path = f"{field_path}.{child_field.name}"
+        limits = _get_field_limits(child_field)
+        if child_field.is_repeated:
+            if limits is not None:
+                violation = _describe_repeated_limit_violation(
+                    child_field, child_value, limits
+                )
+                if violation is not None:
+                    return _reject_pref_validation_message(
+                        f"Invalid value for {child_path}; {violation}.",
+                        cli_print=cli_print,
+                    )
+            if child_field.message_type is not None:
+                for index, nested in enumerate(child_value):
+                    if not _validate_message_size_count_limits(
+                        nested,
+                        field_path=f"{child_path}[{index}]",
+                        cli_print=cli_print,
+                    ):
+                        return False
+            continue
+        if child_field.message_type is not None:
+            if not _validate_message_size_count_limits(
+                child_value, field_path=child_path, cli_print=cli_print
+            ):
+                return False
+            continue
+        if not _validate_field_size_limit(
+            child_field, child_value, field_path=child_path, cli_print=cli_print
+        ):
+            return False
+    return True
+
+
 def _assign_repeated_message_pref_value(
     target: Any,
     pref: FieldDescriptor,
@@ -553,6 +683,18 @@ def _assign_repeated_message_pref_value(
     if not ok:
         return False, True
 
+    limits = _get_field_limits(pref)
+    if limits is not None:
+        violation = _describe_repeated_limit_violation(pref, elements, limits)
+        if violation is not None:
+            return (
+                _reject_pref_validation_message(
+                    f"Invalid value for {field_path}; {violation}.",
+                    cli_print=cli_print,
+                ),
+                True,
+            )
+
     candidate = type(target)()
     candidate.CopyFrom(target)
     field_container = getattr(candidate, pref.name)
@@ -566,6 +708,12 @@ def _assign_repeated_message_pref_value(
             message = f"Invalid value for {field_path}; element {index}: {exc}."
             _reject_pref_validation_message(message, cli_print=cli_print)
             return False, True
+        if not _validate_message_size_count_limits(
+            submsg,
+            field_path=f"{field_path}[{index}]",
+            cli_print=cli_print,
+        ):
+            return False, True
         field_container.append(submsg)
 
     target.CopyFrom(candidate)
@@ -578,6 +726,57 @@ def _assign_repeated_message_pref_value(
         else:
             cli_print(f"Clearing {pref.name} list")
     return True, False
+
+
+def _describe_repeated_limit_violation(
+    pref: FieldDescriptor,
+    values: Any,
+    limits: FieldLimits,
+) -> str | None:
+    """Describe the first firmware-limit violation in a repeated assignment.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the repeated field being assigned.
+    values : Any
+        Final element sequence awaiting assignment.
+    limits : FieldLimits
+        Declared field limits carrying ``max_count`` and ``max_size``.
+
+    Returns
+    -------
+    str | None
+        Diagnostic text for the count or first oversized-element violation,
+        or ``None`` when the assignment fits the declared limits.
+    """
+    if limits.max_count is not None and len(values) > limits.max_count:
+        return (
+            f"{len(values)} entries exceeds the firmware limit of "
+            f"{limits.max_count}"
+        )
+    max_size = limits.max_size
+    if max_size is None:
+        return None
+    usable = max_size - 1 if pref.type == FieldDescriptor.TYPE_STRING else max_size
+    for element in values:
+        if pref.type == FieldDescriptor.TYPE_STRING and isinstance(element, str):
+            try:
+                encoded = len(element.encode("utf-8"))
+            except UnicodeEncodeError:
+                return "element is not encodable as UTF-8"
+        elif pref.type == FieldDescriptor.TYPE_BYTES and isinstance(
+            element, (bytes, bytearray)
+        ):
+            encoded = len(element)
+        else:
+            continue
+        if encoded > usable:
+            return (
+                f"element encoded length {encoded} bytes exceeds the firmware "
+                f"limit of {usable} bytes"
+            )
+    return None
 
 
 def _assign_repeated_pref_value(
@@ -631,6 +830,21 @@ def _assign_repeated_pref_value(
             ),
             True,
         )
+
+    limits = _get_field_limits(pref)
+    if limits is not None:
+        violation = _describe_repeated_limit_violation(pref, candidate_values, limits)
+        if violation is not None:
+            display_value = redact_pref_value(
+                field_path, meshtastic.util.toStr(raw_value)
+            )
+            return (
+                _reject_pref_validation_message(
+                    f"Invalid value {display_value} for {field_path}; {violation}.",
+                    cli_print=cli_print,
+                ),
+                True,
+            )
 
     target.CopyFrom(candidate)
     if isinstance(value, list):

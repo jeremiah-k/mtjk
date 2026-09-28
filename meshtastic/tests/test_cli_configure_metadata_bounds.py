@@ -158,3 +158,53 @@ def test_configure_preflight_accepts_in_bounds_values() -> None:
     assert module_candidate is not node.moduleConfig
     assert node.localConfig == local_before
     assert node.moduleConfig == module_before
+
+
+@pytest.mark.unit
+def test_configure_preflight_rejects_over_limit_string_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A YAML string beyond the firmware size limit terminates before mutation."""
+    node = _make_node()
+    hooks, recordings = _make_hooks()
+    local_before = _snapshot(node.localConfig)
+    module_before = _snapshot(node.moduleConfig)
+
+    with pytest.raises(SystemExit):
+        _preflight_configure_sections(
+            hooks,
+            node,
+            config_sections={"network": {"wifi_ssid": "x" * 33}},
+            module_config_sections={},
+        )
+
+    assert recordings["exits"], "over-limit wifi_ssid must terminate the preflight"
+    output = capsys.readouterr().out
+    assert "encoded length 33 bytes exceeds the firmware limit of 32 bytes" in output
+    assert node.localConfig == local_before
+    assert node.moduleConfig == module_before
+
+
+@pytest.mark.unit
+def test_configure_preflight_rejects_over_limit_repeated_list(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A YAML list beyond the firmware count limit terminates before mutation."""
+    node = _make_node()
+    hooks, recordings = _make_hooks()
+    local_before = _snapshot(node.localConfig)
+    module_before = _snapshot(node.moduleConfig)
+
+    with pytest.raises(SystemExit):
+        _preflight_configure_sections(
+            hooks,
+            node,
+            config_sections={"lora": {"ignore_incoming": [1, 2, 3, 4]}},
+            module_config_sections={},
+        )
+
+    assert recordings["exits"], "over-count ignore_incoming must terminate"
+    output = capsys.readouterr().out
+    assert "4 entries exceeds the firmware limit of 3" in output
+    assert node.localConfig == local_before
+    assert node.moduleConfig == module_before

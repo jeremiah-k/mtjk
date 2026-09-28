@@ -240,6 +240,45 @@ def test_repeated_enum_field_rejects_separator_only_value() -> None:
 
 
 @pytest.mark.unit
+def test_repeated_message_enforces_declared_max_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeated message arrays reject values beyond the firmware max_count."""
+    config = localonly_pb2.LocalModuleConfig()
+    accepted = [{"preset": "SHORT_FAST", "channelIndex": index} for index in range(4)]
+    rejected = accepted + [{"preset": "LONG_FAST", "channelIndex": 4}]
+
+    assert setPref(config, "mesh_beacon.broadcast_targets", accepted) is True
+    before = config.SerializeToString()
+    assert setPref(config, "mesh_beacon.broadcast_targets", rejected) is False
+
+    assert config.SerializeToString() == before
+    out, err = capsys.readouterr()
+    assert "5 entries exceeds the firmware limit of 4" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_repeated_message_enforces_nested_string_size(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nested message strings honor their own nanopb max_size before commit."""
+    config = localonly_pb2.LocalModuleConfig()
+    accepted = [{"gpioPin": 1, "name": "x" * 14, "type": "DIGITAL_READ"}]
+    rejected = [{"gpioPin": 1, "name": "x" * 15, "type": "DIGITAL_READ"}]
+
+    assert setPref(config, "remote_hardware.available_pins", accepted) is True
+    before = config.SerializeToString()
+    assert setPref(config, "remote_hardware.available_pins", rejected) is False
+
+    assert config.SerializeToString() == before
+    out, err = capsys.readouterr()
+    assert "remote_hardware.available_pins[0].name" in out
+    assert "encoded length 15 bytes exceeds the firmware limit of 14 bytes" in out
+    assert err == ""
+
+
+@pytest.mark.unit
 def test_non_repeated_field_unchanged_by_repeated_message_support() -> None:
     """Setting a non-repeated field still routes through the scalar path."""
     config = localonly_pb2.LocalConfig()
@@ -457,3 +496,19 @@ def test_repeated_message_element_parse_error_honors_fatal_policy() -> None:
         pytest.raises(preference_runtime.PreferenceValueError, match="element 0"),
     ):
         setPref(config, "mesh_beacon.broadcast_targets", payload)
+
+
+@pytest.mark.unit
+def test_repeated_element_unencodable_utf8_reports_violation() -> None:
+    """Repeated string elements with lone surrogates report a UTF-8 violation."""
+    from meshtastic.cli.preference_runtime import _describe_repeated_limit_violation
+    from meshtastic.protobuf import config_pb2
+    from meshtastic.schema_metadata import _get_field_limits
+
+    field = config_pb2.Config.NetworkConfig.DESCRIPTOR.fields_by_name["wifi_ssid"]
+    limits = _get_field_limits(field)
+    assert limits is not None
+
+    violation = _describe_repeated_limit_violation(field, ["ab\ud800cd"], limits)
+
+    assert violation == "element is not encodable as UTF-8"

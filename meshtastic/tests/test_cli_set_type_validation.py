@@ -434,3 +434,136 @@ def test_set_pref_rejects_non_finite_values_for_bounded_float_fields(
     assert "Invalid value" in out
     assert "power.adc_multiplier_override" in out
     assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_firmware_string_size_limits(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Encoded string length beyond the firmware limit is rejected."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.wifi_ssid", "x" * 33) is False
+    assert config.network.wifi_ssid == ""
+
+    out, err = capsys.readouterr()
+    assert "encoded length 33 bytes exceeds the firmware limit of 32 bytes" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_firmware_string_size_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A string exactly filling the firmware capacity is accepted."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.wifi_ssid", "x" * 32) is True
+    assert config.network.wifi_ssid == "x" * 32
+
+
+@pytest.mark.unit
+def test_set_pref_measures_utf8_bytes_not_code_points(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Multi-byte characters count as their encoded byte length."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.ntp_server", "é" * 33) is False
+    assert config.network.ntp_server == ""
+
+    out, _ = capsys.readouterr()
+    assert "encoded length 66 bytes exceeds the firmware limit of 32 bytes" in out
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_repeated_entry_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeated assignments beyond the firmware count limit are rejected."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.ignore_incoming", "1,2,3,4") is False
+    assert list(config.lora.ignore_incoming) == []
+
+    out, err = capsys.readouterr()
+    assert "4 entries exceeds the firmware limit of 3" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_repeated_entry_count_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A repeated assignment filling the firmware count is accepted."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "lora.ignore_incoming", "1,2,3") is True
+    assert list(config.lora.ignore_incoming) == [1, 2, 3]
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_string_limit_after_historical_coercion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Numeric-looking strings are size-checked after string-field coercion."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.ntp_server", "1" * 33) is False
+    assert config.network.ntp_server == ""
+
+    out, err = capsys.readouterr()
+    assert "encoded length 33 bytes exceeds the firmware limit of 32 bytes" in out
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_string_limit_after_historical_coercion_boundary() -> None:
+    """A numeric-looking string at the usable nanopb boundary still assigns."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.ntp_server", "1" * 32) is True
+    assert config.network.ntp_server == "1" * 32
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_repeated_element_size(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Oversized elements in repeated assignments are rejected."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "security.admin_key", [b"x" * 33]) is False
+    assert list(config.security.admin_key) == []
+
+    out, err = capsys.readouterr()
+    assert (
+        "element encoded length 33 bytes exceeds the firmware limit of 32 bytes" in out
+    )
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_repeated_element_size_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeated byte elements filling the firmware capacity are accepted."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "security.admin_key", [b"x" * 32]) is True
+    assert list(config.security.admin_key) == [b"x" * 32]
+
+
+@pytest.mark.unit
+def test_set_pref_rejects_unencodable_utf8_string(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Strings with lone surrogates are rejected instead of mis-measured."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "network.wifi_ssid", "ab\ud800cd") is False
+    assert config.network.wifi_ssid == ""
+
+    out, err = capsys.readouterr()
+    assert "not encodable as UTF-8" in out
+    assert err == ""
