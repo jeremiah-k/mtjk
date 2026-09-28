@@ -26,6 +26,7 @@ from meshtastic.protobuf import (
     config_pb2,
     field_metadata_pb2,
     module_config_pb2,
+    nanopb_pb2,
 )
 
 
@@ -71,6 +72,26 @@ class FieldMetadata:
         return self.min_value is not None or self.max_value is not None
 
 
+@dataclass(frozen=True, slots=True)
+class FieldLimits:
+    """Immutable firmware-side size and count limits for one schema field.
+
+    Attributes
+    ----------
+    max_size : int | None
+        nanopb maximum encoded size in bytes. For string fields this
+        includes the NUL terminator, matching firmware semantics.
+    max_count : int | None
+        nanopb maximum element count for repeated fields.
+    int_size : int | None
+        Declared integer width in bits (8, 16, 32, or 64).
+    """
+
+    max_size: int | None = None
+    max_count: int | None = None
+    int_size: int | None = None
+
+
 def getFieldMetadata(path: str) -> FieldMetadata | None:
     """Return declared metadata for one configuration field path.
 
@@ -89,6 +110,87 @@ def getFieldMetadata(path: str) -> FieldMetadata | None:
         The declared metadata, or ``None`` when the path does not resolve
         to a known field or the field declares no metadata.
     """
+    field = _resolve_config_field(path)
+    if field is None:
+        return None
+    return _get_field_metadata(field)
+
+
+def getFieldLimits(path: str) -> FieldLimits | None:
+    """Return firmware size and count limits for one configuration field path.
+
+    Parameters
+    ----------
+    path : str
+        Dotted field path with the same resolution semantics as
+        ``getFieldMetadata``.
+
+    Returns
+    -------
+    FieldLimits | None
+        The declared nanopb limits, or ``None`` when the path does not
+        resolve to a known field or the field declares no limits.
+    """
+    field = _resolve_config_field(path)
+    if field is None:
+        return None
+    options = field.GetOptions().Extensions[nanopb_pb2.nanopb]
+    if not (
+        options.HasField("max_size")
+        or options.HasField("max_count")
+        or options.HasField("int_size")
+    ):
+        return None
+    return FieldLimits(
+        max_size=options.max_size if options.HasField("max_size") else None,
+        max_count=options.max_count if options.HasField("max_count") else None,
+        int_size=options.int_size if options.HasField("int_size") else None,
+    )
+
+
+def getEnumValueMetadata(path: str, value_name: str) -> FieldMetadata | None:
+    """Return declared metadata for one enum value of a configuration field.
+
+    Parameters
+    ----------
+    path : str
+        Dotted field path to an enum-valued configuration field.
+    value_name : str
+        Enum value name, matched exactly first and then case-insensitively
+        against the upper-case proto naming (``"long_fast"`` resolves to
+        ``LONG_FAST``).
+
+    Returns
+    -------
+    FieldMetadata | None
+        The declared value metadata, or ``None`` when the field has no
+        enum type, the value is unknown, or the value declares no metadata.
+    """
+    field = _resolve_config_field(path)
+    if field is None or field.enum_type is None:
+        return None
+    value = field.enum_type.values_by_name.get(value_name)
+    if value is None:
+        value = field.enum_type.values_by_name.get(value_name.upper())
+    if value is None:
+        return None
+    return _get_enum_value_metadata(value)
+
+
+def _resolve_config_field(path: str) -> FieldDescriptor | None:
+    """Resolve a dotted configuration field path to its field descriptor.
+
+    Parameters
+    ----------
+    path : str
+        Dotted field path; camelCase segments are normalized to snake_case.
+
+    Returns
+    -------
+    FieldDescriptor | None
+        The resolved field descriptor, or ``None`` when the path has no
+        section/field pair or does not resolve in either configuration root.
+    """
     segments = [meshtastic.util.camel_to_snake(part) for part in path.split(".")]
     if len(segments) < 2:
         return None
@@ -96,7 +198,7 @@ def getFieldMetadata(path: str) -> FieldMetadata | None:
     for root in _configuration_roots():
         field = _resolve_field_path(root, section, field_path)
         if field is not None:
-            return _get_field_metadata(field)
+            return field
     return None
 
 
