@@ -368,6 +368,10 @@ def _validate_field_size_limit(
     bool
         ``True`` when the value fits the declared firmware limit.
     """
+    if pref.is_repeated:
+        # Element sizes are validated where the final element list is known;
+        # the scalar form of a repeated field may carry multiple elements.
+        return True
     limits = _get_field_limits(pref)
     if limits is None or limits.max_size is None:
         return True
@@ -641,6 +645,54 @@ def _assign_repeated_message_pref_value(
     return True, False
 
 
+def _describe_repeated_limit_violation(
+    pref: FieldDescriptor,
+    values: Any,
+    limits: Any,
+) -> str | None:
+    """Describe the first firmware-limit violation in a repeated assignment.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the repeated field being assigned.
+    values : Any
+        Final element sequence awaiting assignment.
+    limits : Any
+        Declared field limits carrying ``max_count`` and ``max_size``.
+
+    Returns
+    -------
+    str | None
+        Diagnostic text for the count or first oversized-element violation,
+        or ``None`` when the assignment fits the declared limits.
+    """
+    if limits.max_count is not None and len(values) > limits.max_count:
+        return (
+            f"{len(values)} entries exceeds the firmware limit of "
+            f"{limits.max_count}"
+        )
+    max_size = limits.max_size
+    if max_size is None:
+        return None
+    usable = max_size - 1 if pref.type == FieldDescriptor.TYPE_STRING else max_size
+    for element in values:
+        if pref.type == FieldDescriptor.TYPE_STRING and isinstance(element, str):
+            encoded = len(element.encode("utf-8", errors="replace"))
+        elif pref.type == FieldDescriptor.TYPE_BYTES and isinstance(
+            element, (bytes, bytearray)
+        ):
+            encoded = len(element)
+        else:
+            continue
+        if encoded > usable:
+            return (
+                f"element encoded length {encoded} bytes exceeds the firmware "
+                f"limit of {usable} bytes"
+            )
+    return None
+
+
 def _assign_repeated_pref_value(
     target: Any,
     pref: FieldDescriptor,
@@ -694,21 +746,19 @@ def _assign_repeated_pref_value(
         )
 
     limits = _get_field_limits(pref)
-    if (
-        limits is not None
-        and limits.max_count is not None
-        and len(candidate_values) > limits.max_count
-    ):
-        display_value = redact_pref_value(field_path, meshtastic.util.toStr(raw_value))
-        return (
-            _reject_pref_validation_message(
-                f"Invalid value {display_value} for {field_path}; "
-                f"{len(candidate_values)} entries exceeds the firmware limit of "
-                f"{limits.max_count}.",
-                cli_print=cli_print,
-            ),
-            True,
-        )
+    if limits is not None:
+        violation = _describe_repeated_limit_violation(pref, candidate_values, limits)
+        if violation is not None:
+            display_value = redact_pref_value(
+                field_path, meshtastic.util.toStr(raw_value)
+            )
+            return (
+                _reject_pref_validation_message(
+                    f"Invalid value {display_value} for {field_path}; {violation}.",
+                    cli_print=cli_print,
+                ),
+                True,
+            )
 
     target.CopyFrom(candidate)
     if isinstance(value, list):

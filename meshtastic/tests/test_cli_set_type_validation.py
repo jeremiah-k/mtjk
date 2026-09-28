@@ -500,3 +500,32 @@ def test_set_pref_accepts_repeated_entry_count_boundary(
 
     assert setPref(config, "lora.ignore_incoming", "1,2,3") is True
     assert list(config.lora.ignore_incoming) == [1, 2, 3]
+
+
+@pytest.mark.unit
+def test_set_pref_enforces_repeated_element_size(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Oversized elements in repeated assignments are rejected."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "security.admin_key", [b"x" * 33]) is False
+    assert list(config.security.admin_key) == []
+
+    out, err = capsys.readouterr()
+    assert (
+        "element encoded length 33 bytes exceeds the firmware limit of 32 bytes"
+        in out
+    )
+    assert err == ""
+
+
+@pytest.mark.unit
+def test_set_pref_accepts_repeated_element_size_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeated byte elements filling the firmware capacity are accepted."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "security.admin_key", [b"x" * 32]) is True
+    assert list(config.security.admin_key) == [b"x" * 32]
