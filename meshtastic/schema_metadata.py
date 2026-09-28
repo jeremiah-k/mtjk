@@ -79,8 +79,9 @@ class FieldLimits:
     Attributes
     ----------
     max_size : int | None
-        nanopb maximum encoded size in bytes. For string fields this
-        includes the NUL terminator, matching firmware semantics.
+        nanopb maximum allocated storage size in bytes. For string
+        fields this includes the NUL terminator, matching firmware
+        semantics; it is a storage limit, not a wire-encoding size.
     max_count : int | None
         nanopb maximum element count for repeated fields.
     int_size : int | None
@@ -165,6 +166,9 @@ def getEnumValueMetadata(path: str, value_name: str) -> FieldMetadata | None:
     FieldMetadata | None
         The declared value metadata, or ``None`` when the field has no
         enum type, the value is unknown, or the value declares no metadata.
+        A value marked deprecated through the standard protobuf option
+        returns ``FieldMetadata(deprecated=True)`` even without custom
+        metadata.
     """
     field = _resolve_config_field(path)
     if field is None or field.enum_type is None:
