@@ -1939,8 +1939,10 @@ class Config(_message.Message):
         SERIAL_HAL_ONLY_FIELD_NUMBER: _builtins.int
         use_preset: _builtins.bool
         """
-        When enabled, the `modem_preset` fields will be adhered to, else the `bandwidth`/`spread_factor`/`coding_rate`
-        will be taked from their respective manually defined fields
+        When enabled, the `modem_preset` sets the bandwidth and spread factor, and the
+        `bandwidth`/`spread_factor` fields are ignored. `coding_rate` is the exception:
+        see that field. When disabled, all three are taken from their respective
+        manually defined fields.
         """
         modem_preset: Global___Config.LoRaConfig.ModemPreset.ValueType
         """
@@ -1948,6 +1950,8 @@ class Config(_message.Message):
         As a heuristic: If bandwidth is specified, do not use modem_config.
         Because protobufs take ZERO space when the value is zero this works out nicely.
         This value is replaced by bandwidth/spread_factor/coding_rate.
+        The one exception is `coding_rate`, which can raise the preset's coding rate
+        without moving off the preset; see that field.
         If you'd like to experiment with other options add them to MeshRadio.cpp in the device code.
         """
         bandwidth: _builtins.int
@@ -1967,6 +1971,19 @@ class Config(_message.Message):
         """
         The denominator of the coding rate.
         ie for 4/5, the value is 5. 4/8 the value is 8.
+
+        With `use_preset` disabled this is the coding rate, clamped to 5 through 8.
+
+        With `use_preset` enabled, since 2.7.18 this raises the preset's coding rate
+        when it is 5 through 8 AND higher than the preset's. A lower value, a value
+        out of range, and 0 all leave the preset's coding rate in place, so 0 is how
+        a client says "use the preset's". Bandwidth and spread factor still come from
+        the preset, and the coding rate travels in the explicit LoRa header, so nodes
+        on the same preset still hear each other either way.
+
+        No bound is stated here because the valid set differs between the two cases:
+        5 through 8 with `use_preset` off, and 0 plus anything from above the preset's
+        own coding rate up to 8 with it on.
         """
         frequency_offset: _builtins.float
         """
