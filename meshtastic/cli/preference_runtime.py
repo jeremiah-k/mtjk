@@ -12,6 +12,7 @@ import contextvars
 import json
 import logging
 import math
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -343,6 +344,59 @@ def _validate_metadata_bounds(
         f"Invalid value {display_value} for {field_path}; expected {expected}.",
         cli_print=cli_print,
     )
+
+
+_DEPRECATED_FIELD_WARNINGS: set[str] = set()
+_deprecated_field_warning_lock = threading.Lock()
+
+
+def _warn_deprecated_field(
+    pref: FieldDescriptor,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> None:
+    """Warn once per process when writing a schema-deprecated field.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the preference field being assigned.
+    field_path : str
+        Canonical dotted path used for the diagnostic.
+    cli_print : Callable[..., None]
+        Quiet-aware CLI reporter for the warning message.
+
+    Notes
+    -----
+    The warning is advisory: deprecated fields still assign so existing
+    automation keeps working. Batch and configure preflights rerun the
+    assignment path, so the warning is suppressed in preflight mode and
+    deduplicated per field path per process.
+    """
+    if CONFIGURE_PREFLIGHT_MODE.get():
+        return
+    metadata = _get_field_metadata(pref)
+    if metadata is None or not metadata.deprecated:
+        return
+    with _deprecated_field_warning_lock:
+        if field_path in _DEPRECATED_FIELD_WARNINGS:
+            return
+        _DEPRECATED_FIELD_WARNINGS.add(field_path)
+    try:
+        cli_print(
+            f"Warning: {field_path} is deprecated in the firmware schema and may "
+            "be removed in a future firmware release."
+        )
+    except Exception:  # noqa: BLE001 - advisory reporter must not fail the write
+        # The warning did not reach the caller. Keep the write successful and
+        # allow a later assignment to retry the once-per-process diagnostic.
+        with _deprecated_field_warning_lock:
+            _DEPRECATED_FIELD_WARNINGS.discard(field_path)
+        logger.debug(
+            "Failed to emit deprecated-field warning for %s",
+            field_path,
+            exc_info=True,
+        )
 
 
 def _validate_field_size_limit(
@@ -971,6 +1025,12 @@ def set_pref(
         display_value = redact_pref_value(normalized, meshtastic.util.toStr(raw_value))
         if not CONFIGURE_PREFLIGHT_MODE.get():
             cli_print(f"Set {prefix}{display_name} to {display_value}")
+
+    if assignment_ok:
+        # Advisory only and emitted after mutation: rejected values must not
+        # consume the field's one warning, and reporter failures cannot block
+        # the assignment itself.
+        _warn_deprecated_field(pref, normalized, cli_print)
 
     return assignment_ok
 
