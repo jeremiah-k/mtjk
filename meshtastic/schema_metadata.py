@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from google.protobuf.descriptor import (
     Descriptor,
+    EnumDescriptor,
     EnumValueDescriptor,
     FieldDescriptor,
 )
@@ -158,8 +159,8 @@ def getEnumValueMetadata(path: str, value_name: str) -> FieldMetadata | None:
         Dotted field path to an enum-valued configuration field.
     value_name : str
         Enum value name, matched exactly first and then case-insensitively
-        against the upper-case proto naming (``"long_fast"`` resolves to
-        ``LONG_FAST``).
+        against the declared protobuf value names (for example,
+        ``"long_fast"`` resolves to ``LONG_FAST``).
 
     Returns
     -------
@@ -173,12 +174,30 @@ def getEnumValueMetadata(path: str, value_name: str) -> FieldMetadata | None:
     field = _resolve_config_field(path)
     if field is None or field.enum_type is None:
         return None
-    value = field.enum_type.values_by_name.get(value_name)
-    if value is None:
-        value = field.enum_type.values_by_name.get(value_name.upper())
+    value = _resolve_enum_value_name(field.enum_type, value_name)
     if value is None:
         return None
     return _get_enum_value_metadata(value)
+
+
+def _resolve_enum_value_name(
+    enum_type: EnumDescriptor, value_name: str
+) -> EnumValueDescriptor | None:
+    """Resolve one enum value name with exact-first case-insensitive matching.
+
+    The public API promises case-insensitive lookup rather than assuming every
+    future protobuf enum follows the conventional all-uppercase spelling.
+    Exact matching remains first so schemas containing case-distinct names keep
+    their protobuf-defined identity whenever the caller supplies it exactly.
+    """
+    exact = enum_type.values_by_name.get(value_name)
+    if exact is not None:
+        return exact
+    folded_name = value_name.casefold()
+    return next(
+        (value for value in enum_type.values if value.name.casefold() == folded_name),
+        None,
+    )
 
 
 def _resolve_config_field(path: str) -> FieldDescriptor | None:
