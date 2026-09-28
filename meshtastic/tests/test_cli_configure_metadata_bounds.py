@@ -57,6 +57,13 @@ def _make_node() -> Any:
     )
 
 
+def _snapshot(message: Any) -> Any:
+    """Return a deep copy of a protobuf config root for before/after comparison."""
+    copied = type(message)()
+    copied.CopyFrom(message)
+    return copied
+
+
 @pytest.mark.unit
 def test_configure_preflight_rejects_out_of_bounds_config_value(
     capsys: pytest.CaptureFixture[str],
@@ -64,6 +71,8 @@ def test_configure_preflight_rejects_out_of_bounds_config_value(
     """A YAML value beyond a schema bound terminates before device mutation."""
     node = _make_node()
     hooks, recordings = _make_hooks()
+    local_before = _snapshot(node.localConfig)
+    module_before = _snapshot(node.moduleConfig)
 
     with pytest.raises(SystemExit):
         _preflight_configure_sections(
@@ -82,7 +91,8 @@ def test_configure_preflight_rejects_out_of_bounds_config_value(
     output = capsys.readouterr().out
     assert "Invalid value 99 for lora.hop_limit" in output
     assert "between 0 and 7" in output
-    assert node.localConfig.lora.hop_limit == 0
+    assert node.localConfig == local_before
+    assert node.moduleConfig == module_before
 
 
 @pytest.mark.unit
@@ -92,6 +102,8 @@ def test_configure_preflight_rejects_out_of_bounds_module_value(
     """Module config values are bounds-checked on the same preflight path."""
     node = _make_node()
     hooks, recordings = _make_hooks()
+    local_before = _snapshot(node.localConfig)
+    module_before = _snapshot(node.moduleConfig)
 
     with pytest.raises(SystemExit):
         _preflight_configure_sections(
@@ -104,7 +116,8 @@ def test_configure_preflight_rejects_out_of_bounds_module_value(
     assert recordings["exits"], "out-of-bounds ambient_lighting.red must terminate"
     output = capsys.readouterr().out
     assert "between 0 and 255" in output
-    assert node.moduleConfig.ambient_lighting.red == 0
+    assert node.localConfig == local_before
+    assert node.moduleConfig == module_before
 
 
 @pytest.mark.unit
@@ -120,6 +133,8 @@ def test_configure_preflight_accepts_in_bounds_values() -> None:
         return main_module.traverseConfig(section, values, interface_config, **kwargs)
 
     hooks, recordings = _make_hooks(traverse_config=_recording_traverse)
+    local_before = _snapshot(node.localConfig)
+    module_before = _snapshot(node.moduleConfig)
 
     _preflight_configure_sections(
         hooks,
@@ -137,9 +152,9 @@ def test_configure_preflight_accepts_in_bounds_values() -> None:
     assert isinstance(module_candidate, module_config_pb2.ModuleConfig)
     assert config_candidate.lora.hop_limit == 3
     assert module_candidate.ambient_lighting.red == 200
-    # Preflight validates copies; the live config roots stay untouched until
-    # the configure plan applies them after the transaction opens.
+    # Preflight validates copies; compare the complete live roots so any field
+    # the preflight might touch, not just the ones under test, is caught here.
     assert config_candidate is not node.localConfig
     assert module_candidate is not node.moduleConfig
-    assert node.localConfig.lora.hop_limit == 0
-    assert node.moduleConfig.ambient_lighting.red == 0
+    assert node.localConfig == local_before
+    assert node.moduleConfig == module_before
