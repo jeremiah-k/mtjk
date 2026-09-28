@@ -567,6 +567,8 @@ def test_set_pref_rejects_unencodable_utf8_string(
     out, err = capsys.readouterr()
     assert "not encodable as UTF-8" in out
     assert err == ""
+
+
 def test_set_pref_warns_once_for_deprecated_field(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -586,6 +588,37 @@ def test_set_pref_warns_once_for_deprecated_field(
     assert setPref(config, "device.serial_enabled", "false") is True
     out, _ = capsys.readouterr()
     assert "deprecated" not in out
+
+
+@pytest.mark.unit
+def test_deprecated_warning_reporter_failure_is_advisory(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed warning reporter cannot fail or consume a successful write."""
+    from meshtastic import __main__ as main_module
+    from meshtastic.cli import preference_runtime
+
+    monkeypatch.setattr(preference_runtime, "_DEPRECATED_FIELD_WARNINGS", set())
+    original_cli_print = main_module._cli_print
+
+    def flaky_cli_print(message: str, *, force: bool = False) -> None:
+        if "deprecated" in message:
+            raise RuntimeError("synthetic warning reporter failure")
+        original_cli_print(message, force=force)
+
+    monkeypatch.setattr(main_module, "_cli_print", flaky_cli_print)
+    config = localonly_pb2.LocalConfig()
+
+    assert main_module.setPref(config, "device.serial_enabled", "true") is True
+    assert config.device.serial_enabled is True
+    assert "device.serial_enabled" not in preference_runtime._DEPRECATED_FIELD_WARNINGS
+
+    monkeypatch.setattr(main_module, "_cli_print", original_cli_print)
+    assert main_module.setPref(config, "device.serial_enabled", "false") is True
+    out, err = capsys.readouterr()
+    assert "Warning: device.serial_enabled is deprecated" in out
+    assert err == ""
 
 
 @pytest.mark.unit

@@ -382,10 +382,21 @@ def _warn_deprecated_field(
         if field_path in _DEPRECATED_FIELD_WARNINGS:
             return
         _DEPRECATED_FIELD_WARNINGS.add(field_path)
-    cli_print(
-        f"Warning: {field_path} is deprecated in the firmware schema and may "
-        "be removed in a future firmware release."
-    )
+    try:
+        cli_print(
+            f"Warning: {field_path} is deprecated in the firmware schema and may "
+            "be removed in a future firmware release."
+        )
+    except Exception:  # noqa: BLE001 - advisory reporter must not fail the write
+        # The warning did not reach the caller. Keep the write successful and
+        # allow a later assignment to retry the once-per-process diagnostic.
+        with _deprecated_field_warning_lock:
+            _DEPRECATED_FIELD_WARNINGS.discard(field_path)
+        logger.debug(
+            "Failed to emit deprecated-field warning for %s",
+            field_path,
+            exc_info=True,
+        )
 
 
 def _validate_field_size_limit(
