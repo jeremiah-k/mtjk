@@ -99,6 +99,12 @@ The current design uses dedicated components for:
 - management operations such as pairing/trust;
 - compatibility event publication.
 
+`interfaces/ble/interface.py` itself is deliberately allowed to remain large.
+Its remaining content is mostly compatibility wiring and collaborator
+orchestration, and further mechanical decomposition there has historically been
+riskier than the size it removes. Treat it as a stable orchestration facade:
+make targeted bug fixes rather than new extraction passes.
+
 The public `meshtastic.ble_interface` module remains a compatibility facade.
 Historical `BLEInterface.BLEError` catching behavior and its `kind` metadata are
 preserved while newer typed BLE exceptions provide more specific context.
@@ -188,6 +194,24 @@ as cleanup-only tools. The maintained checks include:
 - simulator and hardware smoke lanes for transport/firmware behavior.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands that mirror CI.
+
+## Upstream relationship
+
+`mtjk` develops independently of `meshtastic/python`. The histories have
+diverged far enough that a merge would be ceremonial rather than a real
+integration, so upstream changes are ported — cherry-picked and adapted — when
+they are wanted, and an upstream merge is done only occasionally, after the
+fixes of interest have already been ported. Porting a fix does not require a
+merge.
+
+Two automations watch upstream without coupling this fork's history to it:
+
+- the protobufs digest automation tracks the current `meshtastic/protobufs`
+  revision and regenerates the bindings;
+- the nightly API-baseline workflow snapshots the upstream master surface and
+  opens a PR when it drifts, so upstream API changes stay visible.
+
+This fork does not open pull requests against upstream.
 
 ## Project evolution
 
