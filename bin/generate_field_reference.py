@@ -18,10 +18,18 @@ from meshtastic.protobuf import localonly_pb2
 def _iter_fields(
     descriptor: Descriptor, prefix: str = ""
 ) -> Iterator[tuple[str, FieldDescriptor]]:
-    """Yield (dotted_path, FieldDescriptor) pairs for leaf fields in order."""
+    """Yield field paths in the same schema order as JSON introspection.
+
+    Repeated-message fields are configurable as array values and therefore get
+    their own row for container limits. Their element fields are also emitted so
+    per-element firmware constraints (for example string ``max_size``) are not
+    omitted from the generated reference.
+    """
     for field in descriptor.fields:
         canonical = f"{prefix}{field.name}"
-        if field.message_type is not None and not field.is_repeated:
+        if field.message_type is not None:
+            if field.is_repeated:
+                yield canonical, field
             yield from _iter_fields(field.message_type, prefix=f"{canonical}.")
             continue
         yield canonical, field

@@ -319,6 +319,26 @@ def test_describe_field_json_includes_enum_values(
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_cli_json_requires_schema_introspection_action(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A standalone --json flag fails before attempting any device transport."""
+    monkeypatch.setattr(sys, "argv", ["meshtastic", "--json"])
+
+    with patch("meshtastic.tcp_interface.TCPInterface") as tcp_interface:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 2
+    tcp_interface.assert_not_called()
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "--json requires --list-fields or --describe-field" in err
+
+
+@pytest.mark.unit
 def test_list_fields_json_covers_both_roots_and_aliases(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

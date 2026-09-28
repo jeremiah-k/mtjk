@@ -91,6 +91,10 @@ def _validate_and_normalize_args(
         parser.error("--contact-verified and --contact-ignore require --contact-qr")
     if args.configure and len(args.configure) != 1:
         parser.error("--configure may be specified only once per invocation")
+    if getattr(args, "json", False) and not (
+        args.list_fields or getattr(args, "describe_field", None) is not None
+    ):
+        parser.error("--json requires --list-fields or --describe-field")
 
     for value, label in (
         (args.set_owner, "Long Name"),

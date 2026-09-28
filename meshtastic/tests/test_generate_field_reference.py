@@ -58,3 +58,21 @@ def test_reference_renders_bounds_limits_and_flags() -> None:
         0
     ]
     assert "max 3 entries" in ignore_row
+
+
+@pytest.mark.unit
+def test_reference_includes_repeated_message_element_constraints() -> None:
+    """Nested constraints inside configurable repeated messages are documented."""
+    mod = _load_reference_module()
+
+    reference = mod.build_reference()
+    rows = reference.splitlines()
+    container_row = next(
+        line for line in rows if "`remote_hardware.available_pins`" in line
+    )
+    name_row = next(
+        line for line in rows if "`remote_hardware.available_pins.name`" in line
+    )
+
+    assert "max 4 entries" in container_row
+    assert "max 14 bytes" in name_row
