@@ -569,8 +569,12 @@ def test_set_pref_rejects_unencodable_utf8_string(
     assert err == ""
 def test_set_pref_warns_once_for_deprecated_field(
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Writing a deprecated field warns once per process but still assigns."""
+    from meshtastic.cli import preference_runtime
+
+    monkeypatch.setattr(preference_runtime, "_DEPRECATED_FIELD_WARNINGS", set())
     config = localonly_pb2.LocalConfig()
 
     assert setPref(config, "device.serial_enabled", "true") is True
@@ -592,6 +596,23 @@ def test_set_pref_does_not_warn_for_undeprecated_field(
     config = localonly_pb2.LocalConfig()
 
     assert setPref(config, "lora.hop_limit", "3") is True
+
+    out, _ = capsys.readouterr()
+    assert "deprecated" not in out
+
+
+@pytest.mark.unit
+def test_set_pref_no_warning_for_rejected_deprecated_value(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected value on a deprecated field does not consume the warning."""
+    from meshtastic.cli import preference_runtime
+
+    monkeypatch.setattr(preference_runtime, "_DEPRECATED_FIELD_WARNINGS", set())
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "display.gps_format", "NOSUCH_FORMAT") is False
 
     out, _ = capsys.readouterr()
     assert "deprecated" not in out

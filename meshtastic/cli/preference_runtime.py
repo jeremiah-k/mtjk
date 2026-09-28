@@ -947,8 +947,6 @@ def set_pref(
     ):
         return False
 
-    _warn_deprecated_field(pref, normalized, cli_print)
-
     if (
         is_repeated_field(pref)
         and pref.enum_type is not None
@@ -1016,6 +1014,12 @@ def set_pref(
         display_value = redact_pref_value(normalized, meshtastic.util.toStr(raw_value))
         if not CONFIGURE_PREFLIGHT_MODE.get():
             cli_print(f"Set {prefix}{display_name} to {display_value}")
+
+    if assignment_ok:
+        # Advisory only and emitted after mutation: rejected values must not
+        # consume the field's one warning, and reporter failures cannot block
+        # the assignment itself.
+        _warn_deprecated_field(pref, normalized, cli_print)
 
     return assignment_ok
 
