@@ -21,7 +21,9 @@ from meshtastic.cli.preference_runtime import CONFIGURE_PREFLIGHT_MODE
 from meshtastic.protobuf import config_pb2, module_config_pb2
 
 
-def _make_hooks(target_node: Any) -> tuple[ConfigureHooks, dict[str, Any]]:
+def _make_hooks(
+    *, traverse_config: Any = main_module.traverseConfig
+) -> tuple[ConfigureHooks, dict[str, Any]]:
     """Build real configure hooks around recording exit/print callables."""
     exits: list[tuple[str, int]] = []
     printed: list[str] = []
@@ -36,7 +38,7 @@ def _make_hooks(target_node: Any) -> tuple[ConfigureHooks, dict[str, Any]]:
     hooks = ConfigureHooks(
         cli_exit=_cli_exit,
         cli_print=printed.append,
-        traverse_config=main_module.traverseConfig,
+        traverse_config=traverse_config,
         preflight_mode=CONFIGURE_PREFLIGHT_MODE,
         is_local_destination=MagicMock(return_value=True),
         post_seturl_stability_check=MagicMock(return_value=True),
@@ -61,7 +63,7 @@ def test_configure_preflight_rejects_out_of_bounds_config_value(
 ) -> None:
     """A YAML value beyond a schema bound terminates before device mutation."""
     node = _make_node()
-    hooks, recordings = _make_hooks(node)
+    hooks, recordings = _make_hooks()
 
     with pytest.raises(SystemExit):
         _preflight_configure_sections(
@@ -89,7 +91,7 @@ def test_configure_preflight_rejects_out_of_bounds_module_value(
 ) -> None:
     """Module config values are bounds-checked on the same preflight path."""
     node = _make_node()
-    hooks, recordings = _make_hooks(node)
+    hooks, recordings = _make_hooks()
 
     with pytest.raises(SystemExit):
         _preflight_configure_sections(
@@ -107,9 +109,17 @@ def test_configure_preflight_rejects_out_of_bounds_module_value(
 
 @pytest.mark.unit
 def test_configure_preflight_accepts_in_bounds_values() -> None:
-    """In-bounds values pass preflight without terminating the CLI."""
+    """In-bounds values are applied to the preflight copies, not the live roots."""
     node = _make_node()
-    hooks, recordings = _make_hooks(node)
+    candidates: list[Any] = []
+
+    def _recording_traverse(
+        section: str, values: dict[str, Any], interface_config: Any, **kwargs: Any
+    ) -> bool:
+        candidates.append(interface_config)
+        return main_module.traverseConfig(section, values, interface_config, **kwargs)
+
+    hooks, recordings = _make_hooks(traverse_config=_recording_traverse)
 
     _preflight_configure_sections(
         hooks,
@@ -119,7 +129,17 @@ def test_configure_preflight_accepts_in_bounds_values() -> None:
     )
 
     assert recordings["exits"] == []
-    # Preflight validates protobuf copies; the live config roots stay untouched
-    # until the configure plan applies them after the transaction opens.
+    # The in-bounds values must reach the protobuf copies preflight validates,
+    # proving traversal and assignment actually ran rather than being skipped.
+    assert len(candidates) == 2
+    config_candidate, module_candidate = candidates
+    assert isinstance(config_candidate, config_pb2.Config)
+    assert isinstance(module_candidate, module_config_pb2.ModuleConfig)
+    assert config_candidate.lora.hop_limit == 3
+    assert module_candidate.ambient_lighting.red == 200
+    # Preflight validates copies; the live config roots stay untouched until
+    # the configure plan applies them after the transaction opens.
+    assert config_candidate is not node.localConfig
+    assert module_candidate is not node.moduleConfig
     assert node.localConfig.lora.hop_limit == 0
     assert node.moduleConfig.ambient_lighting.red == 0
