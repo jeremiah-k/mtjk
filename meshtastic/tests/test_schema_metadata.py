@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from meshtastic.cli.schema_metadata import (
+from meshtastic.protobuf import config_pb2, localonly_pb2
+from meshtastic.schema_metadata import (
     _get_enum_value_metadata,
     _get_field_metadata,
+    getFieldMetadata,
 )
-from meshtastic.protobuf import config_pb2, localonly_pb2
 
 
 @pytest.mark.unit
@@ -103,3 +104,63 @@ def test_standard_enum_value_deprecation_is_preserved_without_custom_metadata() 
 
     assert metadata is not None
     assert metadata.deprecated is True
+
+
+@pytest.mark.unit
+def test_get_field_metadata_resolves_config_path() -> None:
+    """Public lookup resolves config paths to their declared metadata."""
+    metadata = getFieldMetadata("lora.hop_limit")
+
+    assert metadata is not None
+    assert metadata.min_value == 0.0
+    assert metadata.max_value == 7.0
+    assert metadata.label == "Hop Limit"
+
+
+@pytest.mark.unit
+def test_get_field_metadata_normalizes_camel_case_segments() -> None:
+    """CamelCase segments resolve to the same metadata as snake_case ones."""
+    assert getFieldMetadata("lora.hopLimit") == getFieldMetadata("lora.hop_limit")
+
+
+@pytest.mark.unit
+def test_get_field_metadata_resolves_module_config_path() -> None:
+    """Public lookup covers module_config sections without a root hint."""
+    metadata = getFieldMetadata("ambient_lighting.red")
+
+    assert metadata is not None
+    assert metadata.max_value == 255.0
+
+
+@pytest.mark.unit
+def test_get_field_metadata_returns_none_for_unknown_paths() -> None:
+    """Unknown sections, unknown fields, and section-only paths return None."""
+    assert getFieldMetadata("nosuch.hop_limit") is None
+    assert getFieldMetadata("lora.nosuch") is None
+    assert getFieldMetadata("lora") is None
+
+
+@pytest.mark.unit
+def test_get_field_metadata_returns_none_for_unannotated_field() -> None:
+    """Fields that declare no metadata resolve to None on the public path."""
+    assert getFieldMetadata("power.sds_secs") is None
+
+
+@pytest.mark.unit
+def test_field_metadata_has_bounds_property() -> None:
+    """has_bounds reflects either declared numeric bound."""
+    bounded = getFieldMetadata("lora.hop_limit")
+    unbounded = getFieldMetadata("position.rx_gpio")
+
+    assert bounded is not None and bounded.has_bounds is True
+    assert unbounded is not None and unbounded.has_bounds is False
+
+
+@pytest.mark.unit
+def test_field_metadata_instances_are_immutable() -> None:
+    """Public metadata objects cannot be mutated after construction."""
+    metadata = getFieldMetadata("lora.hop_limit")
+
+    assert metadata is not None
+    with pytest.raises(AttributeError):
+        metadata.min_value = 1.0  # type: ignore[misc]

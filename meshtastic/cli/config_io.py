@@ -14,13 +14,13 @@ from google.protobuf.message import DecodeError, Message
 
 import meshtastic.util
 from meshtastic.cli.context import CliExit, _terminate_cli
-from meshtastic.cli.schema_metadata import (
+from meshtastic.mesh_interface import MeshInterface
+from meshtastic.protobuf import clientonly_pb2, localonly_pb2
+from meshtastic.schema_metadata import (
     _format_numeric_bound,
     _get_enum_value_metadata,
     _get_field_metadata,
 )
-from meshtastic.mesh_interface import MeshInterface
-from meshtastic.protobuf import clientonly_pb2, localonly_pb2
 
 
 class DescriptorLike(Protocol):

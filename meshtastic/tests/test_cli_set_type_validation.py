@@ -7,8 +7,8 @@ import pytest
 
 import meshtastic.cli.preference_runtime as preference_runtime
 from meshtastic.__main__ import main, setPref
-from meshtastic.cli.schema_metadata import _SchemaMetadata
 from meshtastic.protobuf import config_pb2, localonly_pb2
+from meshtastic.schema_metadata import FieldMetadata as _SchemaMetadata
 
 from .cli_validation_test_helpers import _mock_tcp_interface_with_channels
 
