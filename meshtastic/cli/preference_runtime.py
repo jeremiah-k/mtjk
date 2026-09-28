@@ -22,7 +22,11 @@ from google.protobuf.message_factory import GetMessageClass
 import meshtastic.util
 from meshtastic.cli.values import parse_bitfield_value
 from meshtastic.protobuf import config_pb2
-from meshtastic.schema_metadata import _format_numeric_bound, _get_field_metadata
+from meshtastic.schema_metadata import (
+    _format_numeric_bound,
+    _get_field_limits,
+    _get_field_metadata,
+)
 
 # Preserve the historical CLI logger name even though implementation moved here.
 # Warning/debug routing is observable through existing logging configuration and tests.
@@ -339,6 +343,59 @@ def _validate_metadata_bounds(
     )
 
 
+def _validate_field_size_limit(
+    pref: FieldDescriptor,
+    value: Any,
+    *,
+    field_path: str,
+    cli_print: Callable[..., None],
+) -> bool:
+    """Reject encoded values the firmware would truncate.
+
+    Parameters
+    ----------
+    pref : FieldDescriptor
+        Descriptor of the preference field being assigned.
+    value : Any
+        Converted value awaiting protobuf assignment.
+    field_path : str
+        Canonical dotted path used for diagnostics.
+    cli_print : Callable[..., None]
+        Quiet-aware CLI reporter for the rejection message.
+
+    Returns
+    -------
+    bool
+        ``True`` when the value fits the declared firmware limit.
+    """
+    limits = _get_field_limits(pref)
+    if limits is None or limits.max_size is None:
+        return True
+    if pref.type == FieldDescriptor.TYPE_STRING and isinstance(value, str):
+        # nanopb reserves one byte of max_size for the NUL terminator.
+        usable = limits.max_size - 1
+        encoded = len(value.encode("utf-8", errors="replace"))
+        if encoded > usable:
+            display_value = redact_pref_value(field_path, repr(value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; encoded length "
+                f"{encoded} bytes exceeds the firmware limit of {usable} bytes.",
+                cli_print=cli_print,
+            )
+    elif pref.type == FieldDescriptor.TYPE_BYTES and isinstance(
+        value, (bytes, bytearray)
+    ):
+        if len(value) > limits.max_size:
+            display_value = redact_pref_value(field_path, repr(value))
+            return _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; encoded length "
+                f"{len(value)} bytes exceeds the firmware limit of "
+                f"{limits.max_size} bytes.",
+                cli_print=cli_print,
+            )
+    return True
+
+
 def _validate_pref_before_assignment(
     pref: FieldDescriptor,
     value: Any,
@@ -350,6 +407,10 @@ def _validate_pref_before_assignment(
 ) -> bool:
     """Run the pre-assignment checks that reject one scalar preference value."""
     if not _validate_metadata_bounds(
+        pref, value, field_path=field_path, cli_print=cli_print
+    ):
+        return False
+    if not _validate_field_size_limit(
         pref, value, field_path=field_path, cli_print=cli_print
     ):
         return False
@@ -627,6 +688,23 @@ def _assign_repeated_pref_value(
                 pref,
                 field_path=field_path,
                 raw_value=raw_value,
+                cli_print=cli_print,
+            ),
+            True,
+        )
+
+    limits = _get_field_limits(pref)
+    if (
+        limits is not None
+        and limits.max_count is not None
+        and len(candidate_values) > limits.max_count
+    ):
+        display_value = redact_pref_value(field_path, meshtastic.util.toStr(raw_value))
+        return (
+            _reject_pref_validation_message(
+                f"Invalid value {display_value} for {field_path}; "
+                f"{len(candidate_values)} entries exceeds the firmware limit of "
+                f"{limits.max_count}.",
                 cli_print=cli_print,
             ),
             True,

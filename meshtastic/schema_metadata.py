@@ -136,18 +136,7 @@ def getFieldLimits(path: str) -> FieldLimits | None:
     field = _resolve_config_field(path)
     if field is None:
         return None
-    options = field.GetOptions().Extensions[nanopb_pb2.nanopb]
-    if not (
-        options.HasField("max_size")
-        or options.HasField("max_count")
-        or options.HasField("int_size")
-    ):
-        return None
-    return FieldLimits(
-        max_size=options.max_size if options.HasField("max_size") else None,
-        max_count=options.max_count if options.HasField("max_count") else None,
-        int_size=options.int_size if options.HasField("int_size") else None,
-    )
+    return _get_field_limits(field)
 
 
 def getEnumValueMetadata(path: str, value_name: str) -> FieldMetadata | None:
@@ -223,6 +212,33 @@ def _resolve_config_field(path: str) -> FieldDescriptor | None:
         if field is not None:
             return field
     return None
+
+
+def _get_field_limits(field: FieldDescriptor) -> FieldLimits | None:
+    """Return declared nanopb limits for one field descriptor.
+
+    Parameters
+    ----------
+    field : FieldDescriptor
+        Descriptor of the configuration field to read.
+
+    Returns
+    -------
+    FieldLimits | None
+        The declared limits, or ``None`` when the field declares none.
+    """
+    options = field.GetOptions().Extensions[nanopb_pb2.nanopb]
+    if not (
+        options.HasField("max_size")
+        or options.HasField("max_count")
+        or options.HasField("int_size")
+    ):
+        return None
+    return FieldLimits(
+        max_size=options.max_size if options.HasField("max_size") else None,
+        max_count=options.max_count if options.HasField("max_count") else None,
+        int_size=options.int_size if options.HasField("int_size") else None,
+    )
 
 
 def _configuration_roots() -> tuple[Descriptor, ...]:
