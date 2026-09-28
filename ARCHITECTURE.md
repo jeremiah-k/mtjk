@@ -197,12 +197,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands that mirror CI.
 
 ## Upstream relationship
 
-`mtjk` develops independently of `meshtastic/python`. The histories have
-diverged far enough that a merge would be ceremonial rather than a real
-integration, so upstream changes are ported — cherry-picked and adapted — when
-they are wanted, and an upstream merge is done only occasionally, after the
-fixes of interest have already been ported. Porting a fix does not require a
-merge.
+The upstream project remains the primary Meshtastic Python project, and
+general Meshtastic community development belongs there. Isolated improvements
+developed here are intended to be made available for upstreaming when they
+can be separated cleanly, as described in the README.
+
+Because the histories have diverged far enough that a merge would be
+ceremonial rather than a real integration, day-to-day integration happens by
+porting: upstream changes of interest are cherry-picked and adapted, and an
+upstream merge is done only occasionally, after the fixes of interest have
+already been ported. Porting a fix does not require a merge.
 
 Two automations watch upstream without coupling this fork's history to it:
 
@@ -210,8 +214,6 @@ Two automations watch upstream without coupling this fork's history to it:
   revision and regenerates the bindings;
 - the nightly API-baseline workflow snapshots the upstream master surface and
   opens a PR when it drifts, so upstream API changes stay visible.
-
-This fork does not open pull requests against upstream.
 
 ## Project evolution
 
