@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import pytest
+from google.protobuf import descriptor_pb2, descriptor_pool
 
 from meshtastic.protobuf import config_pb2, localonly_pb2
 from meshtastic.schema_metadata import (
     _format_numeric_bound,
     _get_enum_value_metadata,
     _get_field_metadata,
+    _resolve_enum_value_name,
+    getEnumValueMetadata,
+    getFieldLimits,
     getFieldMetadata,
 )
 
@@ -200,3 +204,96 @@ def test_format_numeric_bound_drops_unneeded_decimals() -> None:
     """Bound formatting keeps decimals only when present."""
     assert _format_numeric_bound(7.0) == "7"
     assert _format_numeric_bound(0.5) == "0.5"
+
+
+@pytest.mark.unit
+def test_enum_name_resolution_is_truly_case_insensitive() -> None:
+    """Public case-insensitive semantics do not depend on uppercase proto style."""
+    file_proto = descriptor_pb2.FileDescriptorProto(
+        name="schema_metadata_casefold.proto", package="schema_metadata_test"
+    )
+    enum_proto = file_proto.enum_type.add(name="MixedCaseEnum")
+    enum_proto.value.add(name="Mixed_Name", number=0)
+    enum_descriptor = (
+        descriptor_pool.DescriptorPool()
+        .Add(file_proto)
+        .enum_types_by_name["MixedCaseEnum"]
+    )
+
+    resolved = _resolve_enum_value_name(enum_descriptor, "mixed_name")
+
+    assert resolved is not None
+    assert resolved.name == "Mixed_Name"
+
+
+@pytest.mark.unit
+def test_get_field_limits_returns_declared_max_size() -> None:
+    """String size limits are readable from the nanopb options."""
+    limits = getFieldLimits("network.ntp_server")
+
+    assert limits is not None
+    assert limits.max_size == 33
+    assert limits.max_count is None
+    assert limits.int_size is None
+
+
+@pytest.mark.unit
+def test_get_field_limits_returns_declared_max_count() -> None:
+    """Repeated-field element counts are readable from the nanopb options."""
+    limits = getFieldLimits("lora.ignore_incoming")
+
+    assert limits is not None
+    assert limits.max_count == 3
+    assert limits.max_size is None
+
+
+@pytest.mark.unit
+def test_get_field_limits_returns_declared_int_size() -> None:
+    """Integer width declarations surface as bit widths."""
+    limits = getFieldLimits("device.buzzer_mode")
+
+    assert limits is not None
+    assert limits.int_size == 8
+
+
+@pytest.mark.unit
+def test_get_field_limits_returns_none_without_declarations() -> None:
+    """Fields with no nanopb limits and unknown paths return None."""
+    assert getFieldLimits("power.sds_secs") is None
+    assert getFieldLimits("nosuch.field") is None
+
+
+@pytest.mark.unit
+def test_get_enum_value_metadata_resolves_by_name() -> None:
+    """Enum value metadata resolves through the field path."""
+    metadata = getEnumValueMetadata("lora.modem_preset", "LONG_FAST")
+
+    assert metadata is not None
+    assert metadata.label == "Long Range - Fast"
+    assert metadata.keywords == ("longfast", "default")
+
+
+@pytest.mark.unit
+def test_get_enum_value_metadata_normalizes_value_name_case() -> None:
+    """Lower-case value names resolve to the same metadata."""
+    assert getEnumValueMetadata(
+        "lora.modem_preset", "long_fast"
+    ) == getEnumValueMetadata("lora.modem_preset", "LONG_FAST")
+
+
+@pytest.mark.unit
+def test_get_enum_value_metadata_returns_none_for_unknown_targets() -> None:
+    """Unknown values, non-enum fields, and unknown paths return None."""
+    assert getEnumValueMetadata("lora.modem_preset", "NO_SUCH_MODE") is None
+    assert getEnumValueMetadata("network.ntp_server", "ANY") is None
+    assert getEnumValueMetadata("nosuch.field", "ANY") is None
+
+
+@pytest.mark.unit
+def test_field_limits_instances_are_immutable() -> None:
+    """Public limit objects cannot be mutated after construction."""
+    limits = getFieldLimits("network.ntp_server")
+
+    assert limits is not None
+    with pytest.raises(AttributeError):
+        limits.max_size = 1  # type: ignore[misc]
