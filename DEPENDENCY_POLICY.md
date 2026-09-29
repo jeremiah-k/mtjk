@@ -26,9 +26,12 @@ classification has been recorded in the table below (with a revisit date).
 
 - `ppk2-api`: the source repo is active, so "abandoned" is inaccurate — but the
   PyPI release has been stuck at 0.9.2 (2023-06) while unreleased behavior
-  changes accumulate. Keep the dashboard reminder until the backend decision
-  (see the ppk2lab evaluation plan in PR #527 and the ppk2 adapter
-  compatibility work in PR #526) is made.
+  changes accumulate. Backend decision parked 2026-09-29: stay on `ppk2-api`;
+  no PPK2 hardware is available to evaluate ppk2lab (see the parked evaluation
+  plan and the ppk2 adapter compatibility work in PR #526). Revisit when a
+  PPK2 unit becomes available, `ppk2-api` publishes a new release, or
+  `ppk2lab` leaves Alpha with maintainer-documented real-hardware
+  validation.
 
 ## Source (Git) dependencies
 

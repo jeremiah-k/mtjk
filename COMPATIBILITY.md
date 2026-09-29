@@ -18,7 +18,7 @@ commitment by default.
 
 ## Scope and Policy
 
-- Runtime baseline is Python 3.10+.
+- Runtime baseline is Python 3.11+.
 - Existing public API names and established calling patterns take priority over
   naming cleanup.
 - New public API names generally follow the project's historical `camelCase`
