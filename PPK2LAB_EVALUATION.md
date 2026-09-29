@@ -1,8 +1,10 @@
 # PPK2 Backend Evaluation: ppk2lab (experiment)
 
-Status: **experiment — no production switch.** This branch only records an
-evaluation plan. The production powermon backend remains `ppk2-api` 0.9.2 from
+Status: **parked (2026-09-29) — no PPK2 hardware is available for the
+evaluation.** The production powermon backend remains `ppk2-api` 0.9.2 from
 PyPI (see https://github.com/jeremiah-k/mtjk/pull/526 for adapter hardening).
+This document is kept as the standing evaluation plan; see "Exit conditions"
+for what would reopen the decision.
 
 Context: dependency health audit, 2026-09-16. `ppk2-api`'s PyPI release has been
 stuck at 0.9.2 (June 2023) while upstream master carries unreleased behavior
@@ -18,11 +20,12 @@ modern alternative against real hardware.
 
 ## Blockers (why it cannot become the default today)
 
-1. Requires Python >= 3.11; mtjk supports 3.10–3.14. Until mtjk raises its
-   floor or ppk2lab widens support, ppk2lab cannot be an unconditional
-   powermon dependency.
+1. ~~Requires Python >= 3.11; mtjk supports 3.10–3.14.~~ Resolved: the mtjk
+   floor is now 3.11. The version gate no longer blocks adoption.
 2. Alpha classification: measurement fidelity and device coverage are not yet
    proven to the standard required for a hardware backend.
+3. No PPK2 hardware is available to run the real-hardware evaluation below;
+   measurement fidelity cannot be validated without it.
 
 ## Evaluation procedure (requires real PPK2 hardware)
 
@@ -46,15 +49,18 @@ ad hoc). Record firmware revision of the PPK2 unit under test.
 ## Success criteria
 
 - All five procedures pass on every tested firmware revision.
-- A migration path exists for Python 3.10 users (keep ppk2-api behind a
-  selection flag, or mtjk floor rises to 3.11 first).
+- (The former Python 3.10 migration-path criterion is moot: the mtjk floor
+  is 3.11 as of 2026-09-29.)
 
 ## Exit conditions
 
-- **Adopt** when success criteria are met and ppk2lab is no longer Alpha
-  (or the hardware validation above is deemed sufficient by a maintainer).
-- **Stay on ppk2-api** if evaluation fails or stalls; revisit when ppk2-api
-  publishes a new release or mtjk's Python floor changes.
+- **Parked (2026-09-29):** stay on `ppk2-api` 0.9.2. The decision reopens when
+  any of these changes: a PPK2 unit becomes available to run the evaluation,
+  `ppk2-api` publishes a new PyPI release, or `ppk2lab` leaves Alpha with
+  real-hardware validation documented by its maintainers.
+- **Adopt** when the parked decision is reopened and the success criteria are
+  met (ppk2lab no longer Alpha, or the hardware validation above is deemed
+  sufficient by a maintainer).
 - **Fork ppk2-api** only for a concrete upstream-blocked hardware fix: carry
   the smallest patch, pin an exact commit, submit upstream, and record an
   exit condition. Note ppk2-api is GPLv2 — any vendoring/copying of source
