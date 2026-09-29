@@ -29,7 +29,9 @@ classification has been recorded in the table below (with a revisit date).
   changes accumulate. Backend decision parked 2026-09-29: stay on `ppk2-api`;
   no PPK2 hardware is available to evaluate ppk2lab (see the parked evaluation
   plan and the ppk2 adapter compatibility work in PR #526). Revisit when a
-  PPK2 unit becomes available or `ppk2-api` publishes a new release.
+  PPK2 unit becomes available, `ppk2-api` publishes a new release, or
+  `ppk2lab` leaves Alpha with maintainer-documented real-hardware
+  validation.
 
 ## Source (Git) dependencies
 
