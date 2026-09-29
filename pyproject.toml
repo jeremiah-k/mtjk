@@ -14,7 +14,7 @@ packages = [{ include = "meshtastic" }]
 include = [{ path = "meshtastic/py.typed", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
-python = "^3.10,<3.15"
+python = "^3.11,<3.15"
 pyserial = "^3.5"
 protobuf = ">=5.29.5"
 typing-extensions = { version = ">=4.15.0", python = "<3.13" }

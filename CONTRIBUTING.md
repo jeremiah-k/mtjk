@@ -40,14 +40,14 @@ source of truth for `mtjk` maintenance policy.
 
 ## Python and typing baseline
 
-- Runtime baseline is Python 3.10+ (see `pyproject.toml`: `python = "^3.10,<3.15"`).
+- Runtime baseline is Python 3.11+ (see `pyproject.toml`: `python = "^3.11,<3.15"`).
 - Use PEP 604 unions (`X | None`, `A | B`) and built-in generics
   (`dict[K, V]`, `list[T]`, `tuple[T, ...]`) for new and edited annotations.
 - Do not churn code with typing-only mass rewrites; normalize typing style only
   in areas already being edited.
 - If your LSP/type checker suggests replacing `|` with `Optional`/`Union`,
   fix the tool's interpreter/version configuration first (Poetry-managed env),
-  rather than rewriting annotations for legacy pre-3.10 compatibility.
+  rather than rewriting annotations for legacy pre-3.11 compatibility.
 - Do not require contributors to manually create/activate a venv; use
   `poetry install ...` and run tools via `poetry run ...`.
 
