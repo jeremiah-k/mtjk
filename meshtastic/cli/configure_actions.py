@@ -16,7 +16,7 @@ import logging
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NoReturn
 
 from google.protobuf.descriptor import FieldDescriptor
 
@@ -30,6 +30,7 @@ from meshtastic.cli.config_preview import (
     preview_requested,
     render_preview_value,
 )
+from meshtastic.cli.config_readiness import ensure_config_sections_loaded
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
 
 # COMPAT_STABLE_SHIM: verification helpers moved to meshtastic.configure_verify.
@@ -1437,6 +1438,27 @@ def _prepare_configure_execution(
     )
 
 
+def _section_readiness_exit(hooks: ConfigureHooks) -> Callable[[str], NoReturn]:
+    """Build the fail-closed abort seam for section-acquisition timeouts.
+
+    Parameters
+    ----------
+    hooks : ConfigureHooks
+        Entrypoint-owned compatibility and reporting seams.
+
+    Returns
+    -------
+    Callable[[str], NoReturn]
+        Abort callable forwarding the readiness message through the caller's
+        exit seam; injected seams that return still fail closed.
+    """
+
+    def _exit(message: str) -> NoReturn:
+        _terminate_cli(hooks.cli_exit, message)
+
+    return _exit
+
+
 def _requested_configure_section_fields(
     target_node: Any,
     prepared: _PreparedConfigureDocument,
@@ -1505,6 +1527,11 @@ def _execute_configure_plan(
     """
     prepared = plan.prepared
     if plan.has_config_writes:
+        ensure_config_sections_loaded(
+            target_node,
+            _requested_configure_section_fields(target_node, prepared),
+            cli_exit=_section_readiness_exit(hooks),
+        )
         _preflight_configure_sections(
             hooks,
             target_node,
