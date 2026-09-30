@@ -1062,10 +1062,45 @@ def _resolve_set_target(
     return None
 
 
+class _ConfigSectionProbe:
+    """Expose pending config-section presence as one boolean wait target."""
+
+    def __init__(self, checks: Sequence[tuple[Callable[[str], bool], str]]) -> None:
+        self._checks = checks
+
+    @property
+    def is_set(self) -> bool:
+        """Return whether every requested config section is currently present."""
+        for has_field_fn, name in self._checks:
+            try:
+                if not has_field_fn(name):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+
+def _wait_for_set_sections(
+    node: Any, pending_sections: Sequence[tuple[Any, FieldDescriptor]]
+) -> bool:
+    """Wait once for all requested config sections to arrive on the cached node."""
+    timeout = getattr(node, "_timeout", None)
+    wait_for_set = getattr(timeout, "waitForSet", None)
+    if not callable(wait_for_set):
+        return True
+    probe = _ConfigSectionProbe(
+        [
+            (config.HasField, config_type.name)
+            for config, config_type in pending_sections
+        ]
+    )
+    return wait_for_set(probe, attrs=("is_set",))
+
+
 def _ensure_set_sections_loaded(
     node: Any, set_entries: Sequence[tuple[str, Any]]
 ) -> None:
-    """Request missing config sections before creating preflight snapshots.
+    """Request missing config sections and wait for them before preflight.
 
     Parameters
     ----------
@@ -1079,10 +1114,15 @@ def _ensure_set_sections_loaded(
     Requests are deduplicated by config section. Protobuf message presence, not
     ``ListFields()``, distinguishes an already-loaded default-valued section from
     a section that has never been received. Unknown preference paths do not
-    trigger device reads.
+    trigger device reads. Requested sections share one bounded wait using the
+    node's existing timeout so the write and preview paths validate and render
+    against received state instead of protobuf defaults; a section that never
+    arrives exits before any validation, rendering, or write. ``noProto`` nodes
+    are never waited on because no response can arrive without protocol use.
     """
     configs = (node.localConfig, node.moduleConfig)
     requested_sections: set[tuple[str, str]] = set()
+    pending_sections: list[tuple[Any, FieldDescriptor]] = []
     for raw_pref_name, _raw_value in set_entries:
         pref_name = _normalize_pref_name(raw_pref_name)
         resolved = _resolve_set_target(configs, pref_name)
@@ -1098,6 +1138,21 @@ def _ensure_set_sections_loaded(
         requested_sections.add(section_key)
         if not config.HasField(config_type.name):
             node.requestConfig(config_type)
+            pending_sections.append((config, config_type))
+    # A noProto node can never deliver a config response, so waiting would only
+    # burn the timeout; unloaded sections keep their fail-closed rendering there.
+    if (
+        pending_sections
+        and not getattr(node, "noProto", False)
+        and not _wait_for_set_sections(node, pending_sections)
+    ):
+        for config, config_type in pending_sections:
+            if not config.HasField(config_type.name):
+                _cli_exit(
+                    "ERROR: timed out waiting for the "
+                    f"{config_type.name} configuration section from the device; "
+                    "no changes were made."
+                )
 
 
 def _validate_set_entries_against_configs(
@@ -1411,8 +1466,9 @@ def _preview_set_command(
 
     Notes
     -----
-    Read-only by construction: only missing-section read requests are issued,
-    validated assignments are applied to the returned protobuf copies, and no
+    Read-only by construction: only missing-section read requests are issued
+    and awaited, validated assignments are applied to the returned protobuf
+    copies, and no
     writes, transactions, or acknowledgments are ever performed. Invalid
     batches report the same preflight errors as the normal path and exit
     without any preview output. Validation considers every entry — including

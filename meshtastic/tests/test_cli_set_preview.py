@@ -26,6 +26,7 @@ def _preview_interface() -> tuple[MagicMock, MagicMock]:
     interface.__enter__ = MagicMock(return_value=interface)
     interface.__exit__ = MagicMock(return_value=None)
     node = MagicMock(autospec=Node)
+    node.noProto = False
     node.localConfig = localonly_pb2.LocalConfig()
     node.moduleConfig = localonly_pb2.LocalModuleConfig()
     interface.getNode.return_value = node
@@ -184,6 +185,141 @@ def test_preview_reports_not_set_for_unloaded_section(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_waits_for_requested_section_before_rendering(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A requested section is awaited and its arrival backs the current value."""
+    interface, node = _preview_interface()
+
+    def _arrive(_probe: object, attrs: object) -> bool:
+        del attrs
+        node.localConfig.power.SetInParent()
+        node.localConfig.power.ls_secs = 900
+        return True
+
+    node._timeout.waitForSet.side_effect = _arrive
+    args = _set_args([["power.ls_secs", "300"]])
+
+    _preview_set_command(interface, args, {})
+
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: 900)" in out.splitlines()
+    node.requestConfig.assert_called_once()
+    assert node.requestConfig.call_args.args[0].name == "power"
+    node._timeout.waitForSet.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_exits_when_requested_section_never_arrives(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A section that never arrives aborts the preview before rendering."""
+    interface, node = _preview_interface()
+    node._timeout.waitForSet.return_value = False
+    args = _set_args([["power.ls_secs", "300"]])
+
+    with pytest.raises(SystemExit) as exc_info:
+        _preview_set_command(interface, args, {})
+
+    assert exc_info.value.code == 1
+    _out, err = capsys.readouterr()
+    assert "timed out waiting for the power configuration" in err
+    node.writeConfig.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_normal_set_exits_when_requested_section_never_arrives(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The write path refuses to proceed when a requested section never arrives."""
+    interface, node = _preview_interface()
+    node._timeout.waitForSet.return_value = False
+    args = _set_args([["power.ls_secs", "300"]])
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_set_command(interface, args, {})
+
+    assert exc_info.value.code == 1
+    _out, err = capsys.readouterr()
+    assert "timed out waiting for the power configuration" in err
+    node.writeConfig.assert_not_called()
+    node.beginSettingsTransaction.assert_not_called()
+    node.commitSettingsTransaction.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_waits_once_for_all_requested_sections(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Multiple requested sections share one bounded wait, not one per section."""
+    interface, node = _preview_interface()
+
+    def _arrive(_probe: object, attrs: object) -> bool:
+        del attrs
+        node.localConfig.power.SetInParent()
+        node.moduleConfig.external_notification.SetInParent()
+        return True
+
+    node._timeout.waitForSet.side_effect = _arrive
+    args = _set_args(
+        [["power.ls_secs", "300"], ["external_notification.enabled", "true"]]
+    )
+
+    _preview_set_command(interface, args, {})
+
+    node.requestConfig.assert_called()
+    assert node.requestConfig.call_count == 2
+    node._timeout.waitForSet.assert_called_once()
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: 0)" in out.splitlines()
+    assert (
+        "Would set external_notification.enabled = true (current: false)"
+        in out.splitlines()
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_set_skips_section_wait_for_noproto_node(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``noProto`` nodes are never waited on because responses cannot arrive."""
+    interface, node = _preview_interface()
+    node.noProto = True
+    args = _set_args([["power.ls_secs", "300"]])
+
+    _preview_set_command(interface, args, {})
+
+    node.requestConfig.assert_called_once()
+    node._timeout.waitForSet.assert_not_called()
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: not set)" in out.splitlines()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_set_skips_section_wait_when_already_loaded(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Loaded sections neither re-request nor wait before previewing."""
+    interface, node = _preview_interface()
+    node.localConfig.power.SetInParent()
+    node.localConfig.power.ls_secs = 900
+    args = _set_args([["power.ls_secs", "300"]])
+
+    _preview_set_command(interface, args, {})
+
+    node.requestConfig.assert_not_called()
+    node._timeout.waitForSet.assert_not_called()
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: 900)" in out.splitlines()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_preview_renders_repeated_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -276,8 +412,12 @@ def test_preview_mutates_only_the_returned_copies() -> None:
     assert snapshot.module_config.external_notification.enabled is True
     assert node.localConfig.power.ls_secs == 60
     assert node.moduleConfig.external_notification.enabled is False
-    called_methods = {record[0] for record in node.mock_calls}
-    assert called_methods <= {"requestConfig"}
+    called_methods = {
+        record[0] for record in node.mock_calls if "().__" not in record[0]
+    }
+    # waitForSet is the local section-arrival poll, not device traffic; dunder
+    # records (mock truthiness bookkeeping) are filtered out above.
+    assert called_methods <= {"requestConfig", "_timeout.waitForSet"}
     node.writeConfig.assert_not_called()
     node.beginSettingsTransaction.assert_not_called()
     node.commitSettingsTransaction.assert_not_called()
