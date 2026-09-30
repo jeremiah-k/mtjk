@@ -26,6 +26,7 @@ def _preview_interface() -> tuple[MagicMock, MagicMock]:
     interface.__enter__ = MagicMock(return_value=interface)
     interface.__exit__ = MagicMock(return_value=None)
     node = MagicMock(autospec=Node)
+    node.noProto = False
     node.localConfig = localonly_pb2.LocalConfig()
     node.moduleConfig = localonly_pb2.LocalModuleConfig()
     interface.getNode.return_value = node
@@ -278,6 +279,24 @@ def test_preview_set_waits_once_for_all_requested_sections(
         "Would set external_notification.enabled = true (current: false)"
         in out.splitlines()
     )
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_set_skips_section_wait_for_noproto_node(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``noProto`` nodes are never waited on because responses cannot arrive."""
+    interface, node = _preview_interface()
+    node.noProto = True
+    args = _set_args([["power.ls_secs", "300"]])
+
+    _preview_set_command(interface, args, {})
+
+    node.requestConfig.assert_called_once()
+    node._timeout.waitForSet.assert_not_called()
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: not set)" in out.splitlines()
 
 
 @pytest.mark.unit

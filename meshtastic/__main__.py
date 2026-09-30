@@ -1117,7 +1117,8 @@ def _ensure_set_sections_loaded(
     trigger device reads. Requested sections share one bounded wait using the
     node's existing timeout so the write and preview paths validate and render
     against received state instead of protobuf defaults; a section that never
-    arrives exits before any validation, rendering, or write.
+    arrives exits before any validation, rendering, or write. ``noProto`` nodes
+    are never waited on because no response can arrive without protocol use.
     """
     configs = (node.localConfig, node.moduleConfig)
     requested_sections: set[tuple[str, str]] = set()
@@ -1138,7 +1139,13 @@ def _ensure_set_sections_loaded(
         if not config.HasField(config_type.name):
             node.requestConfig(config_type)
             pending_sections.append((config, config_type))
-    if pending_sections and not _wait_for_set_sections(node, pending_sections):
+    # A noProto node can never deliver a config response, so waiting would only
+    # burn the timeout; unloaded sections keep their fail-closed rendering there.
+    if (
+        pending_sections
+        and not getattr(node, "noProto", False)
+        and not _wait_for_set_sections(node, pending_sections)
+    ):
         for config, config_type in pending_sections:
             if not config.HasField(config_type.name):
                 _cli_exit(
