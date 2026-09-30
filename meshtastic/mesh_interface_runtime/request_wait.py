@@ -281,6 +281,72 @@ class _RequestWaitRuntime:
             return {}
         return retired_ids
 
+    def _resolve_wait_outcome_locked(
+        self,
+        acknowledgment_attr: str,
+        request_id: int | None,
+        *,
+        description: str,
+    ) -> tuple[int | None, bool]:
+        """Resolve the wait slot an ack/error belongs to; caller must hold the lock.
+
+        Parameters
+        ----------
+        acknowledgment_attr : str
+            Acknowledgment attribute scope the outcome belongs to.
+        request_id : int | None
+            Request-scoped id, or None for a legacy unscoped outcome.
+        description : str
+            Human-readable outcome label used in stale/retired debug logs.
+
+        Returns
+        -------
+        tuple[int | None, bool]
+            The resolved request id (None when the outcome must be ignored)
+            and whether the legacy unscoped acknowledgment flag should be set.
+        """
+        active_request_ids_for_attr = self._get_active_wait_request_ids().get(
+            acknowledgment_attr
+        )
+        has_request_scope = active_request_ids_for_attr is not None
+        active_request_ids = active_request_ids_for_attr or set()
+        if request_id is not None:
+            if request_id in active_request_ids:
+                resolved_request_id = request_id
+            elif has_request_scope:
+                logger.debug(
+                    "Ignoring stale %s for %s request_id=%s (active=%s)",
+                    description,
+                    acknowledgment_attr,
+                    request_id,
+                    sorted(active_request_ids),
+                )
+                return None, False
+            else:
+                retired_request_ids = self.prune_retired_wait_request_ids_locked(
+                    acknowledgment_attr
+                )
+                if request_id in retired_request_ids:
+                    logger.debug(
+                        "Ignoring retired scoped %s for %s request_id=%s",
+                        description,
+                        acknowledgment_attr,
+                        request_id,
+                    )
+                    return None, False
+                resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
+        elif has_request_scope:
+            logger.debug(
+                "Ignoring stale unscoped %s for %s while scoped waits are active: %s",
+                description,
+                acknowledgment_attr,
+                sorted(active_request_ids),
+            )
+            return None, False
+        else:
+            resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
+        return resolved_request_id, not has_request_scope
+
     def set_wait_error(
         self,
         acknowledgment_attr: str,
@@ -289,52 +355,19 @@ class _RequestWaitRuntime:
         request_id: int | None = None,
     ) -> None:
         """Record wait errors using scoped/unscoped compatibility rules."""
-        set_legacy_ack_flag = False
         with self._lock:
-            active_wait_request_ids = self._get_active_wait_request_ids()
-            wait_errors = self._get_wait_errors()
-            active_request_ids_for_attr = active_wait_request_ids.get(
-                acknowledgment_attr
-            )
-            has_request_scope = active_request_ids_for_attr is not None
-            active_request_ids = active_request_ids_for_attr or set()
-            if request_id is not None:
-                if request_id in active_request_ids:
-                    resolved_request_id = request_id
-                elif has_request_scope:
-                    logger.debug(
-                        "Ignoring stale wait error for %s request_id=%s (active=%s)",
-                        acknowledgment_attr,
-                        request_id,
-                        sorted(active_request_ids),
-                    )
-                    return
-                else:
-                    retired_request_ids = self.prune_retired_wait_request_ids_locked(
-                        acknowledgment_attr
-                    )
-                    if request_id in retired_request_ids:
-                        logger.debug(
-                            "Ignoring retired scoped wait error for %s request_id=%s",
-                            acknowledgment_attr,
-                            request_id,
-                        )
-                        return
-                    resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
-                wait_errors[(acknowledgment_attr, resolved_request_id)] = message
-            elif has_request_scope:
-                logger.debug(
-                    "Ignoring stale unscoped wait error for %s while scoped waits are active: %s",
+            resolved_request_id, set_legacy_ack_flag = (
+                self._resolve_wait_outcome_locked(
                     acknowledgment_attr,
-                    sorted(active_request_ids),
+                    request_id,
+                    description="wait error",
                 )
+            )
+            if resolved_request_id is None:
                 return
-            else:
-                resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
-                wait_errors[(acknowledgment_attr, resolved_request_id)] = message
-                set_legacy_ack_flag = True
-            if request_id is not None and not has_request_scope:
-                set_legacy_ack_flag = True
+            self._get_wait_errors()[
+                (acknowledgment_attr, resolved_request_id)
+            ] = message
         if set_legacy_ack_flag:
             setattr(self._get_acknowledgment(), acknowledgment_attr, True)
 
@@ -345,52 +378,17 @@ class _RequestWaitRuntime:
         request_id: int | None = None,
     ) -> None:
         """Mark wait acknowledgments using scoped/unscoped compatibility rules."""
-        set_legacy_ack_flag = False
         with self._lock:
-            active_wait_request_ids = self._get_active_wait_request_ids()
-            wait_acks = self._get_wait_acks()
-            active_request_ids_for_attr = active_wait_request_ids.get(
-                acknowledgment_attr
-            )
-            has_request_scope = active_request_ids_for_attr is not None
-            active_request_ids = active_request_ids_for_attr or set()
-            if request_id is not None:
-                if request_id in active_request_ids:
-                    resolved_request_id = request_id
-                elif has_request_scope:
-                    logger.debug(
-                        "Ignoring stale acknowledgement for %s request_id=%s (active=%s)",
-                        acknowledgment_attr,
-                        request_id,
-                        sorted(active_request_ids),
-                    )
-                    return
-                else:
-                    retired_request_ids = self.prune_retired_wait_request_ids_locked(
-                        acknowledgment_attr
-                    )
-                    if request_id in retired_request_ids:
-                        logger.debug(
-                            "Ignoring retired scoped acknowledgement for %s request_id=%s",
-                            acknowledgment_attr,
-                            request_id,
-                        )
-                        return
-                    resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
-                wait_acks.add((acknowledgment_attr, resolved_request_id))
-            elif has_request_scope:
-                logger.debug(
-                    "Ignoring stale unscoped acknowledgement for %s while scoped waits are active: %s",
+            resolved_request_id, set_legacy_ack_flag = (
+                self._resolve_wait_outcome_locked(
                     acknowledgment_attr,
-                    sorted(active_request_ids),
+                    request_id,
+                    description="acknowledgement",
                 )
+            )
+            if resolved_request_id is None:
                 return
-            else:
-                resolved_request_id = UNSCOPED_WAIT_REQUEST_ID
-                wait_acks.add((acknowledgment_attr, resolved_request_id))
-                set_legacy_ack_flag = True
-            if request_id is not None and not has_request_scope:
-                set_legacy_ack_flag = True
+            self._get_wait_acks().add((acknowledgment_attr, resolved_request_id))
         if set_legacy_ack_flag:
             setattr(self._get_acknowledgment(), acknowledgment_attr, True)
 

@@ -515,6 +515,32 @@ def test_retired_scoped_wait_ids_do_not_clobber_unscoped_wait_state() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_same_request_id_in_different_scopes_stays_isolated() -> None:
+    """One packet id reused by two wait scopes must correlate per scope."""
+    with MeshInterface(noProto=True) as iface:
+        iface._clear_wait_error(WAIT_ATTR_TELEMETRY, request_id=77)
+        iface._clear_wait_error(WAIT_ATTR_POSITION, request_id=77)
+
+        iface._set_wait_error(WAIT_ATTR_TELEMETRY, "telemetry-error", request_id=77)
+
+        # The position scope owns the same numeric id but must not see the error.
+        iface._raise_wait_error_if_present(WAIT_ATTR_POSITION, request_id=77)
+        with pytest.raises(MeshInterface.MeshInterfaceError, match="telemetry-error"):
+            iface._raise_wait_error_if_present(WAIT_ATTR_TELEMETRY, request_id=77)
+
+        iface._mark_wait_acknowledged(WAIT_ATTR_POSITION, request_id=77)
+
+        assert iface._wait_for_request_ack(WAIT_ATTR_POSITION, 77, timeout_seconds=0.05)
+        assert not iface._wait_for_request_ack(
+            WAIT_ATTR_TELEMETRY, 77, timeout_seconds=0.05
+        )
+        # Scoped outcomes never set the legacy unscoped acknowledgment flags.
+        assert iface._acknowledgment.receivedPosition is False
+        assert iface._acknowledgment.receivedTelemetry is False
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_record_routing_wait_error_ignores_none_like_reason() -> None:
     """Routing wait-error recorder should no-op for None/NONE reasons."""
     with MeshInterface(noProto=True) as iface:
