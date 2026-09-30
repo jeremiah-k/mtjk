@@ -106,8 +106,6 @@ def test_dry_run_rejects_each_action_category(
     capsys: pytest.CaptureFixture[str], flag_argv: list[str], label: str
 ) -> None:
     """Each rejected action flag exits 2 naming only the flag(s) provided."""
-    if flag_argv[0] == "--tunnel" and platform.system() != "Linux":
-        pytest.skip("--tunnel only exists on Linux")
     argv = ["--dry-run", "--set", "a", "1", *flag_argv]
     parser, args = _parse(argv)
     hooks = _make_hooks()
@@ -259,6 +257,25 @@ _DRY_RUN_INERT_DESTS = frozenset(
         "lockdown_wait",
     }
 )
+
+
+@pytest.mark.unit
+def test_dry_run_denylisted_action_defaults_are_inert() -> None:
+    """Every denylisted parser default must remain an inert action value.
+
+    ``_action_requested`` deliberately fails closed for any value other than
+    ``None``, ``False``, or ``[]``.  This guard catches future parser-default
+    drift (for example ``0`` or an empty string) without weakening runtime
+    handling of explicitly supplied zero-valued actions.
+    """
+    parser, _args = _parse([])
+
+    unexpected_defaults = {
+        label: parser.get_default(attribute)
+        for attribute, label in bootstrap._DRY_RUN_CONFLICTING_ACTIONS
+        if bootstrap._action_requested(parser.get_default(attribute))
+    }
+    assert unexpected_defaults == {}
 
 
 @pytest.mark.unit

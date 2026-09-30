@@ -1201,12 +1201,10 @@ def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) ->
         ``True`` if every entry is valid; ``False`` if an unknown field or semantic
         validation failure rejects the batch.
     """
-    config_copies: list[Any] = []
-    for source in (node.localConfig, node.moduleConfig):
-        candidate = type(source)()
-        candidate.CopyFrom(source)
-        config_copies.append(candidate)
-    return _validate_set_entries_against_configs(node, config_copies, set_entries)
+    snapshot = _ConfigSnapshotCopies.from_node(node)
+    return _validate_set_entries_against_configs(
+        node, (snapshot.local_config, snapshot.module_config), set_entries
+    )
 
 
 def _handle_set_command(

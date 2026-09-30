@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
+import meshtastic.__main__ as main_module
 from meshtastic.__main__ import _preview_set_command, setPref
 from meshtastic.cli import configure_actions, preference_runtime
 from meshtastic.cli.config_preview import (
@@ -202,7 +203,7 @@ def _install_clock(
         "time",
         SimpleNamespace(
             monotonic=current_time.monotonic,
-            sleep=current_time.sleep if sleep is None else sleep,
+            sleep=sleeps.append if sleep is None else sleep,
         ),
     )
     return sleeps
@@ -402,6 +403,29 @@ def test_preview_configure_renders_direct_values_without_mutating(
         "Would set device position",
         "Would set canned message messages to Hi there",
         "Would set ringtone to :d=16,d=32",
+    ]
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_preview_configure_owner_names_without_flags_stay_direct(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Owner names without profile flags preview as the two direct writes."""
+    path = _write_document(tmp_path, "owner: Alice\nowner_short: AL\n")
+    node = _target_node()
+    iface = _interface(node)
+    hooks = _hooks()
+    sleeps = _install_clock(monkeypatch)
+
+    configure_actions._preview_configure_command(
+        hooks, iface, _configure_args(path), {}
+    )
+
+    assert _printed_lines(hooks) == [
+        CONFIGURE_PREVIEW_HEADER,
+        "Would set device owner to Alice",
+        "Would set device owner short to AL",
     ]
     _assert_no_mutations(node, sleeps)
 
@@ -628,6 +652,89 @@ def test_preview_configure_prints_transaction_lifecycle_without_writes(
 
 
 @pytest.mark.unit
+def test_configure_apply_preflight_uses_copy_only_shared_validation() -> None:
+    """Normal configure preflight validates through copies without live mutation."""
+    node = _target_node()
+    original_hop_limit = node.localConfig.lora.hop_limit
+    hooks = _hooks()
+
+    configure_actions._preflight_configure_sections(
+        hooks,
+        node,
+        config_sections={"lora": {"hop_limit": 7}},
+        module_config_sections={},
+    )
+
+    assert node.localConfig.lora.hop_limit == original_hop_limit
+    cast(MagicMock, hooks.cli_print).assert_not_called()
+
+
+@pytest.mark.unit
+def test_preview_configure_nested_leaf_reports_unloaded_current_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nested section leaves flatten canonically and report unloaded live state."""
+    path = _write_document(
+        tmp_path,
+        "module_config:\n"
+        "  mqtt:\n"
+        "    map_report_settings:\n"
+        "      publish_interval_secs: 120\n",
+    )
+    node = _target_node()
+    node.moduleConfig.ClearField("mqtt")
+    iface = _interface(node)
+    hooks = _hooks()
+    sleeps = _install_clock(monkeypatch)
+
+    configure_actions._preview_configure_command(
+        hooks, iface, _configure_args(path), {}
+    )
+
+    assert (
+        "Would set mqtt.map_report_settings.publish_interval_secs = 120 "
+        "(current: not set)"
+    ) in _printed_lines(hooks)
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_preview_configure_redacts_secret_section_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Section previews redact path-classified secrets on new and current sides."""
+    path = _write_document(
+        tmp_path,
+        "module_config:\n"
+        "  mqtt:\n"
+        "    username: new-preview-user\n"
+        "    password: new-preview-password\n",
+    )
+    node = _target_node()
+    node.moduleConfig.mqtt.username = "old-preview-user"
+    node.moduleConfig.mqtt.password = "old-preview-password"
+    iface = _interface(node)
+    hooks = _hooks()
+    sleeps = _install_clock(monkeypatch)
+
+    configure_actions._preview_configure_command(
+        hooks, iface, _configure_args(path), {}
+    )
+
+    output = "\n".join(_printed_lines(hooks))
+    assert "Would set mqtt.username = <redacted> (current: <redacted>)" in output
+    assert "Would set mqtt.password = <redacted> (current: <redacted>)" in output
+    for secret in (
+        "new-preview-user",
+        "new-preview-password",
+        "old-preview-user",
+        "old-preview-password",
+    ):
+        assert secret not in output
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
 def test_preview_configure_validates_against_chained_snapshot_with_live_current(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -655,6 +762,31 @@ def test_preview_configure_validates_against_chained_snapshot_with_live_current(
         "Would commit settings transaction",
     ]
     _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_main_configure_preview_wrapper_forwards_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The historical __main__ preview seam forwards the chained snapshot."""
+    hooks = MagicMock()
+    preview = MagicMock()
+    iface = _interface(_target_node())
+    args = argparse.Namespace(configure=["config.yaml"], dest="^local")
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    monkeypatch.setattr(main_module, "_configure_hooks", lambda: hooks)
+    monkeypatch.setattr(
+        main_module.cli_configure_actions, "_preview_configure_command", preview
+    )
+
+    main_module._run_configure_preview(iface, args, {"timeout": 1}, snapshot)
+
+    preview.assert_called_once_with(
+        hooks, iface, args, {"timeout": 1}, snapshot=snapshot
+    )
 
 
 @pytest.mark.unit
