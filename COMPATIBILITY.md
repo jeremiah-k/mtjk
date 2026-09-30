@@ -87,6 +87,36 @@ everything `meshtastic.test` uses (attribute access, nested auto-vivification,
 dict wrapping); features unique to the third-party class (such as `toDict()` or
 its copy/plug-in behaviors) are intentionally not reproduced.
 
+### `adminIndex` resolution prefers a channel literally named `admin`
+
+`Node.writeChannel`, `Node.requestConfig`, and `Node.ensureSessionKey` accept
+an optional `adminIndex` defaulting to `None`. Upstream's `writeChannel`
+defaulted `adminIndex` to `0`, and upstream's `requestConfig`/`ensureSessionKey`
+took no admin-index argument at all; `mtjk` adds the optional parameter so
+callers can pick a channel explicitly. `None` resolves through the node's
+authoritative channel lookup: the first enabled channel literally named
+`admin` (case-insensitive) when one exists, otherwise channel `0`. An explicit
+`adminIndex=0` always selects channel `0`. When a channel is deleted on the
+local node, the pre/post-delete admin indexes are re-derived through the same
+rule; deleting a channel on a remote node uses the local node's admin index.
+
+This differs from upstream only in the case where a channel literally named
+`admin` exists at a nonzero index: upstream's `writeChannel` addressed
+channel `0` there, while `mtjk` routes admin traffic to the named channel.
+Nodes without a channel named `admin`, and callers passing an explicit index,
+behave identically to upstream.
+
+### `MeshInterface.showInfo` resolves stdout at call time
+
+`showInfo(file=None)` defaults to `None` and resolves the effective stdout
+stream when the method runs, rather than capturing `sys.stdout` as a default
+value at definition time as upstream does. The returned string is unchanged.
+Two observable differences follow: signature introspection (for example
+`inspect.signature`) shows `file=None` instead of a bound stream, and a
+`sys.stdout` redirection installed after import (such as
+`contextlib.redirect_stdout`) is honored — upstream's definition-time capture
+wrote to the original stream instead.
+
 ## CLI Compatibility
 
 CLI branding is intentionally separate from the Python import namespace:
@@ -311,16 +341,42 @@ compatibility/patching and are not recommended public surface.
 
 ### Core Package and CLI
 
-| Module                | Compatibility symbol                    | Canonical symbol                       |
-| --------------------- | --------------------------------------- | -------------------------------------- |
-| `meshtastic.__init__` | `meshtastic.serial` (lazy module alias) | third-party `serial` (pyserial) module |
-| `meshtastic.__main__` | `support_info()`                        | `supportInfo()`                        |
-| `meshtastic.__main__` | `export_config`                         | `exportConfig`                         |
-| `meshtastic.__main__` | `create_power_meter`                    | `_create_power_meter`                  |
-| `meshtastic.__main__` | `_PREFERENCE_FIELD_ALIASES` legacy keys | canonical protobuf preference names    |
-| `meshtastic.version`  | `get_active_version()`                  | `getActiveVersion()`                   |
-| `meshtastic.test`     | `subscribe()`                           | `subscribeToNodeUpdates()`             |
-| `meshtastic.test`     | `_FallbackDotMap`                       | `DotMap` (in-tree)                     |
+| Module                | Compatibility symbol                    | Canonical symbol                                           |
+| --------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| `meshtastic.__init__` | `meshtastic.serial` (lazy module alias) | third-party `serial` (pyserial) module                     |
+| `meshtastic.__init__` | `fixme`                                 | `meshtastic.util.fixme`                                    |
+| `meshtastic.__main__` | `support_info()`                        | `supportInfo()`                                            |
+| `meshtastic.__main__` | `export_config`                         | `exportConfig`                                             |
+| `meshtastic.__main__` | `create_power_meter`                    | `_create_power_meter`                                      |
+| `meshtastic.__main__` | `traverseConfig()`                      | `meshtastic.cli.preference_runtime.traverse_config()`      |
+| `meshtastic.__main__` | `setPref()`                             | `meshtastic.cli.preference_runtime.set_pref()`             |
+| `meshtastic.__main__` | `printConfig()`                         | `meshtastic.cli.config_io.print_config()`                  |
+| `meshtastic.__main__` | `printAvailableConfigFields()`          | `meshtastic.cli.config_io.print_available_config_fields()` |
+| `meshtastic.__main__` | `_PREFERENCE_FIELD_ALIASES` legacy keys | canonical protobuf preference names                        |
+| `meshtastic.version`  | `get_active_version()`                  | `getActiveVersion()`                                       |
+| `meshtastic.test`     | `subscribe()`                           | `subscribeToNodeUpdates()`                                 |
+| `meshtastic.test`     | `_FallbackDotMap`                       | `DotMap` (in-tree)                                         |
+
+`traverseConfig`, `setPref`, `printConfig`, and `printAvailableConfigFields`
+are historical public module-level names of `meshtastic.__main__` and remain
+importable; their implementations live in the `meshtastic.cli` runtime
+packages.
+
+### `meshtastic.__main__` internal wrapper layer
+
+`meshtastic/__main__.py` also retains a layer of underscore-prefixed
+one-line delegates whose docstrings say "Compatibility wrapper" (for example
+`_preflight_configure_sections`, `_handle_ota_update`, `_parse_host_port`,
+`_handle_configure_command`, and the configure-verification helpers). These
+are internal CLI orchestration seams: they exist so the CLI facade wiring and
+this repository's tests keep working against one implementation while the
+names are not promoted by this inventory and follow the Non-Public rules
+below: they may change or be removed once their callers are migrated, without
+deprecation warnings. A few carry older docstrings claiming the name is
+"retained for external callers" (for example
+`_validate_non_empty_mapping_sections`); this inventory does not convert those
+claims into public stability commitments — treat them as historical notes
+until the callers are migrated.
 
 ### Runtime Module Compatibility Exports
 
@@ -382,7 +438,11 @@ considered stable API and may change without deprecation warnings.
 
 For `Node.startOTA`, use canonical call style in first-party code and docs:
 `startOTA(mode=..., ota_file_hash=...)`. Legacy aliases (`ota_mode`, `ota_hash`,
-and legacy `hash`) remain accepted silently for compatibility.
+and legacy `hash`) remain accepted silently for compatibility. On the local
+node, required arguments and unknown keyword arguments are validated inside
+the call before any packet is sent (raising `TypeError` for missing or
+unknown arguments), rather than at function-binding time; a non-local
+destination fails the pre-existing locality check first.
 
 ### BLE and Related Exports
 
