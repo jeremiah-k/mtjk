@@ -71,10 +71,23 @@ jobs:
           git checkout -B bot/upstream-baseline
           git commit -m "Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
           git push origin bot/upstream-baseline --force
-          if gh pr view bot/upstream-baseline >/dev/null 2>&1; then
-            echo "PR already open; branch push updated it."
+          pr_title="Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
+          pr_body="Automated refresh of the upstream API baseline snapshot (mirror of upstream/master at \`${UPSTREAM_SHORT_SHA}\`). Merges with no checks expected: PRs opened by the workflow token do not trigger CI, and develop requires no approvals."
+          open_pr_number="$(gh pr list \
+            --base develop \
+            --head bot/upstream-baseline \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [[ -n "${open_pr_number}" ]]; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/pulls/${open_pr_number}" \
+              -f title="${pr_title}" \
+              -f body="${pr_body}" \
+              >/dev/null
+            echo "Updated open PR #${open_pr_number} after refreshing the branch."
           else
             gh pr create --base develop --head bot/upstream-baseline \
-              --title "Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}" \
-              --body "Automated refresh of the upstream API baseline snapshot (mirror of upstream/master at \`${UPSTREAM_SHORT_SHA}\`). Merges with no checks expected: PRs opened by the workflow token do not trigger CI, and develop requires no approvals."
+              --title "${pr_title}" \
+              --body "${pr_body}"
           fi

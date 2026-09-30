@@ -679,6 +679,24 @@ class TestCompatibilityGatePolicy:
         assert "nested_only" not in surface["top_level_exports"]
 
 
+class TestUpstreamBaselineRefreshWorkflow:
+    """Guard recurring upstream-baseline PR lifecycle semantics."""
+
+    def test_refresh_reuses_only_open_pr_and_updates_metadata(self) -> None:
+        """A prior closed PR must not suppress the next scheduled refresh PR."""
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            project_root / ".github" / "workflows" / "sync-upstream-master.yml"
+        ).read_text(encoding="utf-8")
+
+        assert "gh pr list" in workflow
+        assert "--state open" in workflow
+        assert "gh api --method PATCH" in workflow
+        assert "pulls/${open_pr_number}" in workflow
+        assert '-f title="${pr_title}"' in workflow
+        assert '-f body="${pr_body}"' in workflow
+
+
 class TestBaselineGeneration:
     """Tests for baseline generation utilities."""
 
