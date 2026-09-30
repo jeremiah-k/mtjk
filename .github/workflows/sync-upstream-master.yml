@@ -1,8 +1,9 @@
 name: Sync Upstream Master
-
 # Daily: regenerate meshtastic/tests/api_baselines/api_baseline_master.json from
-# upstream/master and open a PR against develop when the upstream API surface
-# changed. develop is protected (PRs required), so the refreshed snapshot lands
+# upstream/master and open a PR against develop whenever the snapshot file
+# changes — including provenance-only updates, since the embedded owning SHA
+# moves with every upstream commit even when the surface is byte-identical.
+# develop is protected (PRs required), so the refreshed snapshot lands
 # via an automated PR. The JSON is opt-in test data
 # (MESHTASTIC_API_BASELINE_SOURCE=master) and never gates CI.
 #
@@ -51,9 +52,12 @@ jobs:
         run: |
           tmpdir="$(mktemp -d)"
           git archive "${UPSTREAM_SHA}" meshtastic | tar -x -C "${tmpdir}"
-          python3 bin/extract_api_surface.py "${tmpdir}/meshtastic" > "${BASELINE_FILE}"
+          python3 bin/extract_api_surface.py "${tmpdir}/meshtastic" \
+            --provenance-ref "upstream/${UPSTREAM_REF}" \
+            --provenance-sha "${UPSTREAM_SHA}" \
+            > "${BASELINE_FILE}"
           echo "UPSTREAM_SHORT_SHA=$(git rev-parse --short "${UPSTREAM_SHA}")" >> "$GITHUB_ENV"
-      - name: Open baseline refresh PR (if changed)
+      - name: Open baseline refresh PR (if snapshot changed)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -61,7 +65,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${BASELINE_FILE}"
           if git diff --cached --quiet; then
-            echo "Baseline unchanged; nothing to do."
+            echo "Baseline snapshot unchanged; nothing to do."
             exit 0
           fi
           git checkout -B bot/upstream-baseline

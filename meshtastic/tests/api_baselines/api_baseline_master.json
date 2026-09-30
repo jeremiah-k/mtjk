@@ -87,6 +87,10 @@
     "writeChannel": "(self, channelIndex, adminIndex=0)",
     "writeConfig": "(self, config_name)"
   },
+  "provenance": {
+    "ref": "upstream/master",
+    "sha": "be366660828b5a54469e703209a10aa954927791"
+  },
   "top_level_exports": [
     "*",
     "BROADCAST_ADDR",
