@@ -250,6 +250,38 @@ def test_normal_set_exits_when_requested_section_never_arrives(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_waits_once_for_all_requested_sections(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Multiple requested sections share one bounded wait, not one per section."""
+    interface, node = _preview_interface()
+
+    def _arrive(_probe: object, attrs: object) -> bool:
+        del attrs
+        node.localConfig.power.SetInParent()
+        node.moduleConfig.external_notification.SetInParent()
+        return True
+
+    node._timeout.waitForSet.side_effect = _arrive
+    args = _set_args(
+        [["power.ls_secs", "300"], ["external_notification.enabled", "true"]]
+    )
+
+    _preview_set_command(interface, args, {})
+
+    node.requestConfig.assert_called()
+    assert node.requestConfig.call_count == 2
+    node._timeout.waitForSet.assert_called_once()
+    out, _err = capsys.readouterr()
+    assert "Would set power.ls_secs = 300 (current: 0)" in out.splitlines()
+    assert (
+        "Would set external_notification.enabled = true (current: false)"
+        in out.splitlines()
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_set_skips_section_wait_when_already_loaded(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -361,14 +393,12 @@ def test_preview_mutates_only_the_returned_copies() -> None:
     assert snapshot.module_config.external_notification.enabled is True
     assert node.localConfig.power.ls_secs == 60
     assert node.moduleConfig.external_notification.enabled is False
-    called_methods = {record[0] for record in node.mock_calls}
-    # waitForSet is the local section-arrival poll, not device traffic; the
-    # __bool__ record is mock bookkeeping for the truthiness check of its result.
-    assert called_methods <= {
-        "requestConfig",
-        "_timeout.waitForSet",
-        "_timeout.waitForSet().__bool__",
+    called_methods = {
+        record[0] for record in node.mock_calls if "().__" not in record[0]
     }
+    # waitForSet is the local section-arrival poll, not device traffic; dunder
+    # records (mock truthiness bookkeeping) are filtered out above.
+    assert called_methods <= {"requestConfig", "_timeout.waitForSet"}
     node.writeConfig.assert_not_called()
     node.beginSettingsTransaction.assert_not_called()
     node.commitSettingsTransaction.assert_not_called()

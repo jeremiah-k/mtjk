@@ -1063,28 +1063,37 @@ def _resolve_set_target(
 
 
 class _ConfigSectionProbe:
-    """Expose config-section presence as a boolean wait target."""
+    """Expose pending config-section presence as one boolean wait target."""
 
-    def __init__(self, *, has_field_fn: Callable[[str], bool], name: str) -> None:
-        self._has_field_fn = has_field_fn
-        self._name = name
+    def __init__(self, checks: Sequence[tuple[Callable[[str], bool], str]]) -> None:
+        self._checks = checks
 
     @property
     def is_set(self) -> bool:
-        """Return whether the requested config section is currently present."""
-        try:
-            return bool(self._has_field_fn(self._name))
-        except (TypeError, ValueError):
-            return False
+        """Return whether every requested config section is currently present."""
+        for has_field_fn, name in self._checks:
+            try:
+                if not has_field_fn(name):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
 
 
-def _wait_for_set_section(node: Any, config: Any, section_name: str) -> bool:
-    """Wait for one requested config section to arrive on the cached node."""
+def _wait_for_set_sections(
+    node: Any, pending_sections: Sequence[tuple[Any, FieldDescriptor]]
+) -> bool:
+    """Wait once for all requested config sections to arrive on the cached node."""
     timeout = getattr(node, "_timeout", None)
     wait_for_set = getattr(timeout, "waitForSet", None)
     if not callable(wait_for_set):
         return True
-    probe = _ConfigSectionProbe(has_field_fn=config.HasField, name=section_name)
+    probe = _ConfigSectionProbe(
+        [
+            (config.HasField, config_type.name)
+            for config, config_type in pending_sections
+        ]
+    )
     return wait_for_set(probe, attrs=("is_set",))
 
 
@@ -1105,10 +1114,10 @@ def _ensure_set_sections_loaded(
     Requests are deduplicated by config section. Protobuf message presence, not
     ``ListFields()``, distinguishes an already-loaded default-valued section from
     a section that has never been received. Unknown preference paths do not
-    trigger device reads. Requested sections are awaited with the node's existing
-    timeout so the write and preview paths validate and render against received
-    state instead of protobuf defaults; a section that never arrives exits
-    before any validation, rendering, or write.
+    trigger device reads. Requested sections share one bounded wait using the
+    node's existing timeout so the write and preview paths validate and render
+    against received state instead of protobuf defaults; a section that never
+    arrives exits before any validation, rendering, or write.
     """
     configs = (node.localConfig, node.moduleConfig)
     requested_sections: set[tuple[str, str]] = set()
@@ -1129,15 +1138,14 @@ def _ensure_set_sections_loaded(
         if not config.HasField(config_type.name):
             node.requestConfig(config_type)
             pending_sections.append((config, config_type))
-    for config, config_type in pending_sections:
-        if config.HasField(config_type.name):
-            continue
-        if not _wait_for_set_section(node, config, config_type.name):
-            _cli_exit(
-                "ERROR: timed out waiting for the "
-                f"{config_type.name} configuration section from the device; "
-                "no changes were made."
-            )
+    if pending_sections and not _wait_for_set_sections(node, pending_sections):
+        for config, config_type in pending_sections:
+            if not config.HasField(config_type.name):
+                _cli_exit(
+                    "ERROR: timed out waiting for the "
+                    f"{config_type.name} configuration section from the device; "
+                    "no changes were made."
+                )
 
 
 def _validate_set_entries_against_configs(
