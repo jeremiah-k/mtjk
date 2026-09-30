@@ -647,6 +647,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Axiometa Axiometa Genesis Mini
     """
+    MAKERFABS_NOMAD_TERMINAL: _HardwareModel.ValueType  # 149
+    """
+    MakerFabs Nomad Terminal
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1271,6 +1275,10 @@ Lilygo T-CONNECT PRO
 AXIOMETA_GENESIS_MINI: HardwareModel.ValueType  # 148
 """
 Axiometa Axiometa Genesis Mini
+"""
+MAKERFABS_NOMAD_TERMINAL: HardwareModel.ValueType  # 149
+"""
+MakerFabs Nomad Terminal
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
@@ -3406,6 +3414,54 @@ class MeshPacket(_message.Message):
     the ack is neither proven nor disproven.
     """
 
+    class _SlotParity:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _SlotParityEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[MeshPacket._SlotParity.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        SLOT_PARITY_UNSET: MeshPacket._SlotParity.ValueType  # 0
+        """
+        No parity asked for: the ordinary backoff draw over the whole contention window.
+        """
+        SLOT_PARITY_EVEN: MeshPacket._SlotParity.ValueType  # 1
+        """
+        Only even-numbered slots, counted from the end of the last frame on air.
+        """
+        SLOT_PARITY_ODD: MeshPacket._SlotParity.ValueType  # 2
+        """
+        Only odd-numbered slots, counted from the end of the last frame on air.
+        """
+
+    class SlotParity(_SlotParity, metaclass=_SlotParityEnumTypeWrapper):
+        """
+        Which slots of the CSMA backoff grid a transmission may draw from.
+
+        Never sent over the radio links. Like priority, it steers how the local node schedules the
+        packet: a module sets it on a packet it is queueing, and the radio driver reads it when it
+        draws the backoff for that packet.
+
+        A node normally draws any slot of the contention window, counted from the moment it draws.
+        A packet that asks for a parity instead has its slots counted from the end of the last frame
+        this node sent or heard, and only slots of that parity are taken, so two senders on opposite
+        parities that redraw after the same frame never land on the same slot, and so are always at
+        least a slot apart. Useful for a pair of nodes exchanging a stream, where the two ends
+        otherwise collide with each other far more often than with the rest of the mesh.
+        """
+
+    SLOT_PARITY_UNSET: MeshPacket.SlotParity.ValueType  # 0
+    """
+    No parity asked for: the ordinary backoff draw over the whole contention window.
+    """
+    SLOT_PARITY_EVEN: MeshPacket.SlotParity.ValueType  # 1
+    """
+    Only even-numbered slots, counted from the end of the last frame on air.
+    """
+    SLOT_PARITY_ODD: MeshPacket.SlotParity.ValueType  # 2
+    """
+    Only odd-numbered slots, counted from the end of the last frame on air.
+    """
+
     FROM_FIELD_NUMBER: _builtins.int
     TO_FIELD_NUMBER: _builtins.int
     CHANNEL_FIELD_NUMBER: _builtins.int
@@ -3429,6 +3485,7 @@ class MeshPacket(_message.Message):
     TRANSPORT_MECHANISM_FIELD_NUMBER: _builtins.int
     XEDDSA_SIGNED_FIELD_NUMBER: _builtins.int
     ACK_PROOF_STATUS_FIELD_NUMBER: _builtins.int
+    SLOT_PARITY_FIELD_NUMBER: _builtins.int
     to: _builtins.int
     """
     The (immediate) destination for this packet
@@ -3583,6 +3640,12 @@ class MeshPacket(_message.Message):
     key can check. This is a pairwise MAC that only the original sender can check, and it attests
     to delivery rather than to authorship.
     """
+    slot_parity: Global___MeshPacket.SlotParity.ValueType
+    """
+    Never sent over the radio links.
+    Which parity of the CSMA backoff slot grid this packet may be sent in; see SlotParity.
+    Set by whoever queues the packet, and read by the radio driver when it draws the backoff.
+    """
     @_builtins.property
     def decoded(self) -> Global___Data:
         """
@@ -3614,10 +3677,11 @@ class MeshPacket(_message.Message):
         transport_mechanism: Global___MeshPacket.TransportMechanism.ValueType = ...,
         xeddsa_signed: _builtins.bool = ...,
         ack_proof_status: Global___MeshPacket.AckProofStatus.ValueType = ...,
+        slot_parity: Global___MeshPacket.SlotParity.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "decoded", b"decoded", "encrypted", b"encrypted", "payload_variant", b"payload_variant", "rx_rssi", b"rx_rssi", "rx_time", b"rx_time"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "ack_proof_status", b"ack_proof_status", "channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack", "xeddsa_signed", b"xeddsa_signed"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi", "_rx_time", b"_rx_time", "ack_proof_status", b"ack_proof_status", "channel", b"channel", "decoded", b"decoded", "delayed", b"delayed", "encrypted", b"encrypted", "from", b"from", "hop_limit", b"hop_limit", "hop_start", b"hop_start", "id", b"id", "next_hop", b"next_hop", "payload_variant", b"payload_variant", "pki_encrypted", b"pki_encrypted", "priority", b"priority", "public_key", b"public_key", "relay_node", b"relay_node", "rx_rssi", b"rx_rssi", "rx_snr", b"rx_snr", "rx_time", b"rx_time", "slot_parity", b"slot_parity", "to", b"to", "transport_mechanism", b"transport_mechanism", "tx_after", b"tx_after", "via_mqtt", b"via_mqtt", "want_ack", b"want_ack", "xeddsa_signed", b"xeddsa_signed"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__rx_rssi: _TypeAlias = _typing.Literal["rx_rssi"]  # noqa: Y015
     _WhichOneofArgType__rx_rssi: _TypeAlias = _typing.Literal["_rx_rssi", b"_rx_rssi"]  # noqa: Y015
