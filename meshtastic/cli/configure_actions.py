@@ -18,6 +18,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from google.protobuf.descriptor import FieldDescriptor
+
 import meshtastic.util
 from meshtastic.cli import config_io as _config_io
 from meshtastic.cli import configure_values
@@ -1433,6 +1435,48 @@ def _prepare_configure_execution(
         is_local_target=is_local_target,
         has_config_writes=has_config_writes,
     )
+
+
+def _requested_configure_section_fields(
+    target_node: Any,
+    prepared: _PreparedConfigureDocument,
+) -> list[tuple[Any, FieldDescriptor]]:
+    """Collect the config sections a configure document needs from the device.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose cached configuration wrappers own the section fields.
+    prepared : _PreparedConfigureDocument
+        Validated document whose section keys name the wanted sections.
+
+    Returns
+    -------
+    list[tuple[Any, FieldDescriptor]]
+        Deduplicated ``(config_root, section_field)`` pairs in apply order.
+        Unknown section names and scalar top-level fields are skipped;
+        traversal validation reports them.
+    """
+    groups = (
+        (target_node.localConfig, prepared.config_sections),
+        (target_node.moduleConfig, prepared.module_config_sections),
+    )
+    section_fields: list[tuple[Any, FieldDescriptor]] = []
+    seen: set[tuple[str, str]] = set()
+    for root, sections in groups:
+        for section in sections:
+            field_name = meshtastic.util.camel_to_snake(section)
+            field = root.DESCRIPTOR.fields_by_name.get(field_name)
+            if field is None or field.message_type is None:
+                # Unknown names and scalar top-level fields (e.g. version) are
+                # not loadable sections; traversal validation reports them.
+                continue
+            section_key = (root.DESCRIPTOR.full_name, field.name)
+            if section_key in seen:
+                continue
+            seen.add(section_key)
+            section_fields.append((root, field))
+    return section_fields
 
 
 def _execute_configure_plan(
