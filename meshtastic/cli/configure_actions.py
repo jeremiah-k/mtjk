@@ -1861,7 +1861,10 @@ def _preview_configure_command(
     """Preview one ``--configure`` document without writing to the device.
 
     Runs the same decoding, normalization, and structural validation as a real
-    apply, then prints every operation that would have been sent. The device is
+    apply, then prints every operation that would have been sent. Missing
+    config sections are requested from the device and waited on exactly like
+    an apply so validation and current-value rendering never see protobuf
+    defaults for sections the device will deliver. Otherwise the device is
     only read: target-node lookup, owner-state resolution, and channel-URL
     comparison. No writes, transactions, ACK waits, or stability sleeps run.
 
@@ -1880,18 +1883,25 @@ def _preview_configure_command(
         invocation, or ``None`` to snapshot the target node's cached state.
         Section assignments validate against this previewed state so a
         combined ``--set``/``--configure`` dry run stays in execution order.
+        Newly received sections are absorbed into staged copies without ever
+        replacing their staged assignments.
     """
     plan = _prepare_configure_execution(hooks, interface, args)
     target_node = interface.getNode(plan.destination, False, **get_node_kwargs)
     prepared = plan.prepared
 
-    if snapshot is None:
-        snapshot = ConfigSnapshotCopies.from_node(target_node)
+    if plan.has_config_writes:
+        ensure_config_sections_loaded(
+            target_node,
+            _requested_configure_section_fields(target_node, prepared),
+            cli_exit=_section_readiness_exit(hooks),
+        )
 
-    # One captured observation backs the whole current-value column so every
-    # rendered "current" comes from a single coherent state even once section
-    # acquisition refreshes the live cache between capture and rendering.
     before = ConfigSnapshotCopies.from_node(target_node)
+    if snapshot is None:
+        snapshot = before
+    else:
+        snapshot.absorb_missing_sections(target_node)
 
     # Validate the complete batch against the preview state before reporting
     # any operation, matching the preflight a real apply runs before its writes.
