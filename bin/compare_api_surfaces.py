@@ -3,6 +3,8 @@
 
 Used by CI to detect breaking API changes between a baseline ref and PR branch.
 Exits 0 if no removed methods/exports, exits 1 if breaking changes found.
+Only the surface keys are compared; unrelated metadata a baseline embeds
+(such as provenance written by bin/generate_master_api_baseline.sh) is ignored.
 
 Usage:
     python3 bin/compare_api_surfaces.py base_surface.json pr_surface.json
@@ -313,6 +315,12 @@ def compare_methods(
 
 
 NOISE_EXPORTS = {
+    # Names in this set are accidental implementation-detail leaks from
+    # __init__.py (stdlib/typing/third-party imports), NOT established API.
+    # Removing an established root export (anything imported, assigned, or
+    # served by a documented lazy __getattr__ alias in __init__.py — e.g.
+    # `fixme`, the lazy `meshtastic.serial` alias) is a breaking change and
+    # must never be silenced here. See COMPATIBILITY.md.
     # stdlib modules imported in __init__.py - implementation details, not public API
     "*",
     "base64",
@@ -336,11 +344,8 @@ NOISE_EXPORTS = {
     "import_module",
     # third-party imports that leaked into namespace
     "google",
-    "serial",
     "tabulate",
     "google.protobuf.json_format",
-    # internal utility helpers that leaked into namespace
-    "fixme",
     # any alias that starts with underscore (private)
 }
 
