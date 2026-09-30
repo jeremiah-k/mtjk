@@ -557,7 +557,7 @@ class TestSignatureAliasComparison:
 
 
 class TestCompatibilityGatePolicy:
-    """Guard the export policy that lets established root exports vanish silently."""
+    """Guard the export policy that prevents established root exports from vanishing silently."""
 
     @staticmethod
     def _compare_exports() -> "_COMPARE_EXPORTS_FN":
@@ -636,6 +636,47 @@ class TestCompatibilityGatePolicy:
 
         assert "VALUE" in surface["top_level_exports"]
         assert "serial" in surface["top_level_exports"]
+
+    def test_extractor_ignores_rejected_or_fallthrough_getattr_names(
+        self, tmp_path: Any
+    ) -> None:
+        """Only lazy branches that can return values are exports."""
+        project_root = Path(__file__).resolve().parents[2]
+        script_path = project_root / "bin" / "extract_api_surface.py"
+        pkg_dir = tmp_path / "lazy_pkg"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").write_text(
+            "def __getattr__(attribute):\n"
+            '    if attribute == "serial":\n'
+            "        raise AttributeError(attribute)\n"
+            '    if attribute == "fallthrough":\n'
+            "        pass\n"
+            '    if attribute == "unreachable":\n'
+            "        raise AttributeError(attribute)\n"
+            "        return object()\n"
+            '    if "served" == attribute:\n'
+            "        return object()\n"
+            "    def nested_helper():\n"
+            '        if attribute == "nested_only":\n'
+            "            return object()\n"
+            "    raise AttributeError(attribute)\n",
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(pkg_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        surface = json.loads(completed.stdout)
+
+        assert "served" in surface["top_level_exports"]
+        assert "serial" not in surface["top_level_exports"]
+        assert "fallthrough" not in surface["top_level_exports"]
+        assert "unreachable" not in surface["top_level_exports"]
+        assert "nested_only" not in surface["top_level_exports"]
 
 
 class TestBaselineGeneration:

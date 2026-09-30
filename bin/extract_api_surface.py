@@ -315,22 +315,103 @@ def _get_top_level_exports(pkg_dir: Path) -> list[str]:
     return sorted(exports)
 
 
+class _GetattrIfVisitor(ast.NodeVisitor):
+    """Collect ``if`` nodes from one ``__getattr__`` control-flow scope."""
+
+    def __init__(self) -> None:
+        self.nodes: list[ast.If] = []
+
+    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+        """Record the conditional and inspect nested control flow."""
+        self.nodes.append(node)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        """Do not inspect nested function scopes."""
+        del node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        """Do not inspect nested async function scopes."""
+        del node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        """Do not inspect nested class scopes."""
+        del node
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        """Do not inspect nested lambda scopes."""
+        del node
+
+
+def _getattr_if_nodes(node: ast.FunctionDef) -> list[ast.If]:
+    """Return conditionals belonging to one module-level ``__getattr__`` body."""
+    visitor = _GetattrIfVisitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.nodes
+
+
+class _ReturnPathVisitor(ast.NodeVisitor):
+    """Detect return paths without descending into nested definition scopes."""
+
+    def __init__(self) -> None:
+        self.found = False
+
+    def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
+        """Record that the enclosing branch can return an attribute value."""
+        del node
+        self.found = True
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        """Do not count returns from nested functions."""
+        del node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        """Do not count returns from nested async functions."""
+        del node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        """Do not count returns from nested class methods."""
+        del node
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        """Do not descend into nested lambda scopes."""
+        del node
+
+
+def _branch_has_return_path(statements: list[ast.stmt]) -> bool:
+    """Return whether a conditional branch contains an attribute-return path."""
+    visitor = _ReturnPathVisitor()
+    for statement in statements:
+        if isinstance(statement, ast.Raise):
+            return False
+        visitor.visit(statement)
+        if visitor.found:
+            return True
+    return False
+
+
 def _get_lazy_getattr_exports(tree: ast.AST) -> set[str]:
-    """Return attribute names served by a module-level ``__getattr__``.
+    """Return literal attribute names served by module-level ``__getattr__``.
 
     Lazy compatibility aliases (for example ``meshtastic.serial``) are provided
-    by a module-level ``__getattr__`` instead of an eager import, so import
-    scanning alone cannot see them. Capture the literal attribute names the
-    function recognizes without importing anything. Only ``name == "<literal>"``
-    comparisons are recognized; dynamic membership or lookup-table lazy
-    resolvers are not discovered.
+    by module-level ``__getattr__`` instead of an eager import, so import scanning
+    alone cannot see them. Capture only literal equality branches that can return
+    from ``__getattr__``. A comparison that only raises ``AttributeError`` or
+    falls through is therefore not misclassified as an export.
+
+    Dynamic membership or lookup-table resolvers are intentionally not inferred.
     """
     lazy_names: set[str] = set()
     for node in ast.iter_child_nodes(tree):
         if not (isinstance(node, ast.FunctionDef) and node.name == "__getattr__"):
             continue
-        for child in ast.walk(node):
-            if not isinstance(child, ast.If):
+        positional_args = [*node.args.posonlyargs, *node.args.args]
+        if not positional_args:
+            continue
+        attribute_name = positional_args[0].arg
+        for child in _getattr_if_nodes(node):
+            if not _branch_has_return_path(child.body):
                 continue
             condition = child.test
             if (
@@ -344,7 +425,7 @@ def _get_lazy_getattr_exports(tree: ast.AST) -> set[str]:
             for side, other in ((left, right), (right, left)):
                 if (
                     isinstance(side, ast.Name)
-                    and side.id == "name"
+                    and side.id == attribute_name
                     and isinstance(other, ast.Constant)
                     and isinstance(other.value, str)
                     and not other.value.startswith("_")
