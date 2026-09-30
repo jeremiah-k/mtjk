@@ -7,10 +7,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import meshtastic.__main__ as main_module
 from meshtastic.__main__ import _handle_set_command, _preview_set_command
 from meshtastic.cli.config_preview import ConfigSnapshotCopies, render_preview_value
 from meshtastic.node import Node
-from meshtastic.protobuf import channel_pb2, config_pb2, localonly_pb2
+from meshtastic.protobuf import (
+    channel_pb2,
+    config_pb2,
+    localonly_pb2,
+    module_config_pb2,
+)
 from meshtastic.tcp_interface import TCPInterface
 
 
@@ -110,6 +116,46 @@ def test_preview_redacts_secret_fields_on_both_sides(
     assert snapshot.module_config.mqtt.password == "new-passphrase"
     assert node.localConfig.security.private_key == b"\xaa" * 32
     assert node.moduleConfig.mqtt.password == "old-passphrase"
+
+
+@pytest.mark.unit
+def test_set_preview_leaf_helpers_fail_closed_for_stale_paths() -> None:
+    """Stale roots/leaves render as absent instead of fabricating values."""
+    config = localonly_pb2.LocalConfig()
+    config.power.SetInParent()
+
+    assert main_module._resolve_set_leaf(config, "missing.value") is None
+    assert main_module._resolve_set_leaf(config, "power.missing") is None
+    assert (
+        main_module._render_preview_current_value(
+            "missing.value", (config, localonly_pb2.LocalModuleConfig())
+        )
+        == "not set"
+    )
+    assert (
+        main_module._render_preview_current_value(
+            "power.missing", (config, localonly_pb2.LocalModuleConfig())
+        )
+        == "not set"
+    )
+
+
+@pytest.mark.unit
+def test_set_preview_current_value_handles_scalar_root_presence() -> None:
+    """Scalar top-level protobuf fields do not require message presence checks."""
+    config = localonly_pb2.LocalConfig()
+    config.version = 7
+
+    parent, field = main_module._resolve_set_leaf(config, "version") or (None, None)
+
+    assert parent is config
+    assert field is not None and field.name == "version"
+    assert (
+        main_module._render_preview_current_value(
+            "version", (config, localonly_pb2.LocalModuleConfig())
+        )
+        == "7"
+    )
 
 
 @pytest.mark.unit
@@ -239,6 +285,47 @@ def test_preview_mutates_only_the_returned_copies() -> None:
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_fails_closed_if_target_disappears_after_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-preflight target-resolution divergence aborts the preview."""
+    interface, _node = _preview_interface()
+    args = _set_args([["power.ls_secs", "300"]])
+    monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
+    monkeypatch.setattr(
+        main_module, "_validate_set_entries_against_configs", lambda *_a: True
+    )
+    monkeypatch.setattr(main_module, "_resolve_set_target", lambda *_a: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module._preview_set_command(interface, args, {})
+
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_preview_set_fails_closed_if_leaf_disappears_after_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-preflight leaf-resolution divergence aborts the preview."""
+    interface, node = _preview_interface()
+    node.localConfig.power.SetInParent()
+    args = _set_args([["power.ls_secs", "300"]])
+    monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
+    monkeypatch.setattr(
+        main_module, "_validate_set_entries_against_configs", lambda *_a: True
+    )
+    monkeypatch.setattr(main_module, "_resolve_set_leaf", lambda *_a: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module._preview_set_command(interface, args, {})
+
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_normal_set_command_still_writes_multi_section_batch_with_transaction(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -285,6 +372,28 @@ def test_renderer_redacts_secret_leaves_inside_nested_messages() -> None:
     assert rendered.startswith("{")
     assert "psk: <redacted>" in rendered
     assert "name: upstairs" in rendered
+
+
+@pytest.mark.unit
+def test_renderer_reports_nonsecret_bytes_by_length() -> None:
+    """Non-secret bytes render as a length, never raw binary content."""
+    assert render_preview_value("telemetry.payload", None, b"\x00\xff") == "<2 bytes>"
+
+
+@pytest.mark.unit
+def test_renderer_preserves_parent_path_for_nested_path_secrets() -> None:
+    """Nested rendering redacts secrets classified by their canonical parent path."""
+    mqtt = module_config_pb2.ModuleConfig.MQTTConfig()
+    mqtt.enabled = True
+    mqtt.username = "preview-user-secret"
+    mqtt.password = "preview-password-secret"
+
+    rendered = render_preview_value("mqtt", None, mqtt)
+
+    assert "username: <redacted>" in rendered
+    assert "password: <redacted>" in rendered
+    assert "preview-user-secret" not in rendered
+    assert "preview-password-secret" not in rendered
 
 
 @pytest.mark.unit

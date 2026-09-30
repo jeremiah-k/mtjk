@@ -110,29 +110,34 @@ def render_preview_value(
     """
     if is_secret_pref(pref_name):
         return REDACTED_PREF_VALUE
-    return _render_leaf(field, value)
+    return _render_leaf(pref_name, field, value)
 
 
-def _render_leaf(field: FieldDescriptor | None, value: Any) -> str:
+def _render_leaf(pref_name: str, field: FieldDescriptor | None, value: Any) -> str:
     """Render one protobuf leaf, list, or nested message without secrets."""
     if isinstance(value, bytes):
         return f"<{len(value)} bytes>"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_render_leaf(field, item) for item in value) + "]"
+        return (
+            "["
+            + ", ".join(_render_leaf(pref_name, field, item) for item in value)
+            + "]"
+        )
     if hasattr(value, "DESCRIPTOR"):
-        return _render_message(value)
+        return _render_message(pref_name, value)
     if field is not None and field.enum_type is not None:
         enum_value = field.enum_type.values_by_number.get(value)
         return enum_value.name if enum_value is not None else str(value)
     return str(value)
 
 
-def _render_message(message: Any) -> str:
-    """Render a nested protobuf message as a compact field mapping."""
+def _render_message(parent_path: str, message: Any) -> str:
+    """Render a nested protobuf message while preserving canonical child paths."""
     parts: list[str] = []
     for field, value in message.ListFields():
-        rendered = render_preview_value(field.name, field, value)
+        child_path = f"{parent_path}.{field.name}" if parent_path else field.name
+        rendered = render_preview_value(child_path, field, value)
         parts.append(f"{field.name}: {rendered}")
     return "{" + ", ".join(parts) + "}" if parts else "{}"
