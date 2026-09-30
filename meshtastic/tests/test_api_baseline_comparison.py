@@ -64,6 +64,7 @@ def get_baseline_file() -> Path:
 
 _EXTRACTED_SURFACE_CACHE: dict[str, Any] | None = None
 _IS_BREAKING_SIGNATURE_CHANGE_FN: Callable[[str, str, str, str], bool] | None = None
+_COMPARE_EXPORTS_FN = Callable[[list[str], list[str]], tuple[list[str], list[str]]]
 
 
 def _is_breaking_signature_change_for_baseline(
@@ -553,6 +554,147 @@ class TestSignatureAliasComparison:
         assert _is_breaking_signature_change_for_baseline(
             base_sig, pr_sig, "Node", "startOTA"
         )
+
+
+class TestCompatibilityGatePolicy:
+    """Guard the export policy that prevents established root exports from vanishing silently."""
+
+    @staticmethod
+    def _compare_exports() -> "_COMPARE_EXPORTS_FN":
+        """Load the canonical comparator export policy from bin."""
+        project_root = Path(__file__).resolve().parents[2]
+        sys.path.insert(0, str(project_root / "bin"))
+        try:
+            from compare_api_surfaces import (  # type: ignore[import-not-found]  # pylint: disable=import-error,import-outside-toplevel
+                compare_exports,
+            )
+        finally:
+            sys.path.pop(0)
+        return compare_exports
+
+    def test_removing_established_root_export_is_breaking(self) -> None:
+        """Established root exports (e.g. fixme) must fail the gate when dropped."""
+        compare_exports = self._compare_exports()
+
+        base = ["Node", "fixme", "stripnl"]
+        current = ["Node", "stripnl"]
+
+        blocking, informational = compare_exports(base, current)
+        assert "REMOVED exports: ['fixme']" in blocking
+        assert not any("fixme" in line for line in informational)
+
+    def test_removing_documented_lazy_alias_is_breaking(self) -> None:
+        """A documented lazy alias (meshtastic.serial) must not be noise-filtered."""
+        compare_exports = self._compare_exports()
+
+        base = ["Node", "serial"]
+        current = ["Node"]
+
+        blocking, _ = compare_exports(base, current)
+        assert "REMOVED exports: ['serial']" in blocking
+
+    def test_dependency_leak_removals_remain_informational(self) -> None:
+        """Stdlib/third-party namespace leaks stay non-breaking when dropped."""
+        compare_exports = self._compare_exports()
+
+        base = ["Node", "fixme", "os", "sys", "tabulate", "datetime"]
+        current = ["Node", "fixme"]
+
+        blocking, informational = compare_exports(base, current)
+        assert blocking == []
+        assert any(
+            "REMOVED (noise/implementation detail)" in line for line in informational
+        )
+        assert not any("fixme" in line for line in informational)
+
+    def test_extractor_captures_lazy_getattr_alias(self, tmp_path: Any) -> None:
+        """The extractor must see __getattr__ lazy aliases without importing."""
+        project_root = Path(__file__).resolve().parents[2]
+        script_path = project_root / "bin" / "extract_api_surface.py"
+        pkg_dir = tmp_path / "lazy_pkg"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").write_text(
+            "VALUE = 1\n"
+            "\n"
+            "\n"
+            "def __getattr__(name):\n"
+            '    if name == "serial":\n'
+            "        import serial as serial_module\n"
+            "        return serial_module\n"
+            "    raise AttributeError(name)\n",
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(pkg_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        surface = json.loads(completed.stdout)
+
+        assert "VALUE" in surface["top_level_exports"]
+        assert "serial" in surface["top_level_exports"]
+
+    def test_extractor_ignores_rejected_or_fallthrough_getattr_names(
+        self, tmp_path: Any
+    ) -> None:
+        """Only lazy branches that can return values are exports."""
+        project_root = Path(__file__).resolve().parents[2]
+        script_path = project_root / "bin" / "extract_api_surface.py"
+        pkg_dir = tmp_path / "lazy_pkg"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").write_text(
+            "def __getattr__(attribute):\n"
+            '    if attribute == "serial":\n'
+            "        raise AttributeError(attribute)\n"
+            '    if attribute == "fallthrough":\n'
+            "        pass\n"
+            '    if attribute == "unreachable":\n'
+            "        raise AttributeError(attribute)\n"
+            "        return object()\n"
+            '    if "served" == attribute:\n'
+            "        return object()\n"
+            "    def nested_helper():\n"
+            '        if attribute == "nested_only":\n'
+            "            return object()\n"
+            "    raise AttributeError(attribute)\n",
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(pkg_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        surface = json.loads(completed.stdout)
+
+        assert "served" in surface["top_level_exports"]
+        assert "serial" not in surface["top_level_exports"]
+        assert "fallthrough" not in surface["top_level_exports"]
+        assert "unreachable" not in surface["top_level_exports"]
+        assert "nested_only" not in surface["top_level_exports"]
+
+
+class TestUpstreamBaselineRefreshWorkflow:
+    """Guard recurring upstream-baseline PR lifecycle semantics."""
+
+    def test_refresh_reuses_only_open_pr_and_updates_metadata(self) -> None:
+        """A prior closed PR must not suppress the next scheduled refresh PR."""
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            project_root / ".github" / "workflows" / "sync-upstream-master.yml"
+        ).read_text(encoding="utf-8")
+
+        assert "gh pr list" in workflow
+        assert "--state open" in workflow
+        assert "gh api --method PATCH" in workflow
+        assert "pulls/${open_pr_number}" in workflow
+        assert '-f title="${pr_title}"' in workflow
+        assert '-f body="${pr_body}"' in workflow
 
 
 class TestBaselineGeneration:

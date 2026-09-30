@@ -230,6 +230,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
             self,
             channel_state=self._channel_state,
             channel_write_runtime=self._channel_write_runtime,
+            channel_lookup_runtime=self._channel_lookup_runtime,
         )
         self._ack_nak_runtime = _NodeAckNakRuntime(self)
         self._settings_message_builder = _NodeSettingsMessageBuilder(self)

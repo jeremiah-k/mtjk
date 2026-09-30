@@ -6,11 +6,13 @@ Outputs a JSON baseline that can be diffed between branches.
 
 Usage:
     python bin/extract_api_surface.py /path/to/meshtastic-package-dir
+    python bin/extract_api_surface.py /path/to/meshtastic \
+        --provenance-ref upstream/master --provenance-sha <sha>
 """
 
+import argparse
 import ast
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -235,6 +237,7 @@ def _get_top_level_exports(pkg_dir: Path) -> list[str]:
     tree = ast.parse(init_path.read_text(encoding="utf-8"))
 
     # Check for __all__ first - if defined, it controls the public API
+    # (including lazy __getattr__ aliases, which are skipped below).
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -274,6 +277,11 @@ def _get_top_level_exports(pkg_dir: Path) -> list[str]:
                 if not name.startswith("_"):
                     exports.add(name)
 
+    # Lazy compatibility aliases served by a module-level __getattr__ (such as
+    # meshtastic.serial) are part of the import surface; capture them without
+    # importing anything.
+    exports.update(_get_lazy_getattr_exports(tree))
+
     # Historically importable top-level meshtastic modules/subpackages.
     # Keep this compatibility surface explicit and stable for baseline checks.
     # Only add names that are present on disk.
@@ -305,6 +313,125 @@ def _get_top_level_exports(pkg_dir: Path) -> list[str]:
             exports.add(name)
 
     return sorted(exports)
+
+
+class _GetattrIfVisitor(ast.NodeVisitor):
+    """Collect ``if`` nodes from one ``__getattr__`` control-flow scope."""
+
+    def __init__(self) -> None:
+        self.nodes: list[ast.If] = []
+
+    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+        """Record the conditional and inspect nested control flow."""
+        self.nodes.append(node)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        """Do not inspect nested function scopes."""
+        del node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        """Do not inspect nested async function scopes."""
+        del node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        """Do not inspect nested class scopes."""
+        del node
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        """Do not inspect nested lambda scopes."""
+        del node
+
+
+def _getattr_if_nodes(node: ast.FunctionDef) -> list[ast.If]:
+    """Return conditionals belonging to one module-level ``__getattr__`` body."""
+    visitor = _GetattrIfVisitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.nodes
+
+
+class _ReturnPathVisitor(ast.NodeVisitor):
+    """Detect return paths without descending into nested definition scopes."""
+
+    def __init__(self) -> None:
+        self.found = False
+
+    def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
+        """Record that the enclosing branch can return an attribute value."""
+        del node
+        self.found = True
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        """Do not count returns from nested functions."""
+        del node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        """Do not count returns from nested async functions."""
+        del node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        """Do not count returns from nested class methods."""
+        del node
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        """Do not descend into nested lambda scopes."""
+        del node
+
+
+def _branch_has_return_path(statements: list[ast.stmt]) -> bool:
+    """Return whether a conditional branch contains an attribute-return path."""
+    visitor = _ReturnPathVisitor()
+    for statement in statements:
+        if isinstance(statement, ast.Raise):
+            return False
+        visitor.visit(statement)
+        if visitor.found:
+            return True
+    return False
+
+
+def _get_lazy_getattr_exports(tree: ast.AST) -> set[str]:
+    """Return literal attribute names served by module-level ``__getattr__``.
+
+    Lazy compatibility aliases (for example ``meshtastic.serial``) are provided
+    by module-level ``__getattr__`` instead of an eager import, so import scanning
+    alone cannot see them. Capture only literal equality branches that can return
+    from ``__getattr__``. A comparison that only raises ``AttributeError`` or
+    falls through is therefore not misclassified as an export.
+
+    Dynamic membership or lookup-table resolvers are intentionally not inferred.
+    """
+    lazy_names: set[str] = set()
+    for node in ast.iter_child_nodes(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == "__getattr__"):
+            continue
+        positional_args = [*node.args.posonlyargs, *node.args.args]
+        if not positional_args:
+            continue
+        attribute_name = positional_args[0].arg
+        for child in _getattr_if_nodes(node):
+            if not _branch_has_return_path(child.body):
+                continue
+            condition = child.test
+            if (
+                not isinstance(condition, ast.Compare)
+                or len(condition.ops) != 1
+                or not isinstance(condition.ops[0], ast.Eq)
+                or len(condition.comparators) != 1
+            ):
+                continue
+            left, right = condition.left, condition.comparators[0]
+            for side, other in ((left, right), (right, left)):
+                if (
+                    isinstance(side, ast.Name)
+                    and side.id == attribute_name
+                    and isinstance(other, ast.Constant)
+                    and isinstance(other.value, str)
+                    and not other.value.startswith("_")
+                ):
+                    lazy_names.add(other.value)
+    return lazy_names
 
 
 def _camel_to_snake(name: str) -> str:
@@ -393,12 +520,34 @@ def extract_api_surface(
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <path-to-meshtastic-pkg-dir>", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Statically extract the public API surface of a meshtastic package tree."
+    )
+    parser.add_argument("pkg_dir", help="Path to the meshtastic package directory")
+    parser.add_argument(
+        "--provenance-ref",
+        help=(
+            "Owning ref label for committed baselines (e.g. upstream/master). "
+            "Requires --provenance-sha."
+        ),
+    )
+    parser.add_argument(
+        "--provenance-sha",
+        help="Resolved full commit SHA of the extracted source tree. Requires --provenance-ref.",
+    )
+    args = parser.parse_args()
+    if (args.provenance_ref is None) != (args.provenance_sha is None):
+        parser.error("--provenance-ref and --provenance-sha must be passed together")
 
-    pkg_dir = sys.argv[1]
-    surface = extract_api_surface(pkg_dir)
+    surface = extract_api_surface(args.pkg_dir)
+    if args.provenance_ref is not None and args.provenance_sha is not None:
+        # Provenance records which source tree a committed baseline snapshot
+        # came from. It is metadata only: the comparator reads just the
+        # surface keys, so this never affects API-diff semantics.
+        surface["provenance"] = {
+            "ref": args.provenance_ref,
+            "sha": args.provenance_sha,
+        }
     print(json.dumps(surface, indent=2, sort_keys=True))
 
 

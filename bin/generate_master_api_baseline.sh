@@ -22,11 +22,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "${REPO_ROOT}" archive "${MASTER_REF}" meshtastic | tar -x -C "${tmpdir}"
+# Resolve the owning ref to a full commit SHA so the committed baseline records
+# exactly which upstream commit was extracted (a ref name alone could drift).
+MASTER_SHA="$(git -C "${REPO_ROOT}" rev-parse "${MASTER_REF}^{commit}")"
+
+git -C "${REPO_ROOT}" archive "${MASTER_SHA}" meshtastic | tar -x -C "${tmpdir}"
 
 (
 	cd "${REPO_ROOT}"
-	poetry run python bin/extract_api_surface.py "${tmpdir}/meshtastic" >"${OUT_FILE}"
+	poetry run python bin/extract_api_surface.py "${tmpdir}/meshtastic" \
+		--provenance-ref "${MASTER_REF}" \
+		--provenance-sha "${MASTER_SHA}" \
+		>"${OUT_FILE}"
 )
 
-echo "Generated ${OUT_FILE} from ${MASTER_REF}"
+echo "Generated ${OUT_FILE} from ${MASTER_REF}@${MASTER_SHA}"
