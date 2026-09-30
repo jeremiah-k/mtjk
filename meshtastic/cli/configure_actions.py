@@ -1709,7 +1709,7 @@ def _preview_section_operations(
     hooks: ConfigureHooks,
     *,
     preview_roots: dict[str, Any],
-    target_node: Any,
+    current_values: ConfigSnapshotCopies,
     config_sections: dict[str, dict[str, Any]],
     module_config_sections: dict[str, dict[str, Any]],
 ) -> None:
@@ -1722,18 +1722,18 @@ def _preview_section_operations(
     preview_roots : dict[str, Any]
         Mutated candidate copies returned by
         :func:`_validate_sections_against_roots`, holding the previewed state.
-    target_node : Any
-        Node whose live cached messages provide the honest current values.
+    current_values : ConfigSnapshotCopies
+        Captured observation whose messages provide the honest current values.
     config_sections : dict[str, dict[str, Any]]
         Validated LocalConfig sections in apply order.
     module_config_sections : dict[str, dict[str, Any]]
         Validated LocalModuleConfig sections in apply order.
     """
     groups = (
-        ("config", target_node.localConfig, config_sections),
-        ("module_config", target_node.moduleConfig, module_config_sections),
+        ("config", current_values.local_config, config_sections),
+        ("module_config", current_values.module_config, module_config_sections),
     )
-    for root_key, live_root, sections in groups:
+    for root_key, current_root, sections in groups:
         preview_root = preview_roots.get(root_key)
         if not sections or preview_root is None:
             continue
@@ -1746,7 +1746,7 @@ def _preview_section_operations(
                 if result_field is None:
                     # Traversal skips unknown fields without assigning anything.
                     continue
-                current_field, current_value = _read_preview_leaf(live_root, parts)
+                current_field, current_value = _read_preview_leaf(current_root, parts)
                 rendered_result = _render_preview_side(
                     pref_name, result_field, result_value
                 )
@@ -1817,6 +1817,11 @@ def _preview_configure_command(
     if snapshot is None:
         snapshot = ConfigSnapshotCopies.from_node(target_node)
 
+    # One captured observation backs the whole current-value column so every
+    # rendered "current" comes from a single coherent state even once section
+    # acquisition refreshes the live cache between capture and rendering.
+    before = ConfigSnapshotCopies.from_node(target_node)
+
     # Validate the complete batch against the preview state before reporting
     # any operation, matching the preflight a real apply runs before its writes.
     preview_roots = _validate_sections_against_roots(
@@ -1834,7 +1839,7 @@ def _preview_configure_command(
     _preview_section_operations(
         hooks,
         preview_roots=preview_roots,
-        target_node=target_node,
+        current_values=before,
         config_sections=prepared.config_sections,
         module_config_sections=prepared.module_config_sections,
     )
