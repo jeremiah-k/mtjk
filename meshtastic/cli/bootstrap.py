@@ -19,6 +19,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import IO, Any, NoReturn
 
+import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliExit
 from meshtastic.cli.context import _terminate_cli as _terminate_cli_with_exit
@@ -79,12 +80,181 @@ def _configure_logging(args: argparse.Namespace) -> None:
         logging.getLogger("meshtastic").setLevel(logging.DEBUG)
 
 
+_DryRunActionFlag = tuple[str, str]
+
+
+_DRY_RUN_CONFLICTING_ACTIONS: tuple[_DryRunActionFlag, ...] = (
+    # (parsed attribute, user-facing flag label). Every argument that performs a
+    # device action, hardware access, long-running loop, pre-connect exit, or
+    # file-producing/read query is refused with --dry-run so a preview
+    # invocation can never reach a mutating or blocking code path. Connection
+    # selection and global output flags (for example --host, --dest, --debug,
+    # --quiet, --seriallog) are intentionally absent. ``--ch-index`` is also
+    # refused on purpose: a channel selector is meaningless for a preview, so
+    # ambiguous selectors are conservatively rejected rather than silently
+    # previewed against the wrong channel.
+    ("restore_preferences", "--restore-preferences"),
+    ("store_ui_config", "--store-ui-config"),
+    ("get_ui_config", "--get-ui-config"),
+    ("toggle_muted_node", "--toggle-muted-node"),
+    ("remove_position", "--remove-position"),
+    ("request_connection_status", "--request-connection-status"),
+    ("delete_file", "--delete-file"),
+    ("send_input_event", "--send-input-event"),
+    ("input_kb_char", "--input-kb-char"),
+    ("input_touch_x", "--input-touch-x"),
+    ("input_touch_y", "--input-touch-y"),
+    ("key_verify", "--key-verify"),
+    ("ch_preset", "--ch-preset"),
+    ("ch_vlongslow", "--ch-vlongslow"),
+    ("ch_longslow", "--ch-longslow"),
+    ("ch_longmod", "--ch-longmod"),
+    ("ch_longfast", "--ch-longfast"),
+    ("ch_longturbo", "--ch-longturbo"),
+    ("ch_medslow", "--ch-medslow"),
+    ("ch_medfast", "--ch-medfast"),
+    ("ch_shortslow", "--ch-shortslow"),
+    ("ch_shortfast", "--ch-shortfast"),
+    ("ch_shortturbo", "--ch-shortturbo"),
+    ("reboot", "--reboot"),
+    ("reboot_ota", "--reboot-ota"),
+    ("enter_dfu", "--enter-dfu"),
+    ("shutdown", "--shutdown"),
+    ("factory_reset", "--factory-reset"),
+    ("factory_reset_device", "--factory-reset-device"),
+    ("reset_nodedb", "--reset-nodedb"),
+    ("backup_preferences", "--backup-preferences"),
+    ("remove_backup_preferences", "--remove-backup-preferences"),
+    ("remove_node", "--remove-node"),
+    ("remove_favorite_node", "--remove-favorite-node"),
+    ("remove_ignored_node", "--remove-ignored-node"),
+    ("set_favorite_node", "--set-favorite-node"),
+    ("set_ignored_node", "--set-ignored-node"),
+    ("set_time", "--set-time"),
+    ("traceroute", "--traceroute"),
+    ("request_position", "--request-position"),
+    ("request_telemetry", "--request-telemetry"),
+    ("device_metadata", "--device-metadata"),
+    ("gpio_rd", "--gpio-rd"),
+    ("gpio_wrb", "--gpio-wrb"),
+    ("gpio_watch", "--gpio-watch"),
+    ("ota_update", "--ota-update"),
+    ("info", "--info"),
+    ("nodes", "--nodes"),
+    ("pos_fields", "--pos-fields"),
+    ("show_fields", "--show-fields"),
+    ("ack", "--ack"),
+    ("lockdown_passphrase", "--lockdown-passphrase"),
+    ("lockdown_passphrase_file", "--lockdown-passphrase-file"),
+    (
+        "insecure_lockdown_passphrase_on_command_line",
+        "--insecure-lockdown-passphrase-on-command-line",
+    ),
+    ("lockdown_provision", "--lockdown-provision"),
+    ("lockdown_lock_now", "--lockdown-lock-now"),
+    ("lockdown_unlock", "--lockdown-unlock"),
+    ("lockdown_disable", "--lockdown-disable"),
+    ("lockdown_yes", "--lockdown-yes"),
+    ("set_owner", "--set-owner"),
+    ("set_owner_short", "--set-owner-short"),
+    ("set_ham", "--set-ham"),
+    ("set_is_unmessageable", "--set-is-unmessageable"),
+    ("setalt", "--setalt"),
+    ("setlat", "--setlat"),
+    ("setlon", "--setlon"),
+    ("set_canned_message", "--set-canned-message"),
+    ("set_ringtone", "--set-ringtone"),
+    ("begin_edit", "--begin-edit"),
+    ("commit_edit", "--commit-edit"),
+    ("get", "--get"),
+    ("get_canned_message", "--get-canned-message"),
+    ("get_ringtone", "--get-ringtone"),
+    ("ch_set", "--ch-set"),
+    ("ch_add", "--ch-add"),
+    ("ch_add_url", "--ch-add-url"),
+    ("ch_del", "--ch-del"),
+    ("ch_disable", "--ch-disable"),
+    ("ch_enable", "--ch-enable"),
+    ("ch_set_url", "--seturl"),
+    # Deliberately rejected despite being "only" a selector: --ch-index cannot
+    # meaningfully scope a preview, so ambiguous selectors are refused.
+    ("ch_index", "--ch-index"),
+    ("show_region_presets", "--show-region-presets"),
+    ("contact_qr", "--contact-qr"),
+    ("add_contact", "--add-contact"),
+    ("contact_verified", "--contact-verified"),
+    ("contact_ignore", "--contact-ignore"),
+    ("sendtext", "--sendtext"),
+    ("reply", "--reply"),
+    ("listen", "--listen"),
+    ("tunnel", "--tunnel"),
+    ("tunnel_net", "--tunnel-net"),
+    ("noproto", "--noproto"),
+    ("wait_to_disconnect", "--wait-to-disconnect"),
+    ("qr", "--qr"),
+    ("qr_all", "--qr-all"),
+    ("export_config", "--export-config"),
+    ("slog", "--slog"),
+    ("test", "--test"),
+    ("support", "--support"),
+    ("deprecated", "--deprecated"),
+    ("list_fields", "--list-fields"),
+    ("describe_field", "--describe-field"),
+    ("ble_scan", "--ble-scan"),
+    ("power_riden", "--power-riden"),
+    ("power_ppk2_meter", "--power-ppk2-meter"),
+    ("power_ppk2_supply", "--power-ppk2-supply"),
+    ("power_sim", "--power-sim"),
+    ("power_stress", "--power-stress"),
+    ("power_wait", "--power-wait"),
+    ("power_voltage", "--power-voltage"),
+)
+
+
+def _action_requested(value: Any) -> bool:
+    """Return whether one parsed action argument was actually provided."""
+    return value is not None and value is not False and value != []
+
+
+def _validate_dry_run_invocation(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    """Reject ``--dry-run`` invocations that cannot be previewed safely.
+
+    The preview workflow supports only ``--set`` and ``--configure`` batches.
+    Every other action argument is refused before pre-connect actions run and
+    before any transport is initialized, so an unrelated mutating or
+    long-running flag can never execute underneath a preview.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI arguments for this invocation.
+    parser : argparse.ArgumentParser
+        Parser that owns usage/error reporting.
+    """
+    if not (args.set or args.configure):
+        parser.error("--dry-run requires --set or --configure")
+    conflicts = [
+        label
+        for attribute, label in _DRY_RUN_CONFLICTING_ACTIONS
+        if _action_requested(getattr(args, attribute, None))
+    ]
+    if conflicts:
+        parser.error(
+            "--dry-run only supports --set and --configure; remove: "
+            + ", ".join(conflicts)
+        )
+
+
 def _validate_and_normalize_args(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     hooks: BootstrapHooks,
 ) -> None:
     """Validate pre-connect arguments and apply historical default mutations."""
+    if cli_config_preview.preview_requested(args):
+        _validate_dry_run_invocation(args, parser)
     if args.quiet and (args.debug or args.listen or args.debuglib):
         parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
     if (args.contact_verified or args.contact_ignore) and not args.contact_qr:

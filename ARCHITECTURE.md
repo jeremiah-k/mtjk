@@ -78,6 +78,11 @@ behind them has changed substantially.
 modules own parser construction, bootstrap/session resources, connected actions,
 preference conversion, configuration planning, and rendering.
 
+`--dry-run` previews `--set`/`--configure` batches through the same
+validation and secret-redaction paths as real writes, applying candidate
+values only to protobuf copies (`meshtastic.cli.config_preview`) and refusing
+unsupported action combinations before any transport is initialized.
+
 The CLI and library intentionally have different failure responsibilities:
 internal library operations raise exceptions; the CLI decides how those failures
 should be presented and which process exit code should be used.
