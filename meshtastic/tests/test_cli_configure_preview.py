@@ -765,6 +765,42 @@ def test_preview_configure_validates_against_chained_snapshot_with_live_current(
 
 
 @pytest.mark.unit
+def test_snapshot_absorb_missing_sections_gains_new_sections_only() -> None:
+    """Absorb fills only sections the node delivered; staged ones survive."""
+    node = _target_node()
+    node.localConfig.bluetooth.enabled = True
+    node.moduleConfig.mqtt.enabled = True
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    snapshot.local_config.lora.hop_limit = 5
+
+    snapshot.absorb_missing_sections(node)
+
+    assert snapshot.local_config.lora.hop_limit == 5
+    assert snapshot.local_config.bluetooth.enabled is True
+    assert snapshot.module_config.mqtt.enabled is True
+
+
+@pytest.mark.unit
+def test_snapshot_absorb_ignores_sections_absent_on_node() -> None:
+    """Sections the node has not delivered stay absent from the copies."""
+    node = _target_node()
+    node.localConfig.ClearField("bluetooth")
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    snapshot.local_config.lora.hop_limit = 5
+
+    snapshot.absorb_missing_sections(node)
+
+    assert snapshot.local_config.lora.hop_limit == 5
+    assert not snapshot.local_config.HasField("bluetooth")
+
+
+@pytest.mark.unit
 def test_main_configure_preview_wrapper_forwards_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
