@@ -416,6 +416,18 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
 
     group.add_argument(
+        "--dry-run",
+        help=(
+            "Preview --set/--configure changes without writing to the device."
+            " Connects read-only (missing configuration sections may be requested),"
+            " validates the complete batch against protobuf copies, and prints the"
+            " planned operations. Requires --set or --configure and cannot be"
+            " combined with other actions."
+        ),
+        action="store_true",
+    )
+
+    group.add_argument(
         "--begin-edit",
         help="Tell the node to open a transaction to edit settings",
         action="store_true",

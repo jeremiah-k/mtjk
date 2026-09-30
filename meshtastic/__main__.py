@@ -23,6 +23,7 @@ from pubsub import pub
 import meshtastic.cli.bootstrap as cli_bootstrap
 import meshtastic.cli.channel_contact_actions as cli_channel_contact_actions
 import meshtastic.cli.config_io as cli_config_io
+import meshtastic.cli.config_preview as cli_config_preview
 import meshtastic.cli.configure_actions as cli_configure_actions
 import meshtastic.cli.device_actions as cli_device_actions
 import meshtastic.cli.dispatch as cli_dispatch
@@ -46,6 +47,11 @@ from meshtastic._branding import (
 # pylint: disable=unused-import
 from meshtastic._core_constants import BROADCAST_ADDR  # noqa: F401
 from meshtastic._core_constants import LOCAL_ADDR  # noqa: F401
+from meshtastic.cli.config_preview import (
+    PREVIEW_CURRENT_NOT_SET as _PREVIEW_CURRENT_NOT_SET,
+)
+from meshtastic.cli.config_preview import ConfigSnapshotCopies as _ConfigSnapshotCopies
+from meshtastic.cli.config_preview import render_preview_value as _render_preview_value
 from meshtastic.cli.context import ActionOutcome, CliContext
 
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
@@ -1094,14 +1100,20 @@ def _ensure_set_sections_loaded(
             node.requestConfig(config_type)
 
 
-def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) -> bool:
+def _validate_set_entries_against_configs(
+    node: Any,
+    config_copies: Sequence[Any],
+    set_entries: Sequence[tuple[str, Any]],
+) -> bool:
     """
-    Validate all --set entries against configuration copies before applying changes.
+    Validate --set entries against prepared configuration copies as one batch.
 
     Parameters
     ----------
     node : Any
-        Node providing the current local and module configuration.
+        Node providing the cached configuration used for field-choice guidance.
+    config_copies : Sequence[Any]
+        Mutable protobuf copies that receive the validated assignments.
     set_entries : Sequence[tuple[str, Any]]
         Preference names and raw values to validate as one batch.
 
@@ -1110,13 +1122,15 @@ def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) ->
     bool
         ``True`` if every entry is valid; ``False`` if an unknown field or semantic
         validation failure rejects the batch.
-    """
-    candidates: list[Any] = []
-    for source in (node.localConfig, node.moduleConfig):
-        candidate = type(source)()
-        candidate.CopyFrom(source)
-        candidates.append(candidate)
 
+    Notes
+    -----
+    Shared by the normal ``--set`` preflight and the ``--dry-run`` preview so both
+    paths apply identical normalization, descriptor, metadata, and nanopb
+    validation semantics. Unknown fields print field-choice guidance, fatal value
+    errors aggregate into one ``_cli_exit``, and value rejections are reported
+    individually.
+    """
     fatal_errors: list[str] = []
     unknown_fields: list[str] = []
     value_rejections: list[tuple[str, tuple[str, ...]]] = []
@@ -1124,7 +1138,7 @@ def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) ->
     try:
         for raw_pref_name, raw_value in set_entries:
             pref_name = _normalize_pref_name(raw_pref_name)
-            resolved = _resolve_set_target(candidates, pref_name)
+            resolved = _resolve_set_target(config_copies, pref_name)
             if resolved is None:
                 unknown_fields.append(pref_name)
                 continue
@@ -1168,6 +1182,29 @@ def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) ->
             _report_pref_validation(f"{pref_name}: {_SET_VALUE_REJECTED_MESSAGE}")
 
     return not (unknown_fields or value_rejections)
+
+
+def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) -> bool:
+    """
+    Validate all --set entries against configuration copies before applying changes.
+
+    Parameters
+    ----------
+    node : Any
+        Node providing the current local and module configuration.
+    set_entries : Sequence[tuple[str, Any]]
+        Preference names and raw values to validate as one batch.
+
+    Returns
+    -------
+    bool
+        ``True`` if every entry is valid; ``False`` if an unknown field or semantic
+        validation failure rejects the batch.
+    """
+    snapshot = _ConfigSnapshotCopies.from_node(node)
+    return _validate_set_entries_against_configs(
+        node, (snapshot.local_config, snapshot.module_config), set_entries
+    )
 
 
 def _handle_set_command(
@@ -1236,6 +1273,205 @@ def _handle_set_command(
             node.commitSettingsTransaction()
 
 
+def _resolve_set_leaf(
+    config: Any, pref_name: str
+) -> tuple[Any, FieldDescriptor] | None:
+    """Resolve the leaf parent message and descriptor for one preference path.
+
+    Parameters
+    ----------
+    config : Any
+        Configuration wrapper message to resolve the path against.
+    pref_name : str
+        Normalized dotted preference path.
+
+    Returns
+    -------
+    tuple[Any, FieldDescriptor] | None
+        Owning parent message and leaf field descriptor, or ``None`` when the
+        path does not resolve.
+    """
+    name_parts = splitCompoundName(pref_name)
+    parent, config_type = _walk_config_path(config, name_parts)
+    if config_type is None:
+        return None
+    if config_type.message_type is not None:
+        leaf_field = config_type.message_type.fields_by_name.get(name_parts[-1])
+    else:
+        leaf_field = config_type
+    if leaf_field is None:
+        return None
+    target = (
+        getattr(parent, config_type.name)
+        if config_type.message_type is not None
+        else parent
+    )
+    return target, leaf_field
+
+
+def _read_set_leaf_value(parent: Any, leaf_field: FieldDescriptor) -> Any:
+    """Read one preference value from its parent message, listifying repeated fields.
+
+    Parameters
+    ----------
+    parent : Any
+        Message owning the leaf field.
+    leaf_field : FieldDescriptor
+        Descriptor of the leaf field to read.
+
+    Returns
+    -------
+    Any
+        Scalar leaf value or a plain list for repeated fields.
+    """
+    value = getattr(parent, leaf_field.name)
+    if _is_repeated_field(leaf_field):
+        return list(value)
+    return value
+
+
+def _render_preview_current_value(pref_name: str, live_configs: Sequence[Any]) -> str:
+    """Render one preference's current value from the live cached configuration.
+
+    Parameters
+    ----------
+    pref_name : str
+        Normalized dotted preference path.
+    live_configs : Sequence[Any]
+        The node's cached local and module configuration messages.
+
+    Returns
+    -------
+    str
+        Rendered current value, ``not set`` for an unloaded section, with
+        secret-bearing paths redacted on every side.
+    """
+    resolved = _resolve_set_target(live_configs, pref_name)
+    if resolved is None:
+        return _PREVIEW_CURRENT_NOT_SET
+    live_config, config_type = resolved
+    try:
+        section_present = live_config.HasField(config_type.name)
+    except ValueError:
+        section_present = True
+    if not section_present:
+        return _PREVIEW_CURRENT_NOT_SET
+    resolved_leaf = _resolve_set_leaf(live_config, pref_name)
+    if resolved_leaf is None:
+        return _PREVIEW_CURRENT_NOT_SET
+    target, leaf_field = resolved_leaf
+    current_value = _read_set_leaf_value(target, leaf_field)
+    return _render_preview_value(pref_name, leaf_field, current_value)
+
+
+def _dedupe_set_entries_last_wins(
+    set_entries: Sequence[tuple[str, Any]],
+) -> list[tuple[str, Any]]:
+    """Collapse duplicate preference assignments, keeping the last value.
+
+    Parameters
+    ----------
+    set_entries : Sequence[tuple[str, Any]]
+        Normalized ``(field_name, value)`` pairs in batch order.
+
+    Returns
+    -------
+    list[tuple[str, Any]]
+        One entry per normalized preference path, in first-mention order,
+        carrying the last assigned value.
+    """
+    collapsed: dict[str, Any] = {}
+    for raw_pref_name, raw_value in set_entries:
+        collapsed[_normalize_pref_name(raw_pref_name)] = raw_value
+    return list(collapsed.items())
+
+
+def _preview_set_command(
+    interface: MeshInterface,
+    args: Any,
+    get_node_kwargs: dict[str, Any],
+) -> _ConfigSnapshotCopies:
+    """
+    Preview a CLI ``--set`` batch without writing changes to the device.
+
+    Parameters
+    ----------
+    interface : MeshInterface
+        Active interface used to resolve the target node.
+    args : Any
+        Parsed CLI arguments containing the ``--set`` entries and destination.
+    get_node_kwargs : dict[str, Any]
+        Additional keyword arguments forwarded to ``interface.getNode``.
+
+    Returns
+    -------
+    ConfigSnapshotCopies
+        Deep copies of the node configuration carrying the previewed
+        assignments, chained into any later ``--configure`` preview.
+
+    Notes
+    -----
+    Read-only by construction: only missing-section read requests are issued,
+    validated assignments are applied to the returned protobuf copies, and no
+    writes, transactions, or acknowledgments are ever performed. Invalid
+    batches report the same preflight errors as the normal path and exit
+    without any preview output. Validation considers every entry — including
+    superseded duplicates — so an invalid earlier assignment rejects the
+    preview exactly as the real batch would be rejected, while the rendered
+    plan collapses a duplicated preference path to one line with its last
+    assigned value.
+    """
+    node = interface.getNode(args.dest, False, **get_node_kwargs)
+    batch_entries = _normalize_set_entries(args.set)
+    _ensure_set_sections_loaded(node, batch_entries)
+    snapshot = _ConfigSnapshotCopies.from_node(node)
+    config_copies = (snapshot.local_config, snapshot.module_config)
+    if not _validate_set_entries_against_configs(node, config_copies, batch_entries):
+        _cli_exit(
+            "ERROR: --set batch rejected during dry run; "
+            "no changes were written to the device."
+        )
+
+    # Validation sees every entry — including superseded duplicates — so an
+    # invalid earlier assignment rejects the preview exactly as it would the
+    # real batch. Only the rendered plan collapses to last-write-wins.
+    display_entries = _dedupe_set_entries_last_wins(batch_entries)
+    live_configs = (node.localConfig, node.moduleConfig)
+    _cli_print("Dry run: previewing --set batch without writing changes.")
+    sections: set[str] = set()
+    for raw_pref_name, _raw_value in display_entries:
+        pref_name = _normalize_pref_name(raw_pref_name)
+        resolved = _resolve_set_target(config_copies, pref_name)
+        if resolved is None:
+            _cli_exit(
+                "ERROR: --set field no longer resolves after successful preflight: "
+                f"{pref_name}."
+            )
+        candidate, config_type = resolved
+        resolved_leaf = _resolve_set_leaf(candidate, pref_name)
+        if resolved_leaf is None:
+            _cli_exit(
+                "ERROR: --set field no longer resolves after successful preflight: "
+                f"{pref_name}."
+            )
+        target, leaf_field = resolved_leaf
+        new_value = _read_set_leaf_value(target, leaf_field)
+        new_rendered = _render_preview_value(pref_name, leaf_field, new_value)
+        current_rendered = _render_preview_current_value(pref_name, live_configs)
+        sections.add(config_type.name)
+        _cli_print(
+            f"Would set {pref_name} = {new_rendered} (current: {current_rendered})"
+        )
+
+    if sections:
+        _cli_print("Would write modified preferences to device")
+        if len(sections) > 1:
+            _cli_print("Would use a configuration transaction")
+        for section in sections:
+            _cli_print(f"Would write {section} configuration to device")
+    return snapshot
+
+
 def _pace_configure_write(
     remaining_writes: int, *, sleep_fn: Callable[[float], None] = time.sleep
 ) -> None:
@@ -1258,6 +1494,18 @@ def _handle_configure_command(
     """Compatibility wrapper for configure-file transaction execution."""
     return cli_configure_actions._handle_configure_command(
         _configure_hooks(), interface, args, getNode_kwargs
+    )
+
+
+def _run_configure_preview(
+    interface: MeshInterface,
+    args: Any,
+    getNode_kwargs: dict[str, Any],
+    snapshot: cli_config_preview.ConfigSnapshotCopies | None,
+) -> None:
+    """Compatibility wrapper previewing a configure document without writes."""
+    cli_configure_actions._preview_configure_command(
+        _configure_hooks(), interface, args, getNode_kwargs, snapshot=snapshot
     )
 
 
@@ -1325,6 +1573,8 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
         cli_exit=_cli_exit,
         cli_print=_cli_print,
         is_local_destination=_is_local_destination,
+        preview_set_command=_preview_set_command,
+        preview_configure_command=_run_configure_preview,
     )
     service_hooks = cli_messaging_service_actions.MessagingServiceHooks(
         cli_exit=_cli_exit,
