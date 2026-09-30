@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from meshtastic.node_runtime.channel_lookup_runtime import _NodeChannelLookupRuntime
 from meshtastic.node_runtime.shared import MAX_CHANNELS
 from meshtastic.node_runtime.transport_runtime import (
     _channels_fingerprint,
@@ -452,44 +453,16 @@ class TestNodeDeleteChannelRuntime:
         _NodeDeleteChannelRuntime
             A delete channel runtime instance.
         """
+        channel_state = mock_local_node._test_channel_state
         channel_write_runtime = _NodeChannelWriteRuntime(
-            mock_local_node, channel_state=mock_local_node._test_channel_state
+            mock_local_node, channel_state=channel_state
         )
         return _NodeDeleteChannelRuntime(
             mock_local_node,
-            channel_state=mock_local_node._test_channel_state,
+            channel_state=channel_state,
             channel_write_runtime=channel_write_runtime,
+            channel_lookup_runtime=_NodeChannelLookupRuntime(channel_state),
         )
-
-    @pytest.mark.unit
-    def test_named_admin_index_from_channels_finds_admin_channel(self) -> None:
-        """_named_admin_index_from_channels should find the named admin channel."""
-        channels = []
-        for i in range(MAX_CHANNELS):
-            ch = channel_pb2.Channel()
-            ch.index = i
-            ch.role = channel_pb2.Channel.Role.DISABLED
-            channels.append(ch)
-
-        # Set channel 2 as admin channel
-        channels[2].role = channel_pb2.Channel.Role.SECONDARY
-        channels[2].settings.name = "admin"
-
-        result = _NodeDeleteChannelRuntime._named_admin_index_from_channels(channels)
-        assert result == 2
-
-    @pytest.mark.unit
-    def test_named_admin_index_from_channels_returns_zero_when_not_found(self) -> None:
-        """_named_admin_index_from_channels should return 0 when no admin channel found."""
-        channels = []
-        for i in range(MAX_CHANNELS):
-            ch = channel_pb2.Channel()
-            ch.index = i
-            ch.role = channel_pb2.Channel.Role.DISABLED
-            channels.append(ch)
-
-        result = _NodeDeleteChannelRuntime._named_admin_index_from_channels(channels)
-        assert result == 0
 
     @pytest.mark.unit
     def test_normalize_staged_channels_truncates_to_max_channels(
@@ -540,7 +513,7 @@ class TestNodeDeleteChannelRuntime:
         delete_channel_runtime: _NodeDeleteChannelRuntime,
         mock_local_node: MagicMock,
     ) -> None:
-        """_build_rewrite_plan for local node should use _named_admin_index_from_channels (line 231)."""
+        """_build_rewrite_plan for a local node keeps the pre-delete named admin index."""
         # Set up channels with PRIMARY at 0, SECONDARY at 1 (to delete), admin at 2
         channels = []
         for i in range(MAX_CHANNELS):
@@ -569,7 +542,7 @@ class TestNodeDeleteChannelRuntime:
     def test_build_rewrite_plan_remote_node_uses_localnode_getadminchannelindex(
         self, mock_remote_node: MagicMock, mock_iface: MagicMock
     ) -> None:
-        """_build_rewrite_plan for remote node should use localNode._get_admin_channel_index() (line 233, 256)."""
+        """_build_rewrite_plan for a remote node resolves admin indexes from localNode."""
         # Set up local node with admin channel index
         mock_local = MagicMock()
         mock_local._get_admin_channel_index = MagicMock(return_value=4)
@@ -591,13 +564,15 @@ class TestNodeDeleteChannelRuntime:
         mock_remote_node.channels = channels
 
         # Create runtime for remote node
+        channel_state = mock_remote_node._test_channel_state
         channel_write_runtime = _NodeChannelWriteRuntime(
-            mock_remote_node, channel_state=mock_remote_node._test_channel_state
+            mock_remote_node, channel_state=channel_state
         )
         delete_runtime = _NodeDeleteChannelRuntime(
             mock_remote_node,
-            channel_state=mock_remote_node._test_channel_state,
+            channel_state=channel_state,
             channel_write_runtime=channel_write_runtime,
+            channel_lookup_runtime=_NodeChannelLookupRuntime(channel_state),
         )
 
         with mock_remote_node._channels_lock:
@@ -676,7 +651,7 @@ class TestNodeDeleteChannelRuntime:
         delete_channel_runtime: _NodeDeleteChannelRuntime,
         mock_local_node: MagicMock,
     ) -> None:
-        """delete_channel should switch admin_index after admin slot rewrite (line 281)."""
+        """delete_channel should switch admin_index after the admin slot rewrite."""
         # Set up channels where admin channel is at index 2, and we delete index 1
         # This means pre_delete_admin_index >= channel_index, so switch_after_admin_slot_rewrite is True
         channels = []

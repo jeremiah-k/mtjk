@@ -227,14 +227,12 @@ class _NodeChannelState:
     def named_admin_index(self, *, is_named_admin: Callable[[str], bool]) -> int | None:
         """Return the index of the enabled channel accepted by ``is_named_admin``."""
         with self._lock:
-            for channel in self._channels or []:
-                if (
-                    channel.role != channel_pb2.Channel.Role.DISABLED
-                    and channel.settings
-                    and is_named_admin(channel.settings.name)
-                ):
-                    return channel.index
-            return None
+            channels = self._channels
+            if channels is None:
+                return None
+            return _named_admin_index_in_channels(
+                channels, is_named_admin=is_named_admin
+            )
 
     @staticmethod
     def _copy_channel(channel: channel_pb2.Channel) -> channel_pb2.Channel:
@@ -242,3 +240,32 @@ class _NodeChannelState:
         copied = channel_pb2.Channel()
         copied.CopyFrom(channel)
         return copied
+
+
+def _named_admin_index_in_channels(
+    channels: Sequence[channel_pb2.Channel],
+    *,
+    is_named_admin: Callable[[str], bool],
+) -> int | None:
+    """Return the first enabled channel index accepted by ``is_named_admin``.
+
+    Parameters
+    ----------
+    channels : Sequence[channel_pb2.Channel]
+        Channel list to scan, such as the live cache or a staged rewrite list.
+    is_named_admin : Callable[[str], bool]
+        Predicate identifying a channel name as the named admin channel.
+
+    Returns
+    -------
+    int | None
+        Index of the first enabled matching channel, or None when absent.
+    """
+    for channel in channels:
+        if (
+            channel.role != channel_pb2.Channel.Role.DISABLED
+            and channel.settings
+            and is_named_admin(channel.settings.name)
+        ):
+            return channel.index
+    return None

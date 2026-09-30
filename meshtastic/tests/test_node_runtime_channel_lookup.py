@@ -429,3 +429,34 @@ def test_get_admin_channel_index_empty_channels(
     result = lookup._get_admin_channel_index()
 
     assert result == 0
+
+
+@pytest.mark.unit
+def test_named_admin_index_from_channels_finds_admin_channel(
+    lookup: _NodeChannelLookupRuntime,
+) -> None:
+    """The named-admin rule finds the first enabled admin-named channel in a list."""
+    channels = [
+        _make_channel(0, channel_pb2.Channel.Role.PRIMARY, name="primary"),
+        _make_channel(1, channel_pb2.Channel.Role.SECONDARY, name="admin"),
+        _make_channel(2, channel_pb2.Channel.Role.DISABLED, name="admin"),
+    ]
+
+    result = lookup._named_admin_index_from_channels(channels)
+
+    assert result == 1
+
+
+@pytest.mark.unit
+def test_named_admin_index_from_channels_returns_zero_when_not_found(
+    lookup: _NodeChannelLookupRuntime,
+) -> None:
+    """The named-admin rule falls back to channel zero for arbitrary lists."""
+    channels = [
+        _make_channel(0, channel_pb2.Channel.Role.PRIMARY, name="primary"),
+        _make_channel(1, channel_pb2.Channel.Role.SECONDARY, name="trailchat"),
+    ]
+
+    result = lookup._named_admin_index_from_channels(channels)
+
+    assert result == 0

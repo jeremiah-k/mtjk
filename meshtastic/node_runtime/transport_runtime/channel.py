@@ -8,11 +8,9 @@ from meshtastic.node_runtime.admin_wait import (
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
+from meshtastic.node_runtime.channel_lookup_runtime import _NodeChannelLookupRuntime
 from meshtastic.node_runtime.channel_state import _NodeChannelState
-from meshtastic.node_runtime.shared import (
-    MAX_CHANNELS,
-    _is_named_admin_channel_name,
-)
+from meshtastic.node_runtime.shared import MAX_CHANNELS
 from meshtastic.protobuf import admin_pb2, channel_pb2
 
 if TYPE_CHECKING:
@@ -131,36 +129,12 @@ class _NodeDeleteChannelRuntime:
         *,
         channel_state: _NodeChannelState,
         channel_write_runtime: _NodeChannelWriteRuntime,
+        channel_lookup_runtime: _NodeChannelLookupRuntime,
     ) -> None:
         self._node = node
         self._channel_state = channel_state
         self._channel_write_runtime = channel_write_runtime
-
-    @staticmethod
-    def _named_admin_index_from_channels(
-        channel_list: list[channel_pb2.Channel],
-    ) -> int:
-        """Find the index of the named admin channel in a channel list.
-
-        Parameters
-        ----------
-        channel_list : list[channel_pb2.Channel]
-            List of channels to search.
-
-        Returns
-        -------
-        int
-            The index of the first enabled channel with a named admin channel name,
-            or 0 if none is found.
-        """
-        for channel in channel_list:
-            if (
-                channel.role != channel_pb2.Channel.Role.DISABLED
-                and channel.settings
-                and _is_named_admin_channel_name(channel.settings.name)
-            ):
-                return channel.index
-        return 0
+        self._channel_lookup_runtime = channel_lookup_runtime
 
     @staticmethod
     def _normalize_staged_channels(channels: list[channel_pb2.Channel]) -> None:
@@ -208,7 +182,9 @@ class _NodeDeleteChannelRuntime:
 
         is_local_node = self._node.iface.localNode is self._node
         if is_local_node:
-            pre_delete_admin_index = self._named_admin_index_from_channels(channels)
+            pre_delete_admin_index = (
+                self._channel_lookup_runtime._named_admin_index_from_channels(channels)
+            )
         else:
             local_node = self._node.iface.localNode
             if local_node is None:
@@ -244,8 +220,10 @@ class _NodeDeleteChannelRuntime:
             channels_to_rewrite.append(channel_snapshot)
 
         if is_local_node:
-            post_delete_admin_index = self._named_admin_index_from_channels(
-                staged_channels
+            post_delete_admin_index = (
+                self._channel_lookup_runtime._named_admin_index_from_channels(
+                    staged_channels
+                )
             )
         else:
             local_node = self._node.iface.localNode
