@@ -22,9 +22,12 @@ from typing import (
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
 
+from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
+from meshtastic.mesh_interface_runtime.request_wait import DECODE_FAILED_PREFIX
 from meshtastic.node_runtime import contact_runtime
 from meshtastic.node_runtime.admin_wait import (
+    WAIT_ATTR_NAK,
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
@@ -1771,15 +1774,56 @@ class Node:  # pylint: disable=too-many-instance-attributes
             raise ValueError("response timeout must be positive")
 
         result: _AdminResponseT | None = None
+        failure_error: _MeshInterfaceError | None = None
         completed = threading.Event()
 
         def _on_response(packet: dict[str, Any]) -> None:
-            nonlocal result
+            nonlocal result, failure_error
             decoded = packet.get("decoded") if isinstance(packet, dict) else None
+            routing = decoded.get("routing") if isinstance(decoded, dict) else None
+            if isinstance(routing, dict):
+                error_reason = routing.get("errorReason")
+                if error_reason is not None and error_reason != "NONE":
+                    # The correlated delivery was a routing NAK for this
+                    # request id, not the requested protobuf. Record the
+                    # refusal under the request id and complete the bounded
+                    # wait as a failure instead of waiting out the timeout.
+                    request_id = (
+                        decoded.get("requestId") if isinstance(decoded, dict) else None
+                    )
+                    runtime = getattr(self.iface, "_request_wait_runtime", None)
+                    if runtime is not None and isinstance(request_id, int):
+                        runtime.record_admin_nak_wait_error(
+                            request_id=request_id,
+                            message=f"Routing error on response: {error_reason}",
+                        )
+                    failure_error = _MeshInterfaceError(
+                        f"Routing error on response: {error_reason}"
+                    )
+                    completed.set()
+                    return
             admin_section = decoded.get("admin") if isinstance(decoded, dict) else None
             raw_admin = (
                 admin_section.get("raw") if isinstance(admin_section, dict) else None
             )
+            if (
+                not isinstance(routing, dict)
+                and isinstance(admin_section, dict)
+                and DECODE_ERROR_KEY in admin_section
+                and raw_admin is None
+            ):
+                # Admin decode failures are delivered to typed getters as a
+                # terminal refusal, never as the requested payload. The
+                # request-wait runtime records the literal-keyed NAK error
+                # before invoking this callback; this callback owns only the
+                # bounded getter's failure result.
+                admin_decode_error = admin_section.get(
+                    DECODE_ERROR_KEY, f"{DECODE_FAILED_PREFIX}unknown error"
+                )
+                message = f"Failed to decode admin payload: {admin_decode_error}"
+                failure_error = _MeshInterfaceError(message)
+                completed.set()
+                return
             has_field = getattr(raw_admin, "HasField", None)
             try:
                 present = callable(has_field) and bool(has_field(response_field_name))
@@ -1801,15 +1845,27 @@ class Node:  # pylint: disable=too-many-instance-attributes
         )
         if request is None:
             return None
-        # A want_response admin request is answered by the data response
-        # itself; firmware sends no separate RoutingACK for it, so no scoped
-        # ACK bookkeeping is registered (``scope_ack=False``) and nothing ever
-        # retires it. The bounded correlated-response event below decides
-        # success, and skipping the WAIT_ATTR_NAK registration keeps the
-        # response handler prunable when the device never answers.
-        if not completed.wait(timeout=response_timeout_seconds):
-            return None
-        return result
+        # A want_response admin request is completed by the correlated data
+        # response itself, so no scoped ACK bookkeeping is registered
+        # (``scope_ack=False``) and the bounded correlated-response event
+        # below decides success. Routing feedback that does arrive must not
+        # disturb that decision: a routing ACK leaves the typed handler
+        # pending, and a routing NAK or an admin decode failure for the
+        # request id completes the wait early with the recorded routing
+        # error instead. The request's response-handler and NAK-error state
+        # is retired on every exit so a bounded getter cannot leak
+        # registrations for ids it no longer owns.
+        request_id = getattr(request, "id", None)
+        runtime = getattr(self.iface, "_request_wait_runtime", None)
+        try:
+            if not completed.wait(timeout=response_timeout_seconds):
+                return None
+            if failure_error is not None:
+                raise failure_error
+            return result
+        finally:
+            if runtime is not None and isinstance(request_id, int):
+                runtime.retire_wait_request(WAIT_ATTR_NAK, request_id=request_id)
 
     def requestDeviceConnectionStatus(
         self, *, response_timeout_seconds: float = ADMIN_RESPONSE_WAIT_SECONDS

@@ -43,6 +43,13 @@ RETIRED_WAIT_REQUEST_ID_TTL_SECONDS: float = 60.0
 # Active scoped waits are exempt from this TTL until their normal retirement path.
 RESPONSE_HANDLER_TTL_SECONDS: float = 3600.0
 
+# Inbound response packets are classified once per correlation so typed
+# (matcher-bound) handlers can treat routing feedback separately from the
+# correlated data payload they were registered for.
+RESPONSE_CLASS_ROUTING_ACK: str = "routing_ack"
+RESPONSE_CLASS_ROUTING_NAK: str = "routing_nak"
+RESPONSE_CLASS_DATA: str = "data"
+
 
 class _RequestWaitRuntime:
     """Owns request/wait bookkeeping, scoped wait semantics, and response correlation.
@@ -103,6 +110,9 @@ class _RequestWaitRuntime:
         self._response_handler_ttl_seconds = response_handler_ttl_seconds
         self._ack_nak_handlers: dict[int, bool] = {}
         self._response_matchers: dict[int, Callable[[dict[str, Any]], bool]] = {}
+        self._response_feedback_matchers: dict[
+            int, Callable[[dict[str, Any]], bool]
+        ] = {}
         self._response_handler_registered_at: dict[int, float] = {}
         self._managed_response_handlers: dict[int, ResponseHandler] = {}
 
@@ -122,16 +132,25 @@ class _RequestWaitRuntime:
         ack_permitted: bool,
         is_ack_nak_handler: bool = False,
         matcher: Callable[[dict[str, Any]], bool] | None = None,
-    ) -> None:
-        """Register a managed response callback for a request id."""
+        feedback_matcher: Callable[[dict[str, Any]], bool] | None = None,
+        reject_if_registered: bool = False,
+    ) -> bool:
+        """Register a managed response callback for a request id.
+
+        Returns ``False`` without changing state when ``reject_if_registered``
+        is true and the request id already belongs to a live handler.
+        """
         now = time.monotonic()
         with self._lock:
             self._prune_stale_response_handlers_locked(now=now)
+            response_handlers = self._get_response_handlers()
+            if reject_if_registered and request_id in response_handlers:
+                return False
             response_handler = ResponseHandler(
                 callback=callback,
                 ackPermitted=ack_permitted,
             )
-            self._get_response_handlers()[request_id] = response_handler
+            response_handlers[request_id] = response_handler
             self._managed_response_handlers[request_id] = response_handler
             self._response_handler_registered_at[request_id] = now
             if is_ack_nak_handler:
@@ -142,6 +161,11 @@ class _RequestWaitRuntime:
                 self._response_matchers[request_id] = matcher
             else:
                 self._response_matchers.pop(request_id, None)
+            if feedback_matcher is not None:
+                self._response_feedback_matchers[request_id] = feedback_matcher
+            else:
+                self._response_feedback_matchers.pop(request_id, None)
+        return True
 
     def drop_response_handler(self, request_id: int) -> None:
         """Remove a response callback registration if present."""
@@ -154,6 +178,7 @@ class _RequestWaitRuntime:
             self._get_response_handlers().clear()
             self._ack_nak_handlers.clear()
             self._response_matchers.clear()
+            self._response_feedback_matchers.clear()
             self._response_handler_registered_at.clear()
             self._managed_response_handlers.clear()
 
@@ -207,6 +232,7 @@ class _RequestWaitRuntime:
         """Forget runtime-owned metadata without touching a legacy replacement."""
         self._ack_nak_handlers.pop(request_id, None)
         self._response_matchers.pop(request_id, None)
+        self._response_feedback_matchers.pop(request_id, None)
         self._response_handler_registered_at.pop(request_id, None)
         self._managed_response_handlers.pop(request_id, None)
 
@@ -527,6 +553,21 @@ class _RequestWaitRuntime:
             request_id=request_id,
         )
 
+    def record_admin_nak_wait_error(self, *, request_id: int, message: str) -> None:
+        """Record a NAK-class admin failure under its literal request id.
+
+        This writes ONLY the ``(WAIT_ATTR_NAK, request_id)`` wait-error key.
+        Typed admin getters deliberately do not open request-scoped ACK/NAK
+        waits, so they must neither file legacy unscoped errors nor touch the
+        global ``receivedNak`` flag; the bounded getter that raises against
+        the refusal retires the key through ``retire_wait_request`` when it
+        completes. Typed admin decode failures use this same literal-keyed
+        policy; untyped decode failures keep the historical scoped/unscoped
+        resolution and legacy flag in :meth:`_apply_admin_decode_failure_wait_state`.
+        """
+        with self._lock:
+            self._get_wait_errors()[(WAIT_ATTR_NAK, request_id)] = message
+
     def correlate_inbound_response(
         self,
         *,
@@ -542,13 +583,16 @@ class _RequestWaitRuntime:
 
         decoded = packet_dict.get("decoded")
         routing = decoded.get("routing") if isinstance(decoded, dict) else None
-        is_ack = routing is not None and (
-            "errorReason" not in routing or routing["errorReason"] == "NONE"
-        )
-        response_handler, dropped_due_to_decode_failure = (
+        if routing is None:
+            response_class = RESPONSE_CLASS_DATA
+        elif "errorReason" not in routing or routing["errorReason"] == "NONE":
+            response_class = RESPONSE_CLASS_ROUTING_ACK
+        else:
+            response_class = RESPONSE_CLASS_ROUTING_NAK
+        response_handler, dropped_due_to_decode_failure, dropped_handler_was_typed = (
             self._select_response_handler_for_packet(
                 request_id=request_id,
-                is_ack=is_ack,
+                response_class=response_class,
                 skip_response_callback_for_decode_failure=(
                     skip_response_callback_for_decode_failure
                 ),
@@ -559,6 +603,7 @@ class _RequestWaitRuntime:
             self._apply_admin_decode_failure_wait_state(
                 request_id=request_id,
                 packet_dict=packet_dict,
+                typed_handler=dropped_handler_was_typed,
             )
         self._invoke_response_callback(
             request_id=request_id,
@@ -570,13 +615,15 @@ class _RequestWaitRuntime:
         self,
         *,
         request_id: int,
-        is_ack: bool,
+        response_class: str,
         skip_response_callback_for_decode_failure: bool,
         packet_dict: dict[str, Any],
-    ) -> tuple[ResponseHandler | None, bool]:
+    ) -> tuple[ResponseHandler | None, bool, bool]:
         """Select/pop a response handler from shared state for one packet."""
+        is_ack = response_class == RESPONSE_CLASS_ROUTING_ACK
         response_handler: ResponseHandler | None = None
         dropped_due_to_decode_failure = False
+        dropped_handler_was_typed = False
         with self._lock:
             response_handlers = self._get_response_handlers()
             candidate = response_handlers.get(request_id, None)
@@ -591,41 +638,107 @@ class _RequestWaitRuntime:
                     )
                 ):
                     self._remove_response_handler_locked(request_id)
-                    return None, False
+                    return None, False, False
                 matcher = self._response_matchers.get(request_id)
-                if not is_ack and matcher is not None:
+                feedback_matcher = self._response_feedback_matchers.get(request_id)
+                if feedback_matcher is not None and (
+                    response_class != RESPONSE_CLASS_DATA
+                    or skip_response_callback_for_decode_failure
+                ):
                     try:
-                        matches_contract = matcher(packet_dict)
+                        matches_feedback_source = feedback_matcher(packet_dict)
                     except Exception:  # pylint: disable=broad-exception-caught
                         logger.exception(
-                            "Response matcher failed for requestId %s; ignoring packet",
+                            "Response feedback matcher failed for requestId %s; "
+                            "ignoring packet",
                             request_id,
                         )
-                        return None, False
-                    if not matches_contract:
+                        return None, False, False
+                    if not matches_feedback_source:
                         logger.warning(
-                            "Ignoring response for requestId %s that did not match its contract",
+                            "Ignoring routing/decode feedback for requestId %s that "
+                            "did not match its source contract",
                             request_id,
                         )
-                        return None, False
+                        return None, False, False
                 is_ack_nak_handler = (
                     self._ack_nak_handlers.get(request_id, False)
                     or not candidate.ackPermitted
                 )
-                if skip_response_callback_for_decode_failure and not is_ack_nak_handler:
-                    self._remove_response_handler_locked(request_id)
+                if skip_response_callback_for_decode_failure and (
+                    matcher is not None or not is_ack_nak_handler
+                ):
+                    # Admin decode failures are handled separately from data
+                    # responses: drop the handler instead of evaluating the
+                    # decode-error payload against the typed contract. This
+                    # must stay reachable for typed (matcher-bound) handlers.
+                    removed_handler = self._remove_response_handler_locked(request_id)
                     dropped_due_to_decode_failure = True
-                elif (not is_ack) or is_ack_nak_handler or candidate.ackPermitted:
+                    if matcher is not None:
+                        dropped_handler_was_typed = True
+                        # Typed handlers receive the decode failure as a
+                        # terminal refusal (mirroring routing-NAK delivery)
+                        # so bounded getters fail fast instead of waiting.
+                        response_handler = removed_handler
+                elif (
+                    matcher is not None
+                    and response_class == RESPONSE_CLASS_ROUTING_ACK
+                    and not candidate.ackPermitted
+                    and not self._ack_nak_handlers.get(request_id, False)
+                ):
+                    # A routing ACK is transport feedback, not the requested
+                    # protobuf: a typed handler that is not explicitly
+                    # ACK-permitted stays pending for the data response. The
+                    # explicit components matter here because admin sends
+                    # always derive ``is_ack_nak_handler`` as True.
+                    logger.debug(
+                        "Ignoring routing ACK for typed requestId %s; "
+                        "waiting for the correlated data response",
+                        request_id,
+                    )
+                elif (
+                    matcher is not None and response_class == RESPONSE_CLASS_ROUTING_NAK
+                ):
+                    # A routing NAK is not the requested protobuf either, so
+                    # the matcher is skipped; consuming the handler and
+                    # delivering the NAK lets bounded getters fail fast with
+                    # the routing reason instead of waiting out their timeout.
                     response_handler = self._remove_response_handler_locked(request_id)
-        return response_handler, dropped_due_to_decode_failure
+                else:
+                    if response_class == RESPONSE_CLASS_DATA and matcher is not None:
+                        try:
+                            matches_contract = matcher(packet_dict)
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            logger.exception(
+                                "Response matcher failed for requestId %s; ignoring packet",
+                                request_id,
+                            )
+                            return None, False, False
+                        if not matches_contract:
+                            logger.warning(
+                                "Ignoring response for requestId %s that "
+                                "did not match its contract",
+                                request_id,
+                            )
+                            return None, False, False
+                    if (not is_ack) or is_ack_nak_handler or candidate.ackPermitted:
+                        response_handler = self._remove_response_handler_locked(
+                            request_id
+                        )
+        return (
+            response_handler,
+            dropped_due_to_decode_failure,
+            dropped_handler_was_typed,
+        )
 
     def _apply_admin_decode_failure_wait_state(
         self,
         *,
         request_id: int,
         packet_dict: dict[str, Any],
+        typed_handler: bool,
     ) -> None:
-        """Convert admin decode failures into wait-error state and legacy NAK flag."""
+        """Convert admin decode failures into typed or legacy wait-error state."""
         logger.warning(
             "Dropping response callback for requestId %s due to admin decode failure.",
             request_id,
@@ -641,12 +754,15 @@ class _RequestWaitRuntime:
             )
         else:
             admin_decode_error = f"{DECODE_FAILED_PREFIX}unknown error"
-        self.set_wait_error(
-            WAIT_ATTR_NAK,
-            f"Failed to decode admin payload: {admin_decode_error}",
-            request_id=request_id,
-        )
-        # Always set legacy NAK flag for admin decode failures regardless of scope
+        message = f"Failed to decode admin payload: {admin_decode_error}"
+        if typed_handler:
+            self.record_admin_nak_wait_error(request_id=request_id, message=message)
+            return
+
+        # Untyped decode failures preserve the historical wait-error routing and
+        # legacy NAK latch. They have no bounded typed getter that would retire a
+        # literal request-keyed error, so do not create one here.
+        self.set_wait_error(WAIT_ATTR_NAK, message, request_id=request_id)
         setattr(self._get_acknowledgment(), WAIT_ATTR_NAK, True)
 
     @staticmethod

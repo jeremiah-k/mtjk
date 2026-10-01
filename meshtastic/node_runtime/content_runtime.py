@@ -164,7 +164,9 @@ class _NodeContentResponseRuntime:
         """Validate decoded packet and return (is_terminal, has_routing_ack, raw_admin or None).
 
         has_routing_ack is True when we received a routing ACK (errorReason == "NONE")
-        but no admin payload yet - caller should continue waiting.
+        but no admin payload yet - caller should continue waiting. The request-wait
+        runtime now holds typed handlers pending across routing ACKs, so this branch
+        is defensive for untyped flows only.
         """
         if not isinstance(decoded, dict):
             logger.warning(
@@ -179,6 +181,8 @@ class _NodeContentResponseRuntime:
             if routing.get("errorReason") == "NONE" and not isinstance(
                 admin_message, dict
             ):
+                # Defensive for untyped flows: typed handlers are held pending
+                # across routing ACKs by the request-wait runtime.
                 return (False, True, None)
         if not isinstance(admin_message, dict):
             logger.warning("Unexpected %s response without admin payload", content_type)

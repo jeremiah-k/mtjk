@@ -68,15 +68,18 @@ class AdminResponseContract:
     response_variant: str
     response_subtype: str | None = None
 
+    def matches_source(self, packet: dict[str, object]) -> bool:
+        """Return whether ``packet`` came from an allowed response source."""
+        source = packet.get("from")
+        return isinstance(source, int) and source in self.expected_sources
+
     def matches(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` satisfies this request's response contract."""
-        source = packet.get("from")
         decoded = packet.get("decoded")
         admin = decoded.get("admin") if isinstance(decoded, dict) else None
         raw = admin.get("raw") if isinstance(admin, dict) else None
         if (
-            not isinstance(source, int)
-            or source not in self.expected_sources
+            not self.matches_source(packet)
             or not isinstance(raw, admin_pb2.AdminMessage)
             or raw.WhichOneof("payload_variant") != self.response_variant
         ):

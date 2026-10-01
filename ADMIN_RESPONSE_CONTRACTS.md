@@ -116,17 +116,36 @@ For a typed administrative getter, the normal sequence is:
 4. `sendData()` / `_send_data_with_wait()` registers the callback under the packet
    request ID and stores the matcher internally;
 5. an inbound packet is decoded and its request ID is extracted;
-6. the request-wait runtime finds the registered callback for that ID;
-7. non-ACK packets are checked against the typed matcher;
-8. only a matching packet consumes the handler and invokes the callback.
+6. the request-wait runtime classifies the packet once as a routing ACK, a routing
+   NAK, or a data response;
+7. the request-wait runtime finds the registered callback for that ID;
+8. data responses are checked against the typed matcher; routing ACKs leave typed
+   handlers pending; routing NAKs consume the typed handler and are delivered as a
+   terminal refusal;
+9. only a matching data packet, or a terminal routing NAK, consumes the handler and
+   invokes the callback.
 
-A response matcher is applied only after the request ID identifies a pending handler.
-The matcher is therefore an additional constraint, not a replacement for request-ID
-correlation.
+A response matcher is applied only after the request ID identifies a pending handler
+and only to data responses. The matcher is therefore an additional constraint, not a
+replacement for request-ID correlation, and routing feedback is never matched against
+the requested protobuf shape.
+
+### Packet id selection
+
+Request ids are generated while sending. Within the existing bounded generation
+retries, an id that still has a live response-handler registration is regenerated
+when the send can elicit correlated routing/data feedback (callback, ACK, response,
+or scoped wait), and zero ids are always regenerated. After the retry budget is
+exhausted, the final candidate is
+checked once more: a fresh non-zero id is accepted, but zero or an id still owned by
+a live handler fails the send before request state or transmission changes. The
+handler registration then atomically rejects a late collision under the same
+response-state lock, closing the check/claim race without changing the historical
+replacement semantics of explicit legacy registrations.
 
 ## Wrong or malformed responses
 
-A non-ACK packet does not consume the typed response handler when:
+A data packet does not consume the typed response handler when:
 
 - it comes from the wrong source;
 - it carries the wrong admin response oneof;
@@ -137,9 +156,21 @@ Matcher exceptions are logged and treated as non-matches. Keeping the handler pe
 is important: a malformed or unrelated packet must not steal the request slot from a
 later valid response.
 
-Admin decode failures are handled separately by the receive pipeline. A decoded
-admin failure is not passed to an ordinary data-response callback as if it were the
-requested protobuf payload.
+Routing feedback is handled by class, not by matcher:
+
+- a routing ACK (routing payload with no error reason) never consumes and never
+  invokes a typed handler; the request stays pending for the correlated data
+  response regardless of the order in which the ACK and the data arrive;
+- a routing NAK (routing payload with an error reason) consumes the typed handler
+  and is delivered to it as a terminal refusal so bounded getters fail fast with
+  the routing reason instead of waiting out their timeout; and
+- untyped (generic) handlers keep the historical ACK/NAK delivery behavior used by
+  request-scoped ACK waits on writes.
+
+Admin decode failures are handled separately by the receive pipeline for typed and
+untyped handlers alike: the handler is dropped and a decode-failure wait error is
+recorded. A decode failure is never passed to a data-response callback as if it were
+the requested protobuf payload, and it is not reported as a contract mismatch.
 
 ## Routing ACK/NAK is not the getter payload
 
@@ -156,12 +187,44 @@ completion is decided by the correlated data response. These methods send with
 `wantResponse=True` and deliberately do not open a separate request-scoped ACK wait.
 A routing ACK is never converted into or returned as the requested response object.
 
+Routing feedback is classified once per inbound packet: a routing payload whose
+`errorReason` key is absent or equal to `NONE` is a routing ACK; every other
+value (including malformed ones, such as a decode-failed marker) is a routing
+NAK; a packet without a routing payload is data.
+
+A routing NAK for the request id is not the requested protobuf, so the typed
+handler is consumed and its callback receives the NAK packet itself as the
+terminal refusal signal; the callback must not interpret that packet as the
+requested protobuf. The bounded getter records the routing reason under the
+literal `(receivedNak, request id)` wait-error key, raises
+`MeshInterface.MeshInterfaceError` naming the reason, and retires that
+literal-keyed wait error together with the response handler when it completes.
+The typed-NAK path files no unscoped `(receivedNak, -1)` error and does not set
+the legacy `receivedNak` flag.
+
+Routing feedback and admin decode failures for typed handlers are first checked
+against the request contract's allowed response sources. Feedback from another
+node carrying the same request id is ignored without consuming the handler.
+
+An admin decode failure from an allowed source is likewise delivered to a typed
+handler's callback as a terminal refusal (never as the requested payload), and
+the bounded getter fails fast with the `Failed to decode admin payload` message.
+Typed decode failures use only the literal `(receivedNak, request id)` error key
+and do not set the legacy `receivedNak` flag or the unscoped error. Untyped
+decode failures keep their historical scoped/unscoped wait-error resolution and
+legacy `receivedNak` behavior.
+
 The helper waits on a bounded event for the named response field and returns:
 
 - a defensive protobuf copy when the response arrives;
-- `None` when the send is skipped or the bounded response wait expires.
+- `None` when the send is skipped or the bounded response wait expires; or
+- `MeshInterface.MeshInterfaceError` naming the routing error reason when a routing
+  NAK correlated to the request id arrives first.
 
-A non-positive response timeout is rejected with `ValueError`.
+A non-positive response timeout is rejected with `ValueError`. On every exit the
+helper retires its response-handler registration and any NAK wait-error recorded for
+its request id, so a bounded getter cannot leak registrations for ids it no longer
+owns and a late duplicate cannot reach a retired request.
 
 Other admin operations still use request-scoped ACK/NAK waits when their contract is
 about successful mutation rather than retrieving a typed response. Do not conflate
@@ -241,7 +304,9 @@ The most focused regression coverage lives in:
 - `meshtastic/tests/test_admin_response_contracts.py`;
 - `meshtastic/tests/test_admin_ack_wait_scoping.py`;
 - `meshtastic/tests/test_response_handler_compat.py`;
-- `meshtastic/tests/test_cli_admin_utility_actions.py`; and
+- `meshtastic/tests/test_cli_admin_utility_actions.py`;
+- `meshtastic/tests/test_admin_typed_handler_lifetime.py`;
+- `meshtastic/tests/test_send_packet_id_collision_avoidance.py`; and
 - the request/response sections of `meshtastic/tests/test_node_runtime_response.py`.
 
 Changes to response correlation should be reviewed as concurrency and compatibility
