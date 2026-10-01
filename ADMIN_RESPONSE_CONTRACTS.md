@@ -130,6 +130,17 @@ and only to data responses. The matcher is therefore an additional constraint, n
 replacement for request-ID correlation, and routing feedback is never matched against
 the requested protobuf shape.
 
+### Packet id selection
+
+Request ids are generated while sending. Within the existing bounded generation
+retries, an id that still has a live response-handler registration is regenerated
+when the send is about to register a response handler for it, and zero ids are
+always regenerated. If the bounded retries are exhausted, a non-zero id is used
+with a warning naming the collision, while an all-zero sequence keeps failing the
+send. The avoidance is best-effort against legacy direct registrations because the
+id is finally claimed under the response-state lock at registration time, before
+the packet is sent.
+
 ## Wrong or malformed responses
 
 A data packet does not consume the typed response handler when:

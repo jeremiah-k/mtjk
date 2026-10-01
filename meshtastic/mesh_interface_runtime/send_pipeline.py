@@ -39,6 +39,7 @@ from meshtastic.traceroute import TraceRouteResult
 from meshtastic.util import Acknowledgment, Timeout, stripnl
 
 if TYPE_CHECKING:
+    from meshtastic._response_types import ResponseHandler
     from meshtastic.node import Node
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,17 @@ class SendPipeline:
     def _request_wait_runtime(self) -> _RequestWaitRuntime:
         """Return the request wait runtime from the parent interface."""
         return self._port.request_wait_runtime
+
+    def _live_response_handlers(self) -> dict[int, ResponseHandler]:
+        """Return the live request-id-keyed response-handler registrations.
+
+        This is the same mapping the request-wait runtime correlates inbound
+        responses against (the interface's public ``responseHandlers`` dict,
+        which the runtime registers into through its handler factory), so
+        containment checks here mirror the key space used at registration
+        time.
+        """
+        return self._port.facade.responseHandlers
 
     @property
     def _queue_send_runtime(self) -> _QueueSendRuntime:
@@ -354,13 +366,32 @@ class SendPipeline:
         meshPacket.decoded.payload = payload
         meshPacket.decoded.portnum = portNum
         meshPacket.decoded.want_response = wantResponse
+        # Response correlation keys live handlers by request id alone, so when
+        # this send will register a response handler, its freshly generated id
+        # must not reuse one that still has a registered callback/matcher.
+        # Zero-id regeneration stays unconditional. Avoidance here is
+        # best-effort for legacy direct registrations into responseHandlers;
+        # the id is finally claimed under the response-state lock by
+        # add_response_handler below, before the packet is sent.
+        will_register_handler = onResponse is not None
         meshPacket.id = self._port.generate_packet_id()
         for _ in range(PACKET_ID_GENERATION_MAX_RETRIES):
-            if meshPacket.id != 0:
+            if meshPacket.id != 0 and not (
+                will_register_handler
+                and meshPacket.id in self._live_response_handlers()
+            ):
                 break
             meshPacket.id = self._port.generate_packet_id()
         else:
-            raise self._port.error_type("Failed to generate non-zero packet ID")
+            if meshPacket.id == 0:
+                raise self._port.error_type("Failed to generate non-zero packet ID")
+            logger.warning(
+                "Packet id %s still collides with a live response handler "
+                "after %d generation attempts; proceeding with the "
+                "colliding request id",
+                meshPacket.id,
+                PACKET_ID_GENERATION_MAX_RETRIES,
+            )
         if replyId is not None:
             meshPacket.decoded.reply_id = replyId
         meshPacket.priority = priority
