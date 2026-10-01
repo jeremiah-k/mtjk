@@ -203,6 +203,34 @@ def test_configure_timeout_refuses_before_preflight_writes_and_transaction(
 
 
 @pytest.mark.unit
+def test_configure_missing_wait_machinery_refuses_before_any_write(
+    tmp_path: Any,
+) -> None:
+    """Absent requested state cannot fall through when a node has no wait seam."""
+    path = _write_document(tmp_path, "config:\n  lora:\n    hop_limit: 7\n")
+    node = _config_node()
+    node._timeout = SimpleNamespace()
+    iface = MagicMock()
+    exits: list[str] = []
+    hooks = _hooks(cli_exit=_recording_exit(exits))
+    plan = configure_actions._prepare_configure_execution(
+        hooks, iface, _configure_args(path)
+    )
+
+    with pytest.raises(SystemExit):
+        configure_actions._execute_configure_plan(hooks, iface, node, plan)
+
+    assert exits == [CONFIG_SECTION_TIMEOUT_MESSAGE]
+    node.requestConfig.assert_called_once()
+    node.setOwner.assert_not_called()
+    node.setURL.assert_not_called()
+    node.setFixedPosition.assert_not_called()
+    node.beginSettingsTransaction.assert_not_called()
+    node.writeConfig.assert_not_called()
+    node.commitSettingsTransaction.assert_not_called()
+
+
+@pytest.mark.unit
 def test_configure_apply_acquires_delayed_section_before_preflight(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:

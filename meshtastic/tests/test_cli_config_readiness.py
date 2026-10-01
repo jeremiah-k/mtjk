@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -151,8 +151,8 @@ def test_noproto_node_never_waits_but_still_requests() -> None:
 
 
 @pytest.mark.unit
-def test_node_without_wait_machinery_proceeds_without_exit() -> None:
-    """Nodes lacking waitForSet treat the wait as satisfied."""
+def test_node_without_wait_machinery_fails_closed_if_section_stays_missing() -> None:
+    """Missing wait machinery cannot turn an absent requested section into success."""
     node = SimpleNamespace(
         localConfig=localonly_pb2.LocalConfig(),
         moduleConfig=localonly_pb2.LocalModuleConfig(),
@@ -162,6 +162,31 @@ def test_node_without_wait_machinery_proceeds_without_exit() -> None:
     )
     exit_calls: list[str] = []
 
+    with pytest.raises(SystemExit):
+        ensure_config_sections_loaded(
+            node,
+            [(node.localConfig, _LORA_FD)],
+            cli_exit=_recording_exit(exit_calls),
+        )
+
+    node.requestConfig.assert_called_once_with(_LORA_FD)
+    assert exit_calls == [_TIMEOUT_MESSAGE_TEMPLATE.format(section="lora")]
+    assert wait_for_config_sections(node, [(node.localConfig, _LORA_FD)]) is False
+
+
+@pytest.mark.unit
+def test_node_without_wait_machinery_accepts_synchronous_section_delivery() -> None:
+    """A request that synchronously populates the section needs no wait machinery."""
+    node = SimpleNamespace(
+        localConfig=localonly_pb2.LocalConfig(),
+        moduleConfig=localonly_pb2.LocalModuleConfig(),
+        noProto=False,
+        requestConfig=MagicMock(),
+        _timeout=SimpleNamespace(),
+    )
+    node.requestConfig.side_effect = lambda _field: node.localConfig.lora.SetInParent()
+    exit_calls: list[str] = []
+
     ensure_config_sections_loaded(
         node,
         [(node.localConfig, _LORA_FD)],
@@ -169,8 +194,8 @@ def test_node_without_wait_machinery_proceeds_without_exit() -> None:
     )
 
     node.requestConfig.assert_called_once_with(_LORA_FD)
+    assert node.localConfig.HasField("lora")
     assert exit_calls == []
-    assert wait_for_config_sections(node, [(node.localConfig, _LORA_FD)]) is True
 
 
 @pytest.mark.unit
@@ -187,6 +212,22 @@ def test_timeout_aborts_with_exact_message_and_nothing_after() -> None:
         )
 
     assert excinfo.value.code == _TIMEOUT_MESSAGE_TEMPLATE.format(section="lora")
+    assert exit_calls == [_TIMEOUT_MESSAGE_TEMPLATE.format(section="lora")]
+    node.requestConfig.assert_called_once_with(_LORA_FD)
+
+@pytest.mark.unit
+def test_timeout_returning_exit_seam_still_fails_closed() -> None:
+    """A misbehaving exit seam cannot let missing state reach validation or writes."""
+    node = _readiness_node(wait_for_set=MagicMock(return_value=False))
+    exit_calls: list[str] = []
+
+    with pytest.raises(AssertionError, match="cli_exit returned unexpectedly"):
+        ensure_config_sections_loaded(
+            node,
+            [(node.localConfig, _LORA_FD)],
+            cli_exit=cast(Callable[[str], NoReturn], exit_calls.append),
+        )
+
     assert exit_calls == [_TIMEOUT_MESSAGE_TEMPLATE.format(section="lora")]
     node.requestConfig.assert_called_once_with(_LORA_FD)
 

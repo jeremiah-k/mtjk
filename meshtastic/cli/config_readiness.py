@@ -71,14 +71,14 @@ def wait_for_config_sections(
     Returns
     -------
     bool
-        ``True`` when the wait was satisfied — or when the node has no wait
-        machinery at all, which is treated as satisfied so nodes that cannot
-        receive config responses keep their historical fail-closed rendering.
+        ``True`` only when callable wait machinery confirms the probe. Nodes
+        without wait machinery return ``False`` so the owner can re-check the
+        requested protobuf presence and fail closed if it is still absent.
     """
     timeout = getattr(node, "_timeout", None)
     wait_for_set = getattr(timeout, "waitForSet", None)
     if not callable(wait_for_set):
-        return True
+        return False
     probe = ConfigSectionProbe(
         [(config.HasField, config_type.name) for config, config_type in sections]
     )
@@ -101,9 +101,9 @@ def ensure_config_sections_loaded(
         ``(config_root, section_field)`` pairs the caller resolved from its own
         path-specific collection. Duplicates are harmless.
     cli_exit : Callable[[str], NoReturn]
-        Caller's abort seam; invoked when the shared wait gives up. Seams that
-        return instead of raising still fail closed only if they abort — the
-        caller owns NoReturn semantics.
+        Caller's abort seam; invoked when the requested state is still missing.
+        The helper defensively raises if an injected seam returns instead of
+        honoring its ``NoReturn`` contract.
 
     Notes
     -----
@@ -116,7 +116,9 @@ def ensure_config_sections_loaded(
     ``noProto`` nodes are never waited on because no response can arrive
     without protocol use. On timeout the first still-missing section is named
     and the caller's ``cli_exit`` seam aborts before any validation, rendering,
-    or write.
+    or write. Compatibility nodes without callable wait machinery are treated
+    as unsatisfied and may continue only when the requested section was populated
+    synchronously before the final presence check.
     """
     requested_sections: set[tuple[str, str]] = set()
     pending_sections: list[tuple[Any, FieldDescriptor]] = []
@@ -136,7 +138,12 @@ def ensure_config_sections_loaded(
         and not wait_for_config_sections(node, pending_sections)
     ):
         for config, config_type in pending_sections:
-            if not config.HasField(config_type.name):
-                cli_exit(
-                    _TIMEOUT_EXIT_PREFIX + f"{config_type.name}" + _TIMEOUT_EXIT_SUFFIX
-                )
+            if config.HasField(config_type.name):
+                continue
+            cli_exit(
+                _TIMEOUT_EXIT_PREFIX + f"{config_type.name}" + _TIMEOUT_EXIT_SUFFIX
+            )
+            # ``cli_exit`` is a NoReturn contract, but injected/downstream seams
+            # occasionally return. Match the CLI runtime's defensive contract
+            # guard rather than allowing validation or writes to continue.
+            raise AssertionError("cli_exit returned unexpectedly") from None
