@@ -134,12 +134,14 @@ the requested protobuf shape.
 
 Request ids are generated while sending. Within the existing bounded generation
 retries, an id that still has a live response-handler registration is regenerated
-when the send is about to register a response handler for it, and zero ids are
-always regenerated. If the bounded retries are exhausted, a non-zero id is used
-with a warning naming the collision, while an all-zero sequence keeps failing the
-send. The avoidance is best-effort against legacy direct registrations because the
-id is finally claimed under the response-state lock at registration time, before
-the packet is sent.
+when the send can elicit correlated routing/data feedback (callback, ACK, response,
+or scoped wait), and zero ids are always regenerated. After the retry budget is
+exhausted, the final candidate is
+checked once more: a fresh non-zero id is accepted, but zero or an id still owned by
+a live handler fails the send before request state or transmission changes. The
+handler registration then atomically rejects a late collision under the same
+response-state lock, closing the check/claim race without changing the historical
+replacement semantics of explicit legacy registrations.
 
 ## Wrong or malformed responses
 
@@ -200,11 +202,17 @@ literal-keyed wait error together with the response handler when it completes.
 The typed-NAK path files no unscoped `(receivedNak, -1)` error and does not set
 the legacy `receivedNak` flag.
 
-An admin decode failure is likewise delivered to a typed handler's callback as
-a terminal refusal (never as the requested payload), and the bounded getter
-fails fast with the `Failed to decode admin payload` message. Decode failures
-keep the historical scoped/unscoped wait-error resolution and the legacy
-`receivedNak` flag.
+Routing feedback and admin decode failures for typed handlers are first checked
+against the request contract's allowed response sources. Feedback from another
+node carrying the same request id is ignored without consuming the handler.
+
+An admin decode failure from an allowed source is likewise delivered to a typed
+handler's callback as a terminal refusal (never as the requested payload), and
+the bounded getter fails fast with the `Failed to decode admin payload` message.
+Typed decode failures use only the literal `(receivedNak, request id)` error key
+and do not set the legacy `receivedNak` flag or the unscoped error. Untyped
+decode failures keep their historical scoped/unscoped wait-error resolution and
+legacy `receivedNak` behavior.
 
 The helper waits on a bounded event for the named response field and returns:
 

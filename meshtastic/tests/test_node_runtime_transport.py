@@ -295,6 +295,31 @@ class TestNodeAdminTransportRuntime:
         mock_local_node.iface.sendData.assert_not_called()
 
     @pytest.mark.unit
+    def test_send_admin_passes_source_matcher_for_typed_feedback(
+        self, mock_local_node: MagicMock
+    ) -> None:
+        """Typed admin getters correlate routing/decode feedback by source only."""
+        runtime = _NodeAdminTransportRuntime(mock_local_node)
+        message = admin_pb2.AdminMessage(
+            get_config_request=admin_pb2.AdminMessage.LORA_CONFIG
+        )
+
+        runtime._send_admin(
+            message,
+            want_response=True,
+            on_response=lambda _: None,
+        )
+
+        mock_local_node.iface._send_data_with_wait.assert_called_once()
+        call_kwargs = mock_local_node.iface._send_data_with_wait.call_args.kwargs
+        data_matcher = call_kwargs["responseMatcher"]
+        feedback_matcher = call_kwargs["responseFeedbackMatcher"]
+        assert callable(data_matcher)
+        assert callable(feedback_matcher)
+        assert feedback_matcher({"from": mock_local_node.nodeNum})
+        assert not feedback_matcher({"from": mock_local_node.nodeNum + 1})
+
+    @pytest.mark.unit
     def test_send_admin_passes_correct_parameters_to_senddata(
         self, mock_local_node: MagicMock
     ) -> None:

@@ -36,6 +36,9 @@ def test_contract_for_admin_request_binds_source_variant_and_subtype() -> None:
     assert contract.response_variant == "get_config_response"
     assert contract.response_subtype == "lora"
     assert contract.expected_sources == frozenset({0x1234})
+    assert contract.matches_source({"from": 0x1234})
+    assert not contract.matches_source({"from": 0x5678})
+    assert not contract.matches_source({"from": "0x1234"})
     assert contract.matches(
         _config_response_packet(request_id=1, source=0x1234, field="lora")
     )
@@ -55,6 +58,8 @@ def test_local_contract_accepts_zero_or_local_source() -> None:
     )
     assert contract is not None
     assert contract.expected_sources == frozenset({0, 0x1234})
+    assert contract.matches_source({"from": 0})
+    assert contract.matches_source({"from": 0x1234})
 
 
 @pytest.mark.unit

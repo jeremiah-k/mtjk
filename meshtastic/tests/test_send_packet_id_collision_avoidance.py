@@ -5,13 +5,12 @@ Response correlation keys live response handlers by request id alone
 so when a send will register a response handler, a freshly generated packet id
 must not reuse an id that still has a registered callback/matcher. These tests
 pin that the send pipeline regenerates ids that are already live (and zero ids,
-as before) while keeping the bounded retry budget and its historical failure
-mode.
+as before), rejects an occupied final candidate, and claims a fresh id atomically
+before transmission.
 """
 
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -20,6 +19,7 @@ import pytest
 
 import meshtastic.mesh_interface as mesh_interface_module
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.node_runtime.admin_wait import WAIT_ATTR_NAK
 
 # Distinct 22-bit random parts used to craft deterministic draws. A generated
 # id is (counter & 0x3FF) | (randint_draw << 10), so with currentPacketId
@@ -121,6 +121,46 @@ def test_send_data_with_wait_avoids_live_response_handler_ids(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "send_kwargs",
+    [
+        pytest.param({"wantAck": True}, id="want-ack"),
+        pytest.param({"wantResponse": True}, id="want-response"),
+        pytest.param({"response_wait_attr": WAIT_ATTR_NAK}, id="scoped-wait"),
+    ],
+)
+def test_send_data_with_wait_avoids_live_handler_ids_for_feedback_only_sends(
+    monkeypatch: pytest.MonkeyPatch,
+    send_kwargs: dict[str, Any],
+) -> None:
+    """Feedback-only sends must not reuse an id owned by an older handler."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime  # noqa: SLF001
+        old_callback = MagicMock(name="callback-old")
+        runtime.add_response_handler(  # noqa: SLF001
+            _COLLISION_ID_1,
+            old_callback,
+            ack_permitted=False,
+            matcher=MagicMock(name="matcher-old"),
+        )
+        old_handler = iface.responseHandlers[_COLLISION_ID_1]
+
+        iface.currentPacketId = 0  # noqa: SLF001
+        _install_randint_draws(monkeypatch, [_RANDOM_PART_1, _RANDOM_PART_2])
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        packet = iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
+            b"ping", **send_kwargs
+        )
+
+        assert sent == [packet]
+        assert packet.id == _COLLISION_ID_2
+        assert iface.responseHandlers[_COLLISION_ID_1] is old_handler
+        assert iface.responseHandlers[_COLLISION_ID_1].callback is old_callback
+
+
+@pytest.mark.unit
 def test_send_data_with_wait_still_retries_zero_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -141,17 +181,66 @@ def test_send_data_with_wait_still_retries_zero_ids(
 
 
 @pytest.mark.unit
-def test_send_data_with_wait_proceeds_after_retry_exhaustion(
+def test_send_data_with_wait_rejects_collision_after_retry_exhaustion(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """When every draw collides, the send proceeds with a warning, not an error."""
+    """Exhausting retries on occupied ids fails without replacing live handlers."""
     with MeshInterface(noProto=True) as iface:
         runtime = iface._request_wait_runtime  # noqa: SLF001
         constant_random_part = 999
-        # With currentPacketId 0 the eleven draws have counters 1..11; all are
-        # pre-registered so every draw collides and the retry budget drains.
+        registrations: dict[int, tuple[Any, MagicMock]] = {}
         for counter in range(1, 12):
+            request_id = (constant_random_part << 10) | counter
+            callback = MagicMock(name=f"callback-{counter}")
+            matcher = MagicMock(name=f"matcher-{counter}")
+            runtime.add_response_handler(  # noqa: SLF001
+                request_id,
+                callback,
+                ack_permitted=False,
+                matcher=matcher,
+            )
+            registrations[request_id] = (iface.responseHandlers[request_id], matcher)
+
+        final_request_id = (constant_random_part << 10) | 11
+        iface._response_wait_errors[(WAIT_ATTR_NAK, final_request_id)] = (
+            "existing wait state"  # noqa: SLF001
+        )
+        wait_errors_before = dict(iface._response_wait_errors)  # noqa: SLF001
+
+        iface.currentPacketId = 0  # noqa: SLF001
+        _install_randint_draws(monkeypatch, [], fallback=constant_random_part)
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        with pytest.raises(
+            MeshInterface.MeshInterfaceError,
+            match="Failed to generate packet ID not already used by a live response handler",
+        ):
+            iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
+                b"ping",
+                onResponse=MagicMock(name="callback-new"),
+                response_wait_attr=WAIT_ATTR_NAK,
+            )
+
+        assert sent == []
+        assert iface._response_wait_errors == wait_errors_before  # noqa: SLF001
+        assert set(iface.responseHandlers) == set(registrations)
+        for request_id, (handler, matcher) in registrations.items():
+            assert iface.responseHandlers[request_id] is handler
+            assert runtime._response_matchers[request_id] is matcher  # noqa: SLF001
+
+
+@pytest.mark.unit
+def test_send_data_with_wait_accepts_fresh_final_retry_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final generated candidate is accepted when retries end on a fresh id."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime  # noqa: SLF001
+        constant_random_part = 999
+        # Initial draw plus the first nine retries collide. The tenth retry
+        # produces counter 11, which is fresh even though the for-loop exhausts.
+        for counter in range(1, 11):
             runtime.add_response_handler(  # noqa: SLF001
                 (constant_random_part << 10) | counter,
                 MagicMock(),
@@ -162,15 +251,66 @@ def test_send_data_with_wait_proceeds_after_retry_exhaustion(
         _install_randint_draws(monkeypatch, [], fallback=constant_random_part)
         sent: list[Any] = []
         _install_capture_send(monkeypatch, iface, sent)
+        callback = MagicMock(name="callback-new")
 
-        with caplog.at_level(logging.WARNING):
-            packet = iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
-                b"ping", onResponse=MagicMock()
-            )
+        packet = iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
+            b"ping", onResponse=callback
+        )
 
         assert sent == [packet]
         assert packet.id == (constant_random_part << 10) | 11
-        assert "still collides with a live response handler" in caplog.text
+        assert iface.responseHandlers[packet.id].callback is callback
+
+
+@pytest.mark.unit
+def test_send_data_with_wait_atomic_registration_rejects_late_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handler installed after id selection cannot be overwritten at registration."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime  # noqa: SLF001
+        request_id = _COLLISION_ID_1
+        old_callback = MagicMock(name="callback-old")
+        old_matcher = MagicMock(name="matcher-old")
+        runtime.add_response_handler(  # noqa: SLF001
+            request_id,
+            old_callback,
+            ack_permitted=False,
+            matcher=old_matcher,
+        )
+        old_handler = iface.responseHandlers[request_id]
+
+        # Simulate the check/claim race: selection observes a stale empty view,
+        # while the atomic registration lock still sees the actual live handler.
+        monkeypatch.setattr(
+            iface._send_pipeline,  # noqa: SLF001
+            "_live_response_handlers",
+            lambda: {},
+        )
+        iface._response_wait_errors[(WAIT_ATTR_NAK, request_id)] = (  # noqa: SLF001
+            "existing wait state"
+        )
+        wait_errors_before = dict(iface._response_wait_errors)  # noqa: SLF001
+        iface.currentPacketId = 0  # noqa: SLF001
+        _install_randint_draws(monkeypatch, [_RANDOM_PART_1])
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        with pytest.raises(
+            MeshInterface.MeshInterfaceError,
+            match="already used by a live response handler",
+        ):
+            iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
+                b"ping",
+                onResponse=MagicMock(name="callback-new"),
+                response_wait_attr=WAIT_ATTR_NAK,
+            )
+
+        assert sent == []
+        assert iface._response_wait_errors == wait_errors_before  # noqa: SLF001
+        assert iface.responseHandlers[request_id] is old_handler
+        assert iface.responseHandlers[request_id].callback is old_callback
+        assert runtime._response_matchers[request_id] is old_matcher  # noqa: SLF001
 
 
 @pytest.mark.unit

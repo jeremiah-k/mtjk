@@ -7,10 +7,9 @@ getter handlers:
 1. A routing ACK leaves the typed handler pending for the correlated data
    response; the handler is consumed exactly once by a matching data packet
    and late duplicates cannot double-deliver.
-2. An admin decode failure drops the typed handler, records the NAK-keyed
-   wait error plus the legacy NAK latch, and is delivered to the typed
-   callback as a terminal refusal instead of being logged as a contract
-   mismatch.
+2. An admin decode failure from the expected source drops the typed handler,
+   records only the request-keyed NAK error, and is delivered to the typed
+   callback as a terminal refusal instead of poisoning legacy NAK state.
 3. A routing NAK for the request id fails a bounded typed getter fast with
    the refusal reason: the callback receives the NAK packet as the terminal
    refusal signal, the literal-keyed wait error is retired with the getter,
@@ -102,14 +101,17 @@ def _register_typed_lora_handler(
 
     ``_send_data_with_wait`` registers ``onResponseAckPermitted=False`` (see
     ``meshtastic/mesh_interface_runtime/send_pipeline.py``) and the admin
-    transport attaches ``contract.matches`` for known getters (see
+    transport attaches ``contract.matches`` for data and
+    ``contract.matches_source`` for routing/decode feedback (see
     ``meshtastic/node_runtime/transport_runtime/admin.py``).
     """
+    contract = _lora_config_contract()
     iface._request_wait_runtime.add_response_handler(  # noqa: SLF001
         request_id,
         callback,
         ack_permitted=False,
-        matcher=_lora_config_contract().matches,
+        matcher=contract.matches,
+        feedback_matcher=contract.matches_source,
     )
 
 
@@ -177,10 +179,9 @@ def test_admin_decode_failure_drops_typed_handler_and_records_nak_wait_error(
     """Admin decode failures must drop the handler, NAK the request, and refuse.
 
     Pinned contract: the handler is dropped, a "Failed to decode admin payload"
-    wait error is recorded under the NAK attr for the request id, the legacy
-    ``receivedNak`` flag is set, and the decode-failure packet is delivered to
-    the typed callback exactly once as a terminal refusal — never as the
-    requested payload and never as a contract mismatch.
+    wait error is recorded under the literal NAK key for the request id, no
+    unscoped error or legacy ``receivedNak`` latch is filed, and the failure
+    packet is delivered exactly once as a terminal refusal.
     """
     iface = MeshInterface(noProto=True)
     request_id = 91
@@ -209,8 +210,76 @@ def test_admin_decode_failure_drops_typed_handler_and_records_nak_wait_error(
     )
     assert wait_error is not None
     assert "Failed to decode admin payload" in wait_error
-    assert iface._acknowledgment.receivedNak is True
+    assert (
+        WAIT_ATTR_NAK,
+        UNSCOPED_WAIT_REQUEST_ID,
+    ) not in iface._response_wait_errors  # noqa: SLF001
+    assert iface._acknowledgment.receivedNak is False
     assert "did not match its contract" not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("packet_kind", "skip_decode"),
+    [
+        pytest.param("routing-nak", False, id="routing-nak"),
+        pytest.param("admin-decode", True, id="admin-decode"),
+    ],
+)
+def test_wrong_source_terminal_feedback_does_not_consume_typed_handler(
+    packet_kind: str, skip_decode: bool
+) -> None:
+    """Wrong-source routing/decode feedback must not steal a typed request id."""
+    iface = MeshInterface(noProto=True)
+    request_id = 92
+    callback = MagicMock()
+    _register_typed_lora_handler(iface, request_id, callback)
+
+    if packet_kind == "routing-nak":
+        wrong = {
+            "from": 0x5678,
+            "decoded": {
+                "requestId": request_id,
+                "routing": {"errorReason": "NOT_AUTHORIZED"},
+            },
+        }
+    else:
+        wrong = {
+            "from": 0x5678,
+            "decoded": {
+                "requestId": request_id,
+                "admin": {DECODE_ERROR_KEY: "decode-failed: malformed admin"},
+            },
+        }
+
+    iface._request_wait_runtime.correlate_inbound_response(  # noqa: SLF001
+        packet_dict=wrong,
+        skip_response_callback_for_decode_failure=skip_decode,
+        extract_request_id=_extract_request_id,
+    )
+
+    callback.assert_not_called()
+    assert request_id in iface.responseHandlers
+    assert (
+        WAIT_ATTR_NAK,
+        request_id,
+    ) not in iface._response_wait_errors  # noqa: SLF001
+    assert (
+        WAIT_ATTR_NAK,
+        UNSCOPED_WAIT_REQUEST_ID,
+    ) not in iface._response_wait_errors  # noqa: SLF001
+    assert iface._acknowledgment.receivedNak is False
+
+    correct = _config_response_packet(
+        request_id=request_id, source=0x1234, field="lora"
+    )
+    iface._request_wait_runtime.correlate_inbound_response(  # noqa: SLF001
+        packet_dict=correct,
+        skip_response_callback_for_decode_failure=False,
+        extract_request_id=_extract_request_id,
+    )
+    callback.assert_called_once_with(correct)
+    assert request_id not in iface.responseHandlers
 
 
 @pytest.mark.unit
@@ -405,6 +474,11 @@ def test_bounded_typed_getter_fails_fast_on_admin_decode_failure(
             WAIT_ATTR_NAK,
             request_id,
         ) not in iface._response_wait_errors  # noqa: SLF001
+        assert (
+            WAIT_ATTR_NAK,
+            UNSCOPED_WAIT_REQUEST_ID,
+        ) not in iface._response_wait_errors  # noqa: SLF001
+        assert iface._acknowledgment.receivedNak is False
         assert request_id not in iface.responseHandlers
 
 

@@ -79,6 +79,7 @@ class _NodeAdminTransportRuntime:
             )
 
         response_matcher = None
+        response_feedback_matcher = None
         if on_response is not None and want_response:
             local_node_num = getattr(self._node.iface.localNode, "nodeNum", None)
             contract = contract_for_admin_request(
@@ -88,7 +89,9 @@ class _NodeAdminTransportRuntime:
                     local_node_num if isinstance(local_node_num, int) else None
                 ),
             )
-            response_matcher = contract.matches if contract is not None else None
+            if contract is not None:
+                response_matcher = contract.matches
+                response_feedback_matcher = contract.matches_source
 
         send_kwargs: dict[str, Any] = {
             "portNum": portnums_pb2.PortNum.ADMIN_APP,
@@ -100,6 +103,8 @@ class _NodeAdminTransportRuntime:
         }
         if response_wait_attr is not None or response_matcher is not None:
             send_kwargs["responseMatcher"] = response_matcher
+            if response_feedback_matcher is not None:
+                send_kwargs["responseFeedbackMatcher"] = response_feedback_matcher
             send_kwargs["response_wait_attr"] = response_wait_attr
             return self._node.iface._send_data_with_wait(
                 outbound_message,

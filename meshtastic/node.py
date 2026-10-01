@@ -1813,21 +1813,14 @@ class Node:  # pylint: disable=too-many-instance-attributes
                 and raw_admin is None
             ):
                 # Admin decode failures are delivered to typed getters as a
-                # terminal refusal, never as the requested payload. Record
-                # the literal-keyed NAK error (the same message the runtime's
-                # drop path records) and fail the bounded wait immediately.
+                # terminal refusal, never as the requested payload. The
+                # request-wait runtime records the literal-keyed NAK error
+                # before invoking this callback; this callback owns only the
+                # bounded getter's failure result.
                 admin_decode_error = admin_section.get(
                     DECODE_ERROR_KEY, f"{DECODE_FAILED_PREFIX}unknown error"
                 )
                 message = f"Failed to decode admin payload: {admin_decode_error}"
-                request_id = (
-                    decoded.get("requestId") if isinstance(decoded, dict) else None
-                )
-                runtime = getattr(self.iface, "_request_wait_runtime", None)
-                if runtime is not None and isinstance(request_id, int):
-                    runtime.record_admin_nak_wait_error(
-                        request_id=request_id, message=message
-                    )
                 failure_error = _MeshInterfaceError(message)
                 completed.set()
                 return
