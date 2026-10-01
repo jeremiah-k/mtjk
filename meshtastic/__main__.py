@@ -53,7 +53,7 @@ from meshtastic.cli.config_preview import (
 )
 from meshtastic.cli.config_preview import ConfigSnapshotCopies as _ConfigSnapshotCopies
 from meshtastic.cli.config_preview import render_preview_value as _render_preview_value
-from meshtastic.cli.context import ActionOutcome, CliContext
+from meshtastic.cli.context import ActionOutcome, CliContext, _terminate_cli
 
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
 # pylint: disable=unused-import
@@ -1255,6 +1255,7 @@ def _handle_set_command(
     if not _preflight_set_entries(node, set_entries):
         return
 
+    pre_write_config_id = getattr(interface, "configId", None)
     live_configs = (node.localConfig, node.moduleConfig)
     fields: set[str] = set()
     for raw_pref_name, raw_value in set_entries:
@@ -1305,6 +1306,7 @@ def _handle_set_command(
             interface,
             node,
             node_dest=args.dest,
+            pre_write_config_id=pre_write_config_id,
             config_fields=config_fields,
             module_config_fields=module_config_fields,
         )
@@ -1365,6 +1367,7 @@ def _verify_local_set_apply(
     node: Any,
     *,
     node_dest: str,
+    pre_write_config_id: int | None,
     config_fields: dict[str, dict[str, Any]],
     module_config_fields: dict[str, dict[str, Any]],
 ) -> None:
@@ -1379,6 +1382,10 @@ def _verify_local_set_apply(
     node_dest : str
         Destination string the node was resolved from; reused by the
         reconnect-based fallback re-verification.
+    pre_write_config_id : int | None
+        Interface config-generation id captured before any writes. A changed
+        generation proves that a reboot/config restart occurred even when the
+        link reconnected before the readback budget expired.
     config_fields : dict[str, dict[str, Any]]
         Frozen requested ``LocalConfig`` values by section.
     module_config_fields : dict[str, dict[str, Any]]
@@ -1409,22 +1416,25 @@ def _verify_local_set_apply(
             timeout_sec=LOCAL_SET_APPLY_VERIFY_SECONDS,
         )
     except Exception as exc:
-        _cli_exit(
+        _terminate_cli(
+            _cli_exit,
             "ERROR: local --set verification could not read fresh device state: "
-            f"{exc}. The requested change could not be verified."
+            f"{exc}. The requested change could not be verified.",
         )
     if verification.status == LocalApplyStatus.VERIFIED:
         _cli_print("Verified: fresh device state matches the requested --set values.")
         return
     if verification.status == LocalApplyStatus.MISMATCH:
         fields_text = ", ".join(verification.mismatched_fields)
-        _cli_exit(
+        _terminate_cli(
+            _cli_exit,
             "ERROR: --set was sent, but fresh device state reports different "
             f"values for: {fields_text}. The device did not apply the requested "
-            "value(s)."
+            "value(s).",
         )
-    if verification.status == LocalApplyStatus.RELOAD_FAILED and _link_dropped(
-        interface
+    if verification.status == LocalApplyStatus.RELOAD_FAILED and (
+        _link_dropped(interface)
+        or _config_generation_changed(interface, pre_write_config_id)
     ):
         _verify_local_set_after_reconnect(
             interface,
@@ -1435,16 +1445,32 @@ def _verify_local_set_apply(
         return
     if verification.status == LocalApplyStatus.RELOAD_FAILED:
         sections_text = ", ".join(verification.missing_sections)
-        _cli_exit(
+        _terminate_cli(
+            _cli_exit,
             "ERROR: --set was sent, but the device did not return the "
             f"{sections_text} configuration section(s) within "
             f"{LOCAL_SET_APPLY_VERIFY_SECONDS:g} seconds; the requested value(s) "
-            "could not be verified."
+            "could not be verified.",
         )
-    _cli_exit(
+    _terminate_cli(
+        _cli_exit,
         "ERROR: local --set verification returned an unrecognized outcome "
-        f"({verification.status!r}); the requested change could not be confirmed."
+        f"({verification.status!r}); the requested change could not be confirmed.",
     )
+
+
+def _config_generation_changed(
+    interface: MeshInterface, previous_config_id: int | None
+) -> bool:
+    """Return whether the interface began a new config generation since the write.
+
+    A fast reboot can drop and restore the transport entirely within the local
+    readback budget. ``isConnected`` then looks healthy at the final check, but
+    ``configId`` still records the reboot/config restart and must trigger the
+    reconnect/full-config verification path. Interfaces without a generation
+    attribute preserve the historical link-state-only behavior.
+    """
+    return getattr(interface, "configId", previous_config_id) != previous_config_id
 
 
 def _link_dropped(interface: MeshInterface) -> bool:
@@ -1492,11 +1518,12 @@ def _verify_local_set_after_reconnect(
     if reconnect_result == cli_configure_actions.ConfigureReconnectResult.VERIFIED:
         _cli_print("Verified: fresh device state matches the requested --set values.")
         return
-    _cli_exit(
+    _terminate_cli(
+        _cli_exit,
         "ERROR: --set was sent, but the device dropped the link before the write "
         "could be verified and the reconnect check failed "
         f"({cli_configure_actions._configure_reconnect_message(reconnect_result)}). "
-        "The requested value(s) could not be verified."
+        "The requested value(s) could not be verified.",
     )
 
 

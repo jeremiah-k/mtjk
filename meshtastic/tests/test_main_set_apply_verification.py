@@ -75,7 +75,6 @@ def _build_local_set_interface(
     no_proto: bool = False,
     delivery_delay: float | None = None,
     reboot_after_write: bool = False,
-    reboot_delay: float = 0.05,
 ) -> tuple[MagicMock, MagicMock, list[str]]:
     """Build a protobuf-backed local node interface double with device truth.
 
@@ -99,11 +98,9 @@ def _build_local_set_interface(
         timer thread instead of synchronously, exercising the seam's deadline
         polling loop against a late reply.
     reboot_after_write : bool
-        When true, the write drops the interface link (reboot indication) and
-        restores it after ``reboot_delay`` seconds, modeling a commit that
-        rebooted the device.
-    reboot_delay : float
-        Seconds before the rebooted interface link is restored.
+        When true, the write drops the interface link and advances the config
+        generation, modeling a reboot. Tests restore the link from an explicit
+        reconnect hook rather than wall-clock timing.
 
     Returns
     -------
@@ -134,12 +131,11 @@ def _build_local_set_interface(
     node.requestChannels = MagicMock()
 
     def _write_config(config_name: str) -> None:
+        """Apply one staged write to device truth and optionally model a reboot."""
         calls.append(f"writeConfig:{config_name}")
         if reboot_after_write:
             iface.isConnected.clear()
-            restore = threading.Timer(reboot_delay, iface.isConnected.set)
-            restore.daemon = True
-            restore.start()
+            iface.configId += 1
         if drop_writes:
             return
         if config_name in staged_local.DESCRIPTOR.fields_by_name:
@@ -213,6 +209,7 @@ def _build_local_set_interface(
         iface.waitForConfig = MagicMock(side_effect=_repopulate_after_config_reload)
 
     iface.devPath = "/dev/mock"
+    iface.configId = 1
     iface.isConnected = threading.Event()
     iface.isConnected.set()
     iface.noProto = no_proto
@@ -598,9 +595,21 @@ def test_local_set_reboot_during_verify_recovers_verified(
         device_local=device_local,
         deliver_on_request=False,
         reboot_after_write=True,
-        reboot_delay=0.05,
     )
     monkeypatch.setattr(cli_configure_actions, "CONFIG_RECONNECT_WAIT_SECONDS", 0.5)
+    monkeypatch.setattr(cli_configure_actions, "CONFIG_REBOOT_PROBE_SECONDS", 0.0)
+    real_reconnect_verify = main_module._post_configure_reconnect_and_verify
+
+    def _restore_link_at_reconnect_check(*args: Any, **kwargs: Any) -> Any:
+        """Restore the modeled link only once the reconnect fallback owns it."""
+        iface.isConnected.set()
+        return real_reconnect_verify(*args, **kwargs)
+
+    monkeypatch.setattr(
+        main_module,
+        "_post_configure_reconnect_and_verify",
+        _restore_link_at_reconnect_check,
+    )
 
     _run_main_set(["--set", "power.ls_secs", "222"], iface, monkeypatch)
 
@@ -609,6 +618,41 @@ def test_local_set_reboot_during_verify_recovers_verified(
     assert "readback:power" in calls
     assert "Verified: fresh device state matches the requested --set values." in out
     assert "did not reconnect" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_local_set_fast_reboot_generation_change_recovers_verified(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A reboot that reconnects before the readback expires still re-verifies."""
+    device_local = localonly_pb2.LocalConfig()
+    device_local.power.ls_secs = 100
+    iface, node, calls = _build_local_set_interface(
+        device_local=device_local,
+        deliver_on_request=False,
+        reboot_after_write=True,
+    )
+    original_write = node.writeConfig.side_effect
+
+    def _write_and_reconnect(config_name: str) -> None:
+        """Complete the modeled reboot before local verification starts."""
+        original_write(config_name)
+        iface.isConnected.set()
+
+    node.writeConfig.side_effect = _write_and_reconnect
+    monkeypatch.setattr(cli_configure_actions, "CONFIG_RECONNECT_WAIT_SECONDS", 0.5)
+    monkeypatch.setattr(cli_configure_actions, "CONFIG_REBOOT_PROBE_SECONDS", 0.0)
+
+    _run_main_set(["--set", "power.ls_secs", "222"], iface, monkeypatch)
+
+    out, err = capsys.readouterr()
+    captured = out + err
+    assert "readback:power" in calls
+    assert iface.configId == 2
+    assert "Verified: fresh device state matches the requested --set values." in out
+    assert "did not return the power configuration section" not in captured
 
 
 @pytest.mark.unit
@@ -624,7 +668,6 @@ def test_local_set_reboot_never_returns_fails_closed(
         device_local=device_local,
         deliver_on_request=False,
         reboot_after_write=True,
-        reboot_delay=3600.0,
     )
     monkeypatch.setattr(cli_configure_actions, "CONFIG_RECONNECT_WAIT_SECONDS", 0.2)
 
@@ -637,6 +680,35 @@ def test_local_set_reboot_never_returns_fails_closed(
     assert "reconnect check failed" in captured
     assert "did not reconnect within the timeout" in captured
     assert "Verified:" not in captured
+
+
+@pytest.mark.unit
+def test_local_set_verification_returning_exit_seam_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nonconforming returning exit seam cannot turn a mismatch into success."""
+    iface = MagicMock()
+    node = MagicMock()
+    monkeypatch.setattr(
+        main_module,
+        "verify_local_config_apply",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            status=main_module.LocalApplyStatus.MISMATCH,
+            mismatched_fields=("power.ls_secs",),
+            missing_sections=(),
+        ),
+    )
+    monkeypatch.setattr(main_module, "_cli_exit", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(AssertionError, match="cli_exit returned unexpectedly"):
+        main_module._verify_local_set_apply(
+            iface,
+            node,
+            node_dest="^local",
+            pre_write_config_id=None,
+            config_fields={"power": {"ls_secs": 222}},
+            module_config_fields={},
+        )
 
 
 @pytest.mark.unit
