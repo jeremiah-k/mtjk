@@ -215,6 +215,7 @@ def test_timeout_aborts_with_exact_message_and_nothing_after() -> None:
     assert exit_calls == [_TIMEOUT_MESSAGE_TEMPLATE.format(section="lora")]
     node.requestConfig.assert_called_once_with(_LORA_FD)
 
+
 @pytest.mark.unit
 def test_timeout_returning_exit_seam_still_fails_closed() -> None:
     """A misbehaving exit seam cannot let missing state reach validation or writes."""

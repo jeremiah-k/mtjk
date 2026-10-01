@@ -12,10 +12,11 @@ from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
+from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.__main__ as main_module
 from meshtastic.__main__ import _preview_set_command, setPref
-from meshtastic.cli import configure_actions, preference_runtime
+from meshtastic.cli import config_preview, configure_actions, preference_runtime
 from meshtastic.cli.config_preview import (
     PREVIEW_NO_CHANGES_MESSAGE,
     ConfigSnapshotCopies,
@@ -798,6 +799,23 @@ def test_snapshot_absorb_ignores_sections_absent_on_node() -> None:
 
     assert snapshot.local_config.lora.hop_limit == 5
     assert not snapshot.local_config.HasField("bluetooth")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        (FieldDescriptor.LABEL_OPTIONAL, True),
+        (FieldDescriptor.LABEL_REPEATED, False),
+    ],
+)
+def test_is_singular_message_uses_legacy_label_fallback(
+    label: int, expected: bool
+) -> None:
+    """Descriptor implementations without boolean is_repeated use label safely."""
+    field = SimpleNamespace(message_type=object(), is_repeated=None, label=label)
+
+    assert config_preview._is_singular_message(cast(Any, field)) is expected
 
 
 @pytest.mark.unit
