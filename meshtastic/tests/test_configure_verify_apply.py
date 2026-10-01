@@ -696,6 +696,7 @@ def test_section_absent_at_compare_time_reports_missing_not_mismatch(
         moduleConfig=localonly_pb2.LocalModuleConfig(),
         _timeout=Timeout(maxSecs=300),
         iface=SimpleNamespace(),
+        requestConfig=lambda _field_desc: None,
         apply_due_replies=lambda _now: None,
     )
     monkeypatch.setattr(
