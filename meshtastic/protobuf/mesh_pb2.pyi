@@ -651,6 +651,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     MakerFabs Nomad Terminal
     """
+    THINKNODE_MX: _HardwareModel.ValueType  # 150
+    """
+    Elecrow ThinkNode MX
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1279,6 +1283,10 @@ Axiometa Axiometa Genesis Mini
 MAKERFABS_NOMAD_TERMINAL: HardwareModel.ValueType  # 149
 """
 MakerFabs Nomad Terminal
+"""
+THINKNODE_MX: HardwareModel.ValueType  # 150
+"""
+Elecrow ThinkNode MX
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
