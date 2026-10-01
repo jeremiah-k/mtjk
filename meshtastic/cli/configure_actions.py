@@ -23,6 +23,7 @@ from google.protobuf.descriptor import FieldDescriptor
 import meshtastic.util
 from meshtastic.cli import config_io as _config_io
 from meshtastic.cli import configure_values
+from meshtastic.cli import preference_runtime as cli_preference_runtime
 from meshtastic.cli.config_preview import (
     PREVIEW_CURRENT_NOT_SET,
     PREVIEW_NO_CHANGES_MESSAGE,
@@ -139,6 +140,41 @@ def _configure_reconnect_message(result: ConfigureReconnectResult) -> str:
         result,
         "Post-reconnect verification: unrecognized verification result "
         f"{result!r}. Configuration may still be applying.",
+    )
+
+
+def _configure_failure_message(result: ConfigureReconnectResult) -> str:
+    """Return a fail-closed error message for a non-verified local configure.
+
+    Parameters
+    ----------
+    result : ConfigureReconnectResult
+        Reconnect/verification outcome that is not ``VERIFIED``.
+
+    Returns
+    -------
+    str
+        Distinct actionable error text embedding the fail-soft status detail.
+    """
+    detail = _configure_reconnect_message(result)
+    if result == ConfigureReconnectResult.RECONNECT_FAILED:
+        return (
+            "ERROR: configuration was sent, but the device did not reconnect, so "
+            f"the requested settings could not be verified. {detail}"
+        )
+    if result == ConfigureReconnectResult.CONFIG_RELOAD_FAILED:
+        return (
+            "ERROR: configuration was sent, but the device configuration did not "
+            f"reload, so the requested settings could not be verified. {detail}"
+        )
+    if result == ConfigureReconnectResult.VERIFICATION_INCOMPLETE:
+        return (
+            "ERROR: configuration was sent, but fresh device state did not confirm "
+            f"the requested settings. {detail}"
+        )
+    return (
+        "ERROR: configuration was sent, but post-apply verification could not be "
+        f"completed. {detail}"
     )
 
 
@@ -1241,7 +1277,7 @@ def _apply_settings_transaction(
     *,
     config_sections: dict[str, dict[str, Any]],
     module_config_sections: dict[str, dict[str, Any]],
-) -> None:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """Apply validated config sections inside one firmware settings transaction.
 
     Parameters
@@ -1254,7 +1290,16 @@ def _apply_settings_transaction(
         Validated LocalConfig sections.
     module_config_sections : dict[str, dict[str, Any]]
         Validated LocalModuleConfig sections.
+
+    Returns
+    -------
+    tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
+        Fields that actually applied per group: traversal-skipped fields are
+        removed and sections left empty are dropped, so post-apply
+        verification confirms written state rather than skipped requests.
     """
+    applied_config_sections: dict[str, dict[str, Any]] = {}
+    applied_module_config_sections: dict[str, dict[str, Any]] = {}
     hooks.cli_print("Applying configuration transaction (may trigger device reboot)...")
     target_node.beginSettingsTransaction()
     remaining_writes = len(config_sections) + len(module_config_sections)
@@ -1264,6 +1309,7 @@ def _apply_settings_transaction(
         sections: dict[str, dict[str, Any]],
         protobuf_root: Any,
         label: str,
+        applied_out: dict[str, dict[str, Any]],
     ) -> None:
         """Apply one validated section group and pace each device write.
 
@@ -1275,8 +1321,28 @@ def _apply_settings_transaction(
             Protobuf configuration root mutated by ``traverse_config``.
         label : str
             Human-readable section group used in diagnostics.
+        applied_out : dict[str, dict[str, Any]]
+            Output group receiving the fields that actually applied.
         """
         nonlocal remaining_writes
+
+        def _applied_fields(prefix: str, values: dict[str, Any]) -> dict[str, Any]:
+            """Return requested fields that resolve on the target protobuf.
+
+            Mirrors the traversal's own resolution so fields the traversal
+            skipped as unknown are absent from the applied set.
+            """
+            applied: dict[str, Any] = {}
+            for field, value in values.items():
+                pref_path = f"{prefix}.{field}" if prefix else field
+                if isinstance(value, dict):
+                    nested = _applied_fields(pref_path, value)
+                    if nested:
+                        applied[field] = nested
+                elif cli_preference_runtime.resolve_pref(protobuf_root, pref_path):
+                    applied[field] = value
+            return applied
+
         for section, section_values in sections.items():
             failed_fields: list[str] = []
             applied = hooks.traverse_config(
@@ -1298,16 +1364,27 @@ def _apply_settings_transaction(
                     hooks.cli_exit,
                     f"Failed to apply {label} section {section!r} due to structural errors.",
                 )
+            applied_fields = _applied_fields(
+                meshtastic.util.camel_to_snake(section), section_values
+            )
+            if applied_fields:
+                applied_out[section] = applied_fields
             target_node.writeConfig(meshtastic.util.camel_to_snake(section))
             remaining_writes -= 1
             hooks.pace_configure_write(remaining_writes)
 
     try:
-        _apply_sections(config_sections, target_node.localConfig, "config")
+        _apply_sections(
+            config_sections,
+            target_node.localConfig,
+            "config",
+            applied_config_sections,
+        )
         _apply_sections(
             module_config_sections,
             target_node.moduleConfig,
             "module_config",
+            applied_module_config_sections,
         )
         commit_attempted = True
         target_node.commitSettingsTransaction()
@@ -1323,6 +1400,7 @@ def _apply_settings_transaction(
     hooks.cli_print(
         "Configuration transaction committed. Device may reboot to apply changes."
     )
+    return applied_config_sections, applied_module_config_sections
 
 
 def _report_configure_result(
@@ -1338,6 +1416,11 @@ def _report_configure_result(
     module_config_sections: dict[str, dict[str, Any]],
 ) -> None:
     """Report post-apply reconnect/verification status for one configure run.
+
+    A local transaction whose reconnect/verification outcome is not
+    ``VERIFIED`` terminates the CLI with a nonzero exit so a dropped or
+    unverifiable apply is never reported as success. Remote targets and
+    non-transaction paths keep their historical informational output.
 
     Parameters
     ----------
@@ -1356,9 +1439,9 @@ def _report_configure_result(
     channel_url : str | None
         Normalized requested channel URL for verification.
     config_sections : dict[str, dict[str, Any]]
-        LocalConfig fields requested by the document.
+        LocalConfig fields that actually applied to the device.
     module_config_sections : dict[str, dict[str, Any]]
-        LocalModuleConfig fields requested by the document.
+        LocalModuleConfig fields that actually applied to the device.
     """
     if settings_transaction_started:
         if is_local_target:
@@ -1370,12 +1453,17 @@ def _report_configure_result(
                 verify_config_fields=config_sections or None,
                 verify_module_config_fields=module_config_sections or None,
             )
-            hooks.cli_print(_configure_reconnect_message(reconnect_result))
-        else:
-            hooks.cli_print(
-                "Post-reconnect verification skipped for remote target. Local transport "
-                "state does not confirm remote node reload status."
+            if reconnect_result == ConfigureReconnectResult.VERIFIED:
+                hooks.cli_print(_configure_reconnect_message(reconnect_result))
+                return
+            _terminate_cli(
+                hooks.cli_exit,
+                _configure_failure_message(reconnect_result),
             )
+        hooks.cli_print(
+            "Post-reconnect verification skipped for remote target. Local transport "
+            "state does not confirm remote node reload status."
+        )
         return
 
     if seturl_executed:
@@ -1551,12 +1639,16 @@ def _execute_configure_plan(
                 "transaction.",
             )
 
+    applied_config_sections: dict[str, dict[str, Any]] = {}
+    applied_module_config_sections: dict[str, dict[str, Any]] = {}
     if plan.has_config_writes:
-        _apply_settings_transaction(
-            hooks,
-            target_node,
-            config_sections=prepared.config_sections,
-            module_config_sections=prepared.module_config_sections,
+        applied_config_sections, applied_module_config_sections = (
+            _apply_settings_transaction(
+                hooks,
+                target_node,
+                config_sections=prepared.config_sections,
+                module_config_sections=prepared.module_config_sections,
+            )
         )
 
     _report_configure_result(
@@ -1567,8 +1659,8 @@ def _execute_configure_plan(
         settings_transaction_started=plan.has_config_writes,
         seturl_executed=seturl_executed,
         channel_url=prepared.direct_values.channel_url,
-        config_sections=prepared.config_sections,
-        module_config_sections=prepared.module_config_sections,
+        config_sections=applied_config_sections,
+        module_config_sections=applied_module_config_sections,
     )
     return _ConfigureCommandResult(
         settings_transaction_started=plan.has_config_writes,

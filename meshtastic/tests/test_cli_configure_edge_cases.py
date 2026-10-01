@@ -7,6 +7,7 @@ import contextvars
 import logging
 import os
 import stat
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -1126,30 +1127,38 @@ def test_channel_refresh_tolerates_legacy_node_without_cache_invalidator() -> No
 
 
 @pytest.mark.unit
-def test_configure_result_reporting_handles_future_verification_result() -> None:
-    """Reporting must not fail after commit when a verification seam returns a new result."""
-    cli_print = MagicMock()
+def test_configure_result_reporting_handles_future_verification_result(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unrecognized verification result must terminate the CLI, never report success."""
+
+    def _printing_exit(message: str, return_value: int = 1) -> NoReturn:
+        print(message, file=sys.stderr)
+        raise SystemExit(return_value)
+
     hooks = _hooks(
-        cli_print=cli_print,
+        cli_exit=cast(CliExit, _printing_exit),
         post_configure_reconnect_and_verify=MagicMock(return_value="future-result"),
     )
 
-    configure_actions._report_configure_result(
-        hooks,
-        _interface(),
-        destination="^local",
-        is_local_target=True,
-        settings_transaction_started=True,
-        seturl_executed=False,
-        channel_url=None,
-        config_sections={},
-        module_config_sections={},
-    )
+    with pytest.raises(SystemExit) as exit_info:
+        configure_actions._report_configure_result(
+            hooks,
+            _interface(),
+            destination="^local",
+            is_local_target=True,
+            settings_transaction_started=True,
+            seturl_executed=False,
+            channel_url=None,
+            config_sections={},
+            module_config_sections={},
+        )
 
-    cli_print.assert_called_once()
-    message = cli_print.call_args.args[0]
-    assert "unrecognized verification result" in message
-    assert "future-result" in message
+    out, err = capsys.readouterr()
+    captured = out + err
+    assert exit_info.value.code == 1
+    assert "could not be completed" in captured
+    assert "future-result" in captured
 
 
 @pytest.mark.unit

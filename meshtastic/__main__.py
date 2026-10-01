@@ -53,7 +53,7 @@ from meshtastic.cli.config_preview import (
 )
 from meshtastic.cli.config_preview import ConfigSnapshotCopies as _ConfigSnapshotCopies
 from meshtastic.cli.config_preview import render_preview_value as _render_preview_value
-from meshtastic.cli.context import ActionOutcome, CliContext
+from meshtastic.cli.context import ActionOutcome, CliContext, _terminate_cli
 
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
 # pylint: disable=unused-import
@@ -89,7 +89,9 @@ from meshtastic.cli.values import (
 
 # isort: on
 from meshtastic.configure_verify import (  # noqa: F401 - legacy __main__ compatibility export
+    LocalApplyStatus,
     _verify_channel_url_against_state,
+    verify_local_config_apply,
 )
 from meshtastic.host_port import parseHostAndPort
 from meshtastic.interfaces.ble.interface import BLEInterface
@@ -224,6 +226,16 @@ CONFIG_COMMIT_SETTLE_SECONDS = cli_configure_actions.CONFIG_COMMIT_SETTLE_SECOND
 
 CONFIG_RECONNECT_WAIT_SECONDS = cli_configure_actions.CONFIG_RECONNECT_WAIT_SECONDS
 """Maximum time to wait for device reconnect after a reboot-capable configure commit."""
+
+LOCAL_SET_APPLY_VERIFY_SECONDS = 12.0
+"""Shared verification budget for one local ``--set`` apply, across all sections.
+
+Local config writes have no routing acknowledgment, so the only honest proof is
+a fresh config readback. One bounded budget (never multiplied per section)
+covers every section reload of a single batch; 12s matches the node's
+correlated admin-response wait, which is generous for a healthy local getter
+round trip while still failing a dead device within seconds.
+"""
 
 SETURL_STABILITY_TIMEOUT_SECONDS = (
     cli_configure_actions.SETURL_STABILITY_TIMEOUT_SECONDS
@@ -1243,6 +1255,7 @@ def _handle_set_command(
     if not _preflight_set_entries(node, set_entries):
         return
 
+    pre_write_config_id = getattr(interface, "configId", None)
     live_configs = (node.localConfig, node.moduleConfig)
     fields: set[str] = set()
     for raw_pref_name, raw_value in set_entries:
@@ -1278,6 +1291,240 @@ def _handle_set_command(
             node.writeConfig(field)
         if len(fields) > 1:
             node.commitSettingsTransaction()
+            # Mirror the --configure path: give the device time to settle
+            # (and, if it reboots, to drop the link) before verifying.
+            time.sleep(CONFIG_COMMIT_SETTLE_SECONDS)
+
+    local_node = getattr(interface, "localNode", None)
+    if fields and node is local_node and not getattr(node, "noProto", False):
+        # Freeze the staged requested values before verification clears and
+        # reloads the cached sections with fresh device state.
+        config_fields, module_config_fields = _freeze_set_expected_values(
+            node, set_entries
+        )
+        _verify_local_set_apply(
+            interface,
+            node,
+            node_dest=args.dest,
+            pre_write_config_id=pre_write_config_id,
+            config_fields=config_fields,
+            module_config_fields=module_config_fields,
+        )
+
+
+def _freeze_set_expected_values(
+    node: Any, set_entries: Sequence[tuple[str, Any]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Freeze the requested leaf values per section from the staged cache.
+
+    Parameters
+    ----------
+    node : Any
+        Local node whose cached configuration holds the staged assignments.
+    set_entries : Sequence[tuple[str, Any]]
+        Parsed ``--set`` name/value entries. Names are normalized before
+        resolution, matching the apply loop.
+
+    Returns
+    -------
+    tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
+        ``LocalConfig`` and ``LocalModuleConfig`` section mappings holding the
+        frozen requested values (plain scalars, lists for repeated fields, and
+        nested dicts for nested message paths).
+    """
+    config_fields: dict[str, dict[str, Any]] = {}
+    module_config_fields: dict[str, dict[str, Any]] = {}
+    for raw_pref_name, _raw_value in set_entries:
+        pref_name = _normalize_pref_name(raw_pref_name)
+        resolved = _resolve_set_target((node.localConfig, node.moduleConfig), pref_name)
+        if resolved is None:
+            continue
+        config, config_type = resolved
+        resolved_leaf = _resolve_set_leaf(config, pref_name)
+        if resolved_leaf is None:
+            continue
+        parts = splitCompoundName(pref_name)[1:]
+        if not parts:
+            continue
+        target, leaf_field = resolved_leaf
+        section_fields = (
+            config_fields if config is node.localConfig else module_config_fields
+        )
+        section_values = section_fields.setdefault(config_type.name, {})
+        cursor = section_values
+        for part in parts[:-1]:
+            nested = cursor.get(part)
+            if not isinstance(nested, dict):
+                nested = {}
+                cursor[part] = nested
+            cursor = nested
+        cursor[parts[-1]] = _read_set_leaf_value(target, leaf_field)
+    return config_fields, module_config_fields
+
+
+def _verify_local_set_apply(
+    interface: MeshInterface,
+    node: Any,
+    *,
+    node_dest: str,
+    pre_write_config_id: int | None,
+    config_fields: dict[str, dict[str, Any]],
+    module_config_fields: dict[str, dict[str, Any]],
+) -> None:
+    """Verify fresh device state for a local ``--set`` batch; exit on failure.
+
+    Parameters
+    ----------
+    interface : MeshInterface
+        Connected interface observed for reboot/disconnect handling.
+    node : Any
+        Local node that received the ``--set`` writes.
+    node_dest : str
+        Destination string the node was resolved from; reused by the
+        reconnect-based fallback re-verification.
+    pre_write_config_id : int | None
+        Interface config-generation id captured before any writes. A changed
+        generation proves that a reboot/config restart occurred even when the
+        link reconnected before the readback budget expired.
+    config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalConfig`` values by section.
+    module_config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalModuleConfig`` values by section.
+
+    Notes
+    -----
+    Local config writes select no acknowledgment callback, so success is only
+    proven by freshly reloading the affected sections and comparing the
+    requested values against device state. Any non-verified outcome fails the
+    CLI instead of reporting an unqualified success; verification is skipped
+    entirely for ``noProto`` nodes by the caller. Send failures from the
+    verification request propagate out of the seam and map to a CLI error
+    here. When the readback budget expires because the device dropped the
+    link (a commit-triggered reboot), one bounded reconnect-based
+    re-verification using the existing ``--configure`` machinery gets the
+    final word; a connection-alive reload failure still fails immediately.
+    """
+    try:
+        if not config_fields and not module_config_fields:
+            # Only requested sections are verifiable; an empty freeze would be
+            # vacuously VERIFIED, which proves nothing about the sent write.
+            raise ValueError("no requested sections were frozen for verification")
+        verification = verify_local_config_apply(
+            node,
+            config_fields=config_fields or None,
+            module_config_fields=module_config_fields or None,
+            timeout_sec=LOCAL_SET_APPLY_VERIFY_SECONDS,
+        )
+    except Exception as exc:
+        _terminate_cli(
+            _cli_exit,
+            "ERROR: local --set verification could not read fresh device state: "
+            f"{exc}. The requested change could not be verified.",
+        )
+    if verification.status == LocalApplyStatus.VERIFIED:
+        _cli_print("Verified: fresh device state matches the requested --set values.")
+        return
+    if verification.status == LocalApplyStatus.MISMATCH:
+        fields_text = ", ".join(verification.mismatched_fields)
+        _terminate_cli(
+            _cli_exit,
+            "ERROR: --set was sent, but fresh device state reports different "
+            f"values for: {fields_text}. The device did not apply the requested "
+            "value(s).",
+        )
+    if verification.status == LocalApplyStatus.RELOAD_FAILED and (
+        _link_dropped(interface)
+        or _config_generation_changed(interface, pre_write_config_id)
+    ):
+        _verify_local_set_after_reconnect(
+            interface,
+            node_dest=node_dest,
+            config_fields=config_fields,
+            module_config_fields=module_config_fields,
+        )
+        return
+    if verification.status == LocalApplyStatus.RELOAD_FAILED:
+        sections_text = ", ".join(verification.missing_sections)
+        _terminate_cli(
+            _cli_exit,
+            "ERROR: --set was sent, but the device did not return the "
+            f"{sections_text} configuration section(s) within "
+            f"{LOCAL_SET_APPLY_VERIFY_SECONDS:g} seconds; the requested value(s) "
+            "could not be verified.",
+        )
+    _terminate_cli(
+        _cli_exit,
+        "ERROR: local --set verification returned an unrecognized outcome "
+        f"({verification.status!r}); the requested change could not be confirmed.",
+    )
+
+
+def _config_generation_changed(
+    interface: MeshInterface, previous_config_id: int | None
+) -> bool:
+    """Return whether the interface began a new config generation since the write.
+
+    A fast reboot can drop and restore the transport entirely within the local
+    readback budget. ``isConnected`` then looks healthy at the final check, but
+    ``configId`` still records the reboot/config restart and must trigger the
+    reconnect/full-config verification path. Interfaces without a generation
+    attribute preserve the historical link-state-only behavior.
+    """
+    return getattr(interface, "configId", previous_config_id) != previous_config_id
+
+
+def _link_dropped(interface: MeshInterface) -> bool:
+    """Return whether the interface link is currently down (possible reboot)."""
+    connected = getattr(interface, "isConnected", None)
+    if connected is None:
+        return False
+    return not connected.is_set()
+
+
+def _verify_local_set_after_reconnect(
+    interface: MeshInterface,
+    *,
+    node_dest: str,
+    config_fields: dict[str, dict[str, Any]],
+    module_config_fields: dict[str, dict[str, Any]],
+) -> None:
+    """Re-verify a local ``--set`` once over one bounded reconnect.
+
+    Parameters
+    ----------
+    interface : MeshInterface
+        Interface whose link dropped after the commit (reboot in progress).
+    node_dest : str
+        Destination string the local node was resolved from.
+    config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalConfig`` values by section.
+    module_config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalModuleConfig`` values by section.
+
+    Notes
+    -----
+    Reuses the ``--configure`` reconnect/verification machinery so a
+    commit-triggered device reboot gets the same tolerance as ``--configure``:
+    one bounded wait for reconnect, one config reload, and the same value
+    comparator over the frozen requested values.
+    """
+    reconnect_result = _post_configure_reconnect_and_verify(
+        interface,
+        timeout=CONFIG_RECONNECT_WAIT_SECONDS,
+        node_dest=node_dest,
+        verify_config_fields=config_fields or None,
+        verify_module_config_fields=module_config_fields or None,
+    )
+    if reconnect_result == cli_configure_actions.ConfigureReconnectResult.VERIFIED:
+        _cli_print("Verified: fresh device state matches the requested --set values.")
+        return
+    _terminate_cli(
+        _cli_exit,
+        "ERROR: --set was sent, but the device dropped the link before the write "
+        "could be verified and the reconnect check failed "
+        f"({cli_configure_actions._configure_reconnect_message(reconnect_result)}). "
+        "The requested value(s) could not be verified.",
+    )
 
 
 def _resolve_set_leaf(

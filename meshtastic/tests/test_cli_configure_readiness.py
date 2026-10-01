@@ -13,6 +13,7 @@ from meshtastic.__main__ import setPref
 from meshtastic.cli import configure_actions, configure_values, preference_runtime
 from meshtastic.cli.configure_actions import (
     ConfigureHooks,
+    ConfigureReconnectResult,
     _requested_configure_section_fields,
 )
 from meshtastic.cli.context import CliExit
@@ -258,7 +259,12 @@ def test_configure_apply_acquires_delayed_section_before_preflight(
         )
 
     node.requestConfig.side_effect = populate_lora
-    hooks = _hooks(traverse_config=traverse)
+    hooks = _hooks(
+        traverse_config=traverse,
+        post_configure_reconnect_and_verify=MagicMock(
+            return_value=ConfigureReconnectResult.VERIFIED
+        ),
+    )
     iface = MagicMock()
     sleeps = _install_clock(monkeypatch)
     plan = configure_actions._prepare_configure_execution(
@@ -284,7 +290,11 @@ def test_configure_apply_skips_request_for_present_default_section() -> None:
     node.localConfig.lora.SetInParent()
     wait_for_set = MagicMock()
     node._timeout = SimpleNamespace(waitForSet=wait_for_set)
-    hooks = _hooks()
+    hooks = _hooks(
+        post_configure_reconnect_and_verify=MagicMock(
+            return_value=ConfigureReconnectResult.VERIFIED
+        )
+    )
     iface = MagicMock()
     plan = configure_actions._ConfigureExecutionPlan(
         prepared=configure_actions._PreparedConfigureDocument(

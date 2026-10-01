@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import enum
 import logging
+import math
+import time
 from collections.abc import Callable
 from typing import Any, cast
 
 import meshtastic.util
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.node_runtime.admin_wait import (
+    WAIT_ATTR_NAK,
+    _extract_request_id_from_sent_packet,
+    _send_admin_with_ack_scope,
+)
+from meshtastic.node_runtime.settings_runtime.message import (  # pylint: disable=no-name-in-module
+    _NodeSettingsMessageBuilder,
+)
 from meshtastic.protobuf import apponly_pb2, channel_pb2
 
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
@@ -69,6 +80,36 @@ class ConfigureReconnectResult(enum.Enum):
     CONFIG_RELOAD_FAILED = "config_reload_failed"
     VERIFICATION_INCOMPLETE = "verification_incomplete"
     VERIFIED = "verified"
+
+
+class LocalApplyStatus(enum.Enum):
+    """Outcome of fresh value-aware verification of a local config apply."""
+
+    VERIFIED = "verified"
+    MISMATCH = "mismatch"
+    RELOAD_FAILED = "reload_failed"
+
+
+@dataclasses.dataclass(frozen=True)
+class LocalApplyVerification:
+    """Result of one :func:`verify_local_config_apply` operation.
+
+    Attributes
+    ----------
+    status : LocalApplyStatus
+        Overall outcome of the operation.
+    mismatched_fields : tuple[str, ...]
+        Dotted paths of requested fields whose fresh device value differs
+        from the requested value (field names in snake_case, section prefix
+        as requested). Populated only for ``MISMATCH``.
+    missing_sections : tuple[str, ...]
+        Requested section names that were not freshly repopulated within
+        the operation budget. Populated only for ``RELOAD_FAILED``.
+    """
+
+    status: LocalApplyStatus
+    mismatched_fields: tuple[str, ...] = ()
+    missing_sections: tuple[str, ...] = ()
 
 
 def _is_repeated_field(field_desc: Any) -> bool:
@@ -492,6 +533,235 @@ def _wait_for_section_reload(
     return bool(timeout.waitForSet(probe, attrs=("is_set",)))
 
 
+def _verification_poll_interval(target_node: Any) -> float:
+    """Return the polling interval, preferring the node timeout owner's pacing.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose timeout owner may define a sleep interval.
+
+    Returns
+    -------
+    float
+        Positive polling interval in seconds.
+    """
+    node_timeout = getattr(target_node, "_timeout", None)
+    sleep_interval = getattr(node_timeout, "sleepInterval", None)
+    if isinstance(sleep_interval, (int, float)) and not isinstance(
+        sleep_interval, bool
+    ):
+        return max(0.01, float(sleep_interval))
+    return 0.1
+
+
+def _wait_for_section_reload_under_deadline(
+    target_node: Any, proto_config: Any, section_snake: str, *, deadline: float
+) -> bool:
+    """Wait for one section to reappear, bounded by a shared monotonic deadline.
+
+    Unlike :func:`_wait_for_section_reload`, which restarts the node's
+    wall-clock ``expireTimeout`` on every call, this wait consumes only the
+    budget remaining until *deadline*, so N sections can never multiply a
+    caller's operation timeout.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose timeout owner supplies the polling interval.
+    proto_config : Any
+        The protobuf config root (local or module) holding the section.
+    section_snake : str
+        Snake-case name of the cleared section being re-requested.
+    deadline : float
+        Operation-wide ``time.monotonic()`` deadline.
+
+    Returns
+    -------
+    bool
+        ``True`` when the section is present again before the deadline,
+        ``False`` otherwise.
+    """
+    has_field = getattr(proto_config, "HasField", None)
+    if not callable(has_field):
+        return True
+    probe = _SectionReloadProbe(cast(Callable[[str], bool], has_field), section_snake)
+    poll_interval = _verification_poll_interval(target_node)
+    while time.monotonic() < deadline:
+        if probe.is_set():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(poll_interval, remaining))
+    return probe.is_set()
+
+
+def _reload_requested_sections(
+    target_node: Any,
+    *,
+    config_fields: dict[str, dict[str, Any]] | None,
+    module_config_fields: dict[str, dict[str, Any]] | None,
+    send_request: Callable[[Any, Any], tuple[bool, int | None]],
+    wait_for_section: Callable[[Any, Any, str], bool],
+    sent_request_ids: list[int],
+) -> list[str]:
+    """Clear and re-request each touched section; return names not repopulated.
+
+    For every requested section the cached section is cleared, one fresh
+    readback request is sent through ``send_request``, and
+    ``wait_for_section`` decides whether the section was repopulated.
+    Sections without a matching field descriptor are warned about and
+    reported without clearing anything.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose cached local/module configuration is refreshed.
+    config_fields : dict[str, dict[str, Any]] | None
+        Requested local-config section/value mappings.
+    module_config_fields : dict[str, dict[str, Any]] | None
+        Requested module-config section/value mappings.
+    send_request : Callable[[Any, Any], tuple[bool, int | None]]
+        Issues one readback request for ``(target_node, field_desc)``,
+        returning whether a waitable request was issued and the sent
+        request id (``None`` when the path exposes no id).
+    wait_for_section : Callable[[Any, Any, str], bool]
+        Per-section reload probe receiving ``(target_node, proto_config,
+        section_snake)``.
+    sent_request_ids : list[int]
+        Output list collecting every sent request id for caller-side
+        retirement.
+
+    Returns
+    -------
+    list[str]
+        Requested section names that were skipped or not repopulated, in
+        request order.
+    """
+    not_repopulated: list[str] = []
+    for (
+        fields,
+        proto_root,
+        warning_label,
+        skip_label,
+    ) in (
+        (config_fields, getattr(target_node, "localConfig", None), "Config", "config"),
+        (
+            module_config_fields,
+            getattr(target_node, "moduleConfig", None),
+            "Module config",
+            "module_config",
+        ),
+    ):
+        if not fields:
+            continue
+        proto_config: Any = proto_root
+        fields_by_name = (
+            getattr(getattr(proto_config, "DESCRIPTOR", None), "fields_by_name", None)
+            or {}
+        )
+        for section_name in fields:
+            section_snake = meshtastic.util.camel_to_snake(section_name)
+            field_desc = fields_by_name.get(section_snake)
+            if field_desc is None:
+                logger.warning(
+                    "Skipping %s refresh for unknown section %r.",
+                    skip_label,
+                    section_name,
+                )
+                not_repopulated.append(section_name)
+                continue
+            proto_config.ClearField(section_snake)
+            waitable, request_id = send_request(target_node, field_desc)
+            if request_id is not None:
+                sent_request_ids.append(request_id)
+            if waitable and not wait_for_section(
+                target_node, proto_config, section_snake
+            ):
+                logger.warning(
+                    "%s section %r was not repopulated before verification.",
+                    warning_label,
+                    section_name,
+                )
+                not_repopulated.append(section_name)
+    return not_repopulated
+
+
+def _send_refresh_request_via_request_config(
+    target_node: Any, field_desc: Any
+) -> tuple[bool, int | None]:
+    """Send one section refresh through the public ``requestConfig`` path.
+
+    Used by the historical refresh wrapper; the node's own wait owner bounds
+    any scoped acknowledgment wait on this path and owns the request
+    lifecycle, so no id is reported for retirement.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose configuration is re-requested.
+    field_desc : Any
+        Field descriptor of the section to re-request.
+
+    Returns
+    -------
+    tuple[bool, int | None]
+        Whether a request was issued (``False`` when the node has no
+        callable ``requestConfig``) and no id.
+    """
+    request_config = getattr(target_node, "requestConfig", None)
+    if callable(request_config):
+        request_config(field_desc)
+        return True, None
+    return False, None
+
+
+def _send_section_refresh_request(
+    target_node: Any, field_desc: Any
+) -> tuple[bool, int | None]:
+    """Send one bounded section readback without enrolling a scoped wait.
+
+    Mirrors the historical local settings-request send (response handler
+    registered with the typed admin response contract; the payload applies
+    when the correlated data reply arrives) while deliberately passing
+    ``scope_ack=False`` so NO request-scoped acknowledgment wait is opened:
+    the caller's deadline loop is the only wait, and a device that never
+    answers cannot block the operation on the node's own timeout.
+
+    Falls back to the public ``requestConfig`` when the private send seam is
+    unavailable on a node double; the operation bound then depends on the
+    node's wait owner.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose configuration is re-requested.
+    field_desc : Any
+        Field descriptor of the section to re-request.
+
+    Returns
+    -------
+    tuple[bool, int | None]
+        Whether a request was issued and the sent request id for caller
+        retirement (``None`` on the fallback path).
+    """
+    on_response = getattr(target_node, "onResponseRequestSettings", None)
+    if callable(on_response) and callable(getattr(target_node, "_send_admin", None)):
+        message = _NodeSettingsMessageBuilder(target_node).build_request_message(
+            field_desc
+        )
+        request = _send_admin_with_ack_scope(
+            target_node,
+            message,
+            scope_ack=False,
+            wantResponse=True,
+            onResponse=on_response,
+        )
+        return True, _extract_request_id_from_sent_packet(target_node, request)
+    return _send_refresh_request_via_request_config(target_node, field_desc)
+
+
 def _refresh_no_disconnect_verify_state(
     target_node: Any,
     *,
@@ -500,51 +770,14 @@ def _refresh_no_disconnect_verify_state(
     verify_module_config_fields: dict[str, dict[str, Any]] | None,
 ) -> None:
     """Invalidate touched cached state before post-reconnect verification."""
-    request_config = getattr(target_node, "requestConfig", None)
-
-    for section_name in verify_config_fields or {}:
-        section_snake = meshtastic.util.camel_to_snake(section_name)
-        field_desc = target_node.localConfig.DESCRIPTOR.fields_by_name.get(
-            section_snake
-        )
-        if field_desc is None:
-            logger.warning(
-                "Skipping config refresh for unknown section %r.",
-                section_name,
-            )
-            continue
-        target_node.localConfig.ClearField(section_snake)
-        if callable(request_config):
-            request_config(field_desc)
-            if not _wait_for_section_reload(
-                target_node, target_node.localConfig, section_snake
-            ):
-                logger.warning(
-                    "Config section %r was not repopulated before verification.",
-                    section_name,
-                )
-
-    for section_name in verify_module_config_fields or {}:
-        section_snake = meshtastic.util.camel_to_snake(section_name)
-        field_desc = target_node.moduleConfig.DESCRIPTOR.fields_by_name.get(
-            section_snake
-        )
-        if field_desc is None:
-            logger.warning(
-                "Skipping module_config refresh for unknown section %r.",
-                section_name,
-            )
-            continue
-        target_node.moduleConfig.ClearField(section_snake)
-        if callable(request_config):
-            request_config(field_desc)
-            if not _wait_for_section_reload(
-                target_node, target_node.moduleConfig, section_snake
-            ):
-                logger.warning(
-                    "Module config section %r was not repopulated before verification.",
-                    section_name,
-                )
+    _reload_requested_sections(
+        target_node,
+        config_fields=verify_config_fields,
+        module_config_fields=verify_module_config_fields,
+        send_request=_send_refresh_request_via_request_config,
+        wait_for_section=_wait_for_section_reload,
+        sent_request_ids=[],
+    )
 
     if verify_channel_url:
         invalidate_channel_cache = getattr(
@@ -741,3 +974,239 @@ def _verify_post_reconnect_config(
         logger.info("Verified: %s", ", ".join(verified_fields))
 
     return ConfigureReconnectResult.VERIFIED
+
+
+def _collect_section_mismatches(
+    config_fields: dict[str, dict[str, Any]],
+    proto_config: Any,
+    *,
+    absent_sections: list[str],
+) -> list[str]:
+    """Collect dotted mismatch paths for freshly reloaded sections.
+
+    Uses the same per-section presence check and field comparator as
+    :func:`_verify_config_sections`, but keeps every mismatched path instead
+    of stopping at the first failing section. A requested section that is
+    not present at comparison time is reported through *absent_sections*
+    (missing-section vocabulary) instead of as a field mismatch.
+
+    Parameters
+    ----------
+    config_fields : dict[str, dict[str, Any]]
+        Requested section/value mappings.
+    proto_config : Any
+        Reloaded protobuf configuration root.
+    absent_sections : list[str]
+        Output list collecting requested section names that lost presence.
+
+    Returns
+    -------
+    list[str]
+        Dotted paths of requested fields whose fresh value differs.
+    """
+    mismatches: list[str] = []
+    for section_name, requested_values in config_fields.items():
+        section_snake = meshtastic.util.camel_to_snake(section_name)
+        if not proto_config.HasField(section_snake):
+            absent_sections.append(section_name)
+            continue
+        mismatches.extend(
+            _verify_requested_fields(
+                requested_values, getattr(proto_config, section_snake), section_name
+            )
+        )
+    return mismatches
+
+
+def verify_local_config_apply(
+    target_node: Any,
+    *,
+    config_fields: dict[str, dict[str, Any]] | None,
+    module_config_fields: dict[str, dict[str, Any]] | None,
+    timeout_sec: float,
+) -> LocalApplyVerification:
+    """Verify requested values were freshly applied to a local node.
+
+    For every requested section the node's cached section is cleared, a
+    fresh ``requestConfig`` is sent, and the operation waits for the device
+    to repopulate the section (``HasField``) before comparing requested
+    values against the fresh device state. Cached or staged values alone are
+    never accepted as evidence: a section that stays cleared (for example
+    because firmware silently dropped the preceding write) yields
+    ``RELOAD_FAILED`` even when the cleared cache previously held the
+    requested values.
+
+    Comparison reuses the existing field comparators (camel/snake
+    normalization, enum-name coercion, repeated lists, NeighborInfo
+    effective-default equivalence). Only requested fields are compared;
+    untouched fields may differ freely. A real section whose values are all
+    defaults (0/false/empty repeated) verifies when the device truly
+    repopulates it, because presence is a ``HasField`` observation, not a
+    nonzero-value observation.
+
+    Timing: *all* sections and waits share ONE ``time.monotonic()`` budget
+    of ``timeout_sec``; each per-section wait consumes only the remaining
+    budget, so several never-repopulating sections cannot multiply the
+    caller's timeout. Readback requests are issued without enrolling any
+    request-scoped acknowledgment wait, so a device that never answers
+    cannot block the operation on the node's own wait timeout. The one
+    exception is the ``requestConfig`` fallback on nodes without the
+    private send seams: there the node's wait owner bounds the wait, not
+    this budget.
+
+    Correlation strength and limits: on the real transport the section
+    response is applied by the response handler registered for the sent
+    request id, further gated by the admin response contract (response
+    variant and source must match, including the local-only source-0
+    allowance), so presence is normally satisfied only by a reply belonging
+    to this operation's own request. A stale or duplicate reply that still
+    matches the contract can in principle satisfy the presence probe; if it
+    carries different values the operation reports ``MISMATCH`` rather than
+    a false success, and a stale-but-identical reply is value-equivalent
+    evidence of the same device state. Wrong-source or wrong-variant replies
+    never repopulate the probed section through the registered handler, so
+    they cannot produce ``VERIFIED`` beyond what presence plus value
+    comparison already proves.
+
+    Cleanup: the operation registers no callbacks, markers, or wait state of
+    its own and never holds locks across sends or callbacks. Every readback
+    request id it sends is retired in an operation-level ``finally`` through
+    the interface's request-wait runtime (the same retirement the bounded
+    admin getters use), so no managed response handler or wait bookkeeping
+    outlives the operation on success, mismatch, timeout, or send failure.
+
+    Failure behavior: send failures (including transport errors raised by
+    the private readback send) PROPAGATE as exceptions (typically
+    ``MeshInterface.MeshInterfaceError``) so callers can distinguish "could
+    not ask the device" from "device did not answer"; mapping them to CLI
+    errors is the caller's responsibility.
+
+    Cache side effect: requested sections are cleared and reloaded from
+    fresh device replies. If a section fails to repopulate (or the operation
+    raises mid-way), the affected cached section may remain cleared: the
+    cache then honestly reflects "device state unknown" instead of stale
+    values.
+
+    Parameters
+    ----------
+    target_node : Any
+        Local node whose ``localConfig``/``moduleConfig`` are verified.
+        Readback requests are sent without enrolling any scoped
+        acknowledgment wait when the node offers the private send seam
+        (``onResponseRequestSettings`` plus ``_send_admin``). On nodes
+        lacking those seams the operation falls back to the public
+        ``requestConfig``; that blocking wait is NOT bounded by
+        ``timeout_sec`` — the node's own wait owner applies.
+    config_fields : dict[str, dict[str, Any]] | None
+        Requested local-config sections mapping section name to
+        ``{field name: frozen expected value}``. Keys may be camelCase or
+        snake_case; values must already be normalized (ints, bools, bytes,
+        lists for repeated fields, nested dicts for submessages).
+    module_config_fields : dict[str, dict[str, Any]] | None
+        Same mapping for module-config sections.
+    timeout_sec : float
+        Positive, finite shared budget in seconds for the whole operation.
+
+    Returns
+    -------
+    LocalApplyVerification
+        ``VERIFIED`` when every requested section freshly repopulated and
+        all requested values match (vacuously true when nothing is
+        requested); ``MISMATCH`` with ``mismatched_fields`` when fresh state
+        is present but at least one requested value differs; ``RELOAD_FAILED``
+        with ``missing_sections`` when any requested section could not be
+        freshly repopulated within the budget (or was no longer present at
+        comparison time; this status takes precedence;
+        ``mismatched_fields`` is then empty).
+
+    Raises
+    ------
+    TypeError
+        If ``timeout_sec`` is not a real number.
+    ValueError
+        If ``timeout_sec`` is not positive and finite.
+    """
+    if isinstance(timeout_sec, bool) or not isinstance(timeout_sec, (int, float)):
+        raise TypeError("timeout_sec must be a positive number of seconds")
+    budget = float(timeout_sec)
+    if not math.isfinite(budget) or budget <= 0:
+        raise ValueError("timeout_sec must be a positive, finite number of seconds")
+
+    requested_sections: tuple[str, ...] = (
+        *(config_fields or {}),
+        *(module_config_fields or {}),
+    )
+    if not requested_sections:
+        return LocalApplyVerification(LocalApplyStatus.VERIFIED, (), ())
+    if not (
+        callable(getattr(target_node, "onResponseRequestSettings", None))
+        or callable(getattr(target_node, "requestConfig", None))
+    ):
+        # Without any way to re-request sections nothing can be freshly
+        # reloaded; report every requested section as missing without
+        # mutating any cached state.
+        return LocalApplyVerification(
+            LocalApplyStatus.RELOAD_FAILED, (), requested_sections
+        )
+
+    deadline = time.monotonic() + budget
+
+    def _wait_bounded(node: Any, proto_config: Any, section_snake: str) -> bool:
+        return _wait_for_section_reload_under_deadline(
+            node, proto_config, section_snake, deadline=deadline
+        )
+
+    sent_request_ids: list[int] = []
+    runtime = getattr(
+        getattr(target_node, "iface", None), "_request_wait_runtime", None
+    )
+    try:
+        not_repopulated = _reload_requested_sections(
+            target_node,
+            config_fields=config_fields,
+            module_config_fields=module_config_fields,
+            send_request=_send_section_refresh_request,
+            wait_for_section=_wait_bounded,
+            sent_request_ids=sent_request_ids,
+        )
+        if not_repopulated:
+            return LocalApplyVerification(
+                LocalApplyStatus.RELOAD_FAILED, (), tuple(not_repopulated)
+            )
+
+        mismatches: list[str] = []
+        absent_sections: list[str] = []
+        if config_fields:
+            mismatches.extend(
+                _collect_section_mismatches(
+                    config_fields,
+                    target_node.localConfig,
+                    absent_sections=absent_sections,
+                )
+            )
+        if module_config_fields:
+            mismatches.extend(
+                _collect_section_mismatches(
+                    module_config_fields,
+                    target_node.moduleConfig,
+                    absent_sections=absent_sections,
+                )
+            )
+        if absent_sections:
+            return LocalApplyVerification(
+                LocalApplyStatus.RELOAD_FAILED,
+                (),
+                tuple(dict.fromkeys(absent_sections)),
+            )
+        if mismatches:
+            return LocalApplyVerification(
+                LocalApplyStatus.MISMATCH, tuple(dict.fromkeys(mismatches)), ()
+            )
+        return LocalApplyVerification(LocalApplyStatus.VERIFIED, (), ())
+    finally:
+        # Retire every readback request id this operation sent so no managed
+        # response handler or wait bookkeeping outlives the operation on any
+        # exit path (the same retirement the bounded admin getters use).
+        if runtime is not None:
+            for request_id in sent_request_ids:
+                runtime.retire_wait_request(WAIT_ATTR_NAK, request_id=request_id)

@@ -217,6 +217,13 @@ def test_main_configure_seturl_stable_proceeds_to_transaction(
         "meshtastic.__main__._post_seturl_stability_check",
         lambda *a, **k: True,
     )
+    # This test's concern is the seturl stability gate, not verification
+    # values; drive a verified reconnect outcome explicitly.
+    monkeypatch.setattr(
+        main_module,
+        "_post_configure_reconnect_and_verify",
+        MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
+    )
     _patch_fast_monotonic(monkeypatch)
     _run_main_configure_file(config_path, iface, monkeypatch)
 
@@ -353,9 +360,11 @@ def test_main_configure_post_reconnect_verifies_channel_url(
         lambda *a, **k: True,
     )
     _patch_fast_monotonic(monkeypatch)
-    _run_main_configure_file(config_path, iface, monkeypatch)
-    out, _ = capsys.readouterr()
-    assert "not all requested settings could be verified" in out
+    with pytest.raises(SystemExit) as exit_info:
+        _run_main_configure_file(config_path, iface, monkeypatch)
+    out, err = capsys.readouterr()
+    assert exit_info.value.code == 1
+    assert "not all requested settings could be verified" in out + err
 
 
 @pytest.mark.unit

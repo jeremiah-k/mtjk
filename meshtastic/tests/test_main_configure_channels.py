@@ -233,6 +233,11 @@ def test_main_configure_applies_mixed_case_and_security_encodings(
     target_local = localonly_pb2.LocalConfig()
     target_module = localonly_pb2.LocalModuleConfig()
     iface, target_node = _build_configure_interface(target_local, target_module)
+    monkeypatch.setattr(
+        main_module,
+        "_post_configure_reconnect_and_verify",
+        MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
+    )
     _run_main_configure_file(config_path, iface, monkeypatch)
 
     assert target_local.bluetooth.enabled is True
@@ -316,6 +321,11 @@ def test_main_configure_accepts_display_use_12h_alias_spellings(
     target_local = localonly_pb2.LocalConfig()
     iface, _ = _build_configure_interface(
         target_local, localonly_pb2.LocalModuleConfig()
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_post_configure_reconnect_and_verify",
+        MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
     )
     _run_main_configure_file(config_path, iface, monkeypatch)
     assert target_local.display.use_12h_clock is True
@@ -1580,6 +1590,11 @@ def test_main_export_config_and_configure_round_trip_nonstandard(
 
     monkeypatch.setattr("time.sleep", lambda _: None)
     _patch_fast_monotonic(monkeypatch)
+    monkeypatch.setattr(
+        main_module,
+        "_post_configure_reconnect_and_verify",
+        MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
+    )
     monkeypatch.setattr(
         "meshtastic.__main__._post_seturl_stability_check",
         lambda *a, **k: True,

@@ -230,6 +230,14 @@ Other admin operations still use request-scoped ACK/NAK waits when their contrac
 about successful mutation rather than retrieving a typed response. Do not conflate
 these two patterns when adding new operations.
 
+Local configuration apply verification (`verify_local_config_apply`) follows the
+typed pattern as well: its section readbacks register the typed response handler
+with `scope_ack=False`, so no request-scoped ACK wait is opened, and the
+verifier's own monotonic deadline — not a bounded-getter helper wait and not the
+node's wait timeout — is the only bound on those readbacks. (The documented
+exception remains the public `requestConfig` fallback, whose scoped
+acknowledgment wait is bounded by the node's wait owner.)
+
 ## Response-handler lifetime
 
 Managed response callbacks are not permanent registrations.
