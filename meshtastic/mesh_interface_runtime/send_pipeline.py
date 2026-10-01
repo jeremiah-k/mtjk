@@ -372,7 +372,11 @@ class SendPipeline:
         # an id that already owns a callback/matcher. Zero-id regeneration
         # stays unconditional. Callback-bearing sends then claim the handler id
         # under the response-state lock so a late registration collision is
-        # rejected before the packet is sent.
+        # rejected before the packet is sent. The checks above are unlocked
+        # advisory reads, and feedback-only sends (no callback) have no
+        # registration-time claim, so a concurrent registration between the
+        # final check and transmit can still reuse an id for those sends;
+        # callback-bearing sends cannot.
         will_register_handler = onResponse is not None
         expects_correlated_feedback = (
             will_register_handler
