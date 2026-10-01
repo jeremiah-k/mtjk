@@ -70,6 +70,46 @@ class ConfigSnapshotCopies:
         module_copy.CopyFrom(node.moduleConfig)
         return cls(local_config=local_copy, module_config=module_copy)
 
+    def absorb_missing_sections(self, node: Any) -> None:
+        """Copy sections present on ``node`` but absent from these copies.
+
+        Only top-level message sections missing from the copies are absorbed
+        (descriptor iteration, HasField presence). Sections already present —
+        including ones carrying earlier staged assignments — are never
+        overwritten, so a combined --set then --configure preview keeps its
+        staged candidates while gaining newly received sections.
+        """
+        observed_roots = (
+            (node.localConfig, self.local_config),
+            (node.moduleConfig, self.module_config),
+        )
+        for live_root, copy_root in observed_roots:
+            for field in copy_root.DESCRIPTOR.fields:
+                if not _is_singular_message(field):
+                    continue
+                if not live_root.HasField(field.name):
+                    continue
+                if copy_root.HasField(field.name):
+                    continue
+                getattr(copy_root, field.name).CopyFrom(getattr(live_root, field.name))
+
+
+def _is_singular_message(field: FieldDescriptor) -> bool:
+    """Return whether a descriptor field is one absorbable message section.
+
+    Repeated fields cannot take ``HasField`` presence, so they are never
+    treated as sections. Detection follows the descriptor-attribute probe
+    used across the configure runtime because ``label`` is unavailable on
+    upb-backed descriptors.
+    """
+    if field.message_type is None:
+        return False
+    is_repeated = getattr(field, "is_repeated", None)
+    if isinstance(is_repeated, bool):
+        return not is_repeated
+    label = getattr(field, "label", None)
+    return label is not None and label != FieldDescriptor.LABEL_REPEATED
+
 
 def preview_requested(args: Any) -> bool:
     """Return whether parsed CLI arguments request a dry-run preview.

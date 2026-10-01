@@ -96,6 +96,8 @@ def _build_configure_interface(
     device_module.CopyFrom(target_module)
 
     target_node = create_autospec(Node, instance=True)
+    # Modeled on the noProto main-path doubles: section readiness never waits.
+    target_node.noProto = True
     target_node.localConfig = target_local
     target_node.moduleConfig = target_module
     target_node.beginSettingsTransaction = MagicMock()

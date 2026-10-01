@@ -56,6 +56,8 @@ def _mock_newer_version_check(monkeypatch: pytest.MonkeyPatch) -> None:
 def mocked_serial_node() -> tuple[Any, Any]:
     """Return an autospecced serial interface and its selected-node double."""
     mocked_node = create_autospec(Node, instance=True)
+    # Modeled on the noProto main-path doubles: section readiness never waits.
+    mocked_node.noProto = True
     iface = create_autospec(SerialInterface, instance=True)
     iface.devPath = "/dev/mock"
     iface.__enter__.return_value = iface

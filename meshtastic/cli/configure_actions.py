@@ -16,7 +16,9 @@ import logging
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NoReturn
+
+from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.util
 from meshtastic.cli import config_io as _config_io
@@ -28,6 +30,7 @@ from meshtastic.cli.config_preview import (
     preview_requested,
     render_preview_value,
 )
+from meshtastic.cli.config_readiness import ensure_config_sections_loaded
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
 
 # COMPAT_STABLE_SHIM: verification helpers moved to meshtastic.configure_verify.
@@ -1435,6 +1438,69 @@ def _prepare_configure_execution(
     )
 
 
+def _section_readiness_exit(hooks: ConfigureHooks) -> Callable[[str], NoReturn]:
+    """Build the fail-closed abort seam for section-acquisition timeouts.
+
+    Parameters
+    ----------
+    hooks : ConfigureHooks
+        Entrypoint-owned compatibility and reporting seams.
+
+    Returns
+    -------
+    Callable[[str], NoReturn]
+        Abort callable forwarding the readiness message through the caller's
+        exit seam; injected seams that return still fail closed.
+    """
+
+    def _exit(message: str) -> NoReturn:
+        _terminate_cli(hooks.cli_exit, message)
+
+    return _exit
+
+
+def _requested_configure_section_fields(
+    target_node: Any,
+    prepared: _PreparedConfigureDocument,
+) -> list[tuple[Any, FieldDescriptor]]:
+    """Collect the config sections a configure document needs from the device.
+
+    Parameters
+    ----------
+    target_node : Any
+        Node whose cached configuration wrappers own the section fields.
+    prepared : _PreparedConfigureDocument
+        Validated document whose section keys name the wanted sections.
+
+    Returns
+    -------
+    list[tuple[Any, FieldDescriptor]]
+        Deduplicated ``(config_root, section_field)`` pairs in apply order.
+        Unknown section names and scalar top-level fields are skipped;
+        traversal validation reports them.
+    """
+    groups = (
+        (target_node.localConfig, prepared.config_sections),
+        (target_node.moduleConfig, prepared.module_config_sections),
+    )
+    section_fields: list[tuple[Any, FieldDescriptor]] = []
+    seen: set[tuple[str, str]] = set()
+    for root, sections in groups:
+        for section in sections:
+            field_name = meshtastic.util.camel_to_snake(section)
+            field = root.DESCRIPTOR.fields_by_name.get(field_name)
+            if field is None or field.message_type is None:
+                # Unknown names and scalar top-level fields (e.g. version) are
+                # not loadable sections; traversal validation reports them.
+                continue
+            section_key = (root.DESCRIPTOR.full_name, field.name)
+            if section_key in seen:
+                continue
+            seen.add(section_key)
+            section_fields.append((root, field))
+    return section_fields
+
+
 def _execute_configure_plan(
     hooks: ConfigureHooks,
     interface: MeshInterface,
@@ -1461,6 +1527,11 @@ def _execute_configure_plan(
     """
     prepared = plan.prepared
     if plan.has_config_writes:
+        ensure_config_sections_loaded(
+            target_node,
+            _requested_configure_section_fields(target_node, prepared),
+            cli_exit=_section_readiness_exit(hooks),
+        )
         _preflight_configure_sections(
             hooks,
             target_node,
@@ -1709,7 +1780,7 @@ def _preview_section_operations(
     hooks: ConfigureHooks,
     *,
     preview_roots: dict[str, Any],
-    target_node: Any,
+    current_values: ConfigSnapshotCopies,
     config_sections: dict[str, dict[str, Any]],
     module_config_sections: dict[str, dict[str, Any]],
 ) -> None:
@@ -1722,18 +1793,18 @@ def _preview_section_operations(
     preview_roots : dict[str, Any]
         Mutated candidate copies returned by
         :func:`_validate_sections_against_roots`, holding the previewed state.
-    target_node : Any
-        Node whose live cached messages provide the honest current values.
+    current_values : ConfigSnapshotCopies
+        Captured observation whose messages provide the honest current values.
     config_sections : dict[str, dict[str, Any]]
         Validated LocalConfig sections in apply order.
     module_config_sections : dict[str, dict[str, Any]]
         Validated LocalModuleConfig sections in apply order.
     """
     groups = (
-        ("config", target_node.localConfig, config_sections),
-        ("module_config", target_node.moduleConfig, module_config_sections),
+        ("config", current_values.local_config, config_sections),
+        ("module_config", current_values.module_config, module_config_sections),
     )
-    for root_key, live_root, sections in groups:
+    for root_key, current_root, sections in groups:
         preview_root = preview_roots.get(root_key)
         if not sections or preview_root is None:
             continue
@@ -1746,7 +1817,7 @@ def _preview_section_operations(
                 if result_field is None:
                     # Traversal skips unknown fields without assigning anything.
                     continue
-                current_field, current_value = _read_preview_leaf(live_root, parts)
+                current_field, current_value = _read_preview_leaf(current_root, parts)
                 rendered_result = _render_preview_side(
                     pref_name, result_field, result_value
                 )
@@ -1790,7 +1861,10 @@ def _preview_configure_command(
     """Preview one ``--configure`` document without writing to the device.
 
     Runs the same decoding, normalization, and structural validation as a real
-    apply, then prints every operation that would have been sent. The device is
+    apply, then prints every operation that would have been sent. Missing
+    config sections are requested from the device and waited on exactly like
+    an apply so validation and current-value rendering never see protobuf
+    defaults for sections the device will deliver. Otherwise the device is
     only read: target-node lookup, owner-state resolution, and channel-URL
     comparison. No writes, transactions, ACK waits, or stability sleeps run.
 
@@ -1809,13 +1883,25 @@ def _preview_configure_command(
         invocation, or ``None`` to snapshot the target node's cached state.
         Section assignments validate against this previewed state so a
         combined ``--set``/``--configure`` dry run stays in execution order.
+        Newly received sections are absorbed into staged copies without ever
+        replacing their staged assignments.
     """
     plan = _prepare_configure_execution(hooks, interface, args)
     target_node = interface.getNode(plan.destination, False, **get_node_kwargs)
     prepared = plan.prepared
 
+    if plan.has_config_writes:
+        ensure_config_sections_loaded(
+            target_node,
+            _requested_configure_section_fields(target_node, prepared),
+            cli_exit=_section_readiness_exit(hooks),
+        )
+
+    before = ConfigSnapshotCopies.from_node(target_node)
     if snapshot is None:
-        snapshot = ConfigSnapshotCopies.from_node(target_node)
+        snapshot = before
+    else:
+        snapshot.absorb_missing_sections(target_node)
 
     # Validate the complete batch against the preview state before reporting
     # any operation, matching the preflight a real apply runs before its writes.
@@ -1834,7 +1920,7 @@ def _preview_configure_command(
     _preview_section_operations(
         hooks,
         preview_roots=preview_roots,
-        target_node=target_node,
+        current_values=before,
         config_sections=prepared.config_sections,
         module_config_sections=prepared.module_config_sections,
     )

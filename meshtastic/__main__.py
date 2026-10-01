@@ -24,6 +24,7 @@ import meshtastic.cli.bootstrap as cli_bootstrap
 import meshtastic.cli.channel_contact_actions as cli_channel_contact_actions
 import meshtastic.cli.config_io as cli_config_io
 import meshtastic.cli.config_preview as cli_config_preview
+import meshtastic.cli.config_readiness as cli_config_readiness
 import meshtastic.cli.configure_actions as cli_configure_actions
 import meshtastic.cli.device_actions as cli_device_actions
 import meshtastic.cli.dispatch as cli_dispatch
@@ -1062,41 +1063,6 @@ def _resolve_set_target(
     return None
 
 
-class _ConfigSectionProbe:
-    """Expose pending config-section presence as one boolean wait target."""
-
-    def __init__(self, checks: Sequence[tuple[Callable[[str], bool], str]]) -> None:
-        self._checks = checks
-
-    @property
-    def is_set(self) -> bool:
-        """Return whether every requested config section is currently present."""
-        for has_field_fn, name in self._checks:
-            try:
-                if not has_field_fn(name):
-                    return False
-            except (TypeError, ValueError):
-                return False
-        return True
-
-
-def _wait_for_set_sections(
-    node: Any, pending_sections: Sequence[tuple[Any, FieldDescriptor]]
-) -> bool:
-    """Wait once for all requested config sections to arrive on the cached node."""
-    timeout = getattr(node, "_timeout", None)
-    wait_for_set = getattr(timeout, "waitForSet", None)
-    if not callable(wait_for_set):
-        return True
-    probe = _ConfigSectionProbe(
-        [
-            (config.HasField, config_type.name)
-            for config, config_type in pending_sections
-        ]
-    )
-    return wait_for_set(probe, attrs=("is_set",))
-
-
 def _ensure_set_sections_loaded(
     node: Any, set_entries: Sequence[tuple[str, Any]]
 ) -> None:
@@ -1119,10 +1085,14 @@ def _ensure_set_sections_loaded(
     against received state instead of protobuf defaults; a section that never
     arrives exits before any validation, rendering, or write. ``noProto`` nodes
     are never waited on because no response can arrive without protocol use.
+
+    The dedup/request/wait/abort policy itself lives in
+    :mod:`meshtastic.cli.config_readiness`, shared with the ``--configure``
+    paths; this wrapper only collects the section pairs implied by the parsed
+    ``--set`` entries.
     """
     configs = (node.localConfig, node.moduleConfig)
-    requested_sections: set[tuple[str, str]] = set()
-    pending_sections: list[tuple[Any, FieldDescriptor]] = []
+    sections: list[tuple[Any, FieldDescriptor]] = []
     for raw_pref_name, _raw_value in set_entries:
         pref_name = _normalize_pref_name(raw_pref_name)
         resolved = _resolve_set_target(configs, pref_name)
@@ -1131,28 +1101,10 @@ def _ensure_set_sections_loaded(
         config, config_type = resolved
         if not _resolve_pref(config, pref_name):
             continue
-
-        section_key = (config.DESCRIPTOR.full_name, config_type.name)
-        if section_key in requested_sections:
-            continue
-        requested_sections.add(section_key)
-        if not config.HasField(config_type.name):
-            node.requestConfig(config_type)
-            pending_sections.append((config, config_type))
-    # A noProto node can never deliver a config response, so waiting would only
-    # burn the timeout; unloaded sections keep their fail-closed rendering there.
-    if (
-        pending_sections
-        and not getattr(node, "noProto", False)
-        and not _wait_for_set_sections(node, pending_sections)
-    ):
-        for config, config_type in pending_sections:
-            if not config.HasField(config_type.name):
-                _cli_exit(
-                    "ERROR: timed out waiting for the "
-                    f"{config_type.name} configuration section from the device; "
-                    "no changes were made."
-                )
+        sections.append((config, config_type))
+    cli_config_readiness.ensure_config_sections_loaded(
+        node, sections, cli_exit=_cli_exit
+    )
 
 
 def _validate_set_entries_against_configs(

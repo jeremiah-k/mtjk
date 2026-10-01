@@ -12,10 +12,11 @@ from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
+from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.__main__ as main_module
 from meshtastic.__main__ import _preview_set_command, setPref
-from meshtastic.cli import configure_actions, preference_runtime
+from meshtastic.cli import config_preview, configure_actions, preference_runtime
 from meshtastic.cli.config_preview import (
     PREVIEW_NO_CHANGES_MESSAGE,
     ConfigSnapshotCopies,
@@ -761,6 +762,179 @@ def test_preview_configure_validates_against_chained_snapshot_with_live_current(
         "Would write config section lora to device",
         "Would commit settings transaction",
     ]
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_snapshot_absorb_missing_sections_gains_new_sections_only() -> None:
+    """Absorb fills only sections the node delivered; staged ones survive."""
+    node = _target_node()
+    node.localConfig.bluetooth.enabled = True
+    node.moduleConfig.mqtt.enabled = True
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    snapshot.local_config.lora.hop_limit = 5
+
+    snapshot.absorb_missing_sections(node)
+
+    assert snapshot.local_config.lora.hop_limit == 5
+    assert snapshot.local_config.bluetooth.enabled is True
+    assert snapshot.module_config.mqtt.enabled is True
+
+
+@pytest.mark.unit
+def test_snapshot_absorb_ignores_sections_absent_on_node() -> None:
+    """Sections the node has not delivered stay absent from the copies."""
+    node = _target_node()
+    node.localConfig.ClearField("bluetooth")
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    snapshot.local_config.lora.hop_limit = 5
+
+    snapshot.absorb_missing_sections(node)
+
+    assert snapshot.local_config.lora.hop_limit == 5
+    assert not snapshot.local_config.HasField("bluetooth")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        (FieldDescriptor.LABEL_OPTIONAL, True),
+        (FieldDescriptor.LABEL_REPEATED, False),
+    ],
+)
+def test_is_singular_message_uses_legacy_label_fallback(
+    label: int, expected: bool
+) -> None:
+    """Descriptor implementations without boolean is_repeated use label safely."""
+    field = SimpleNamespace(message_type=object(), is_repeated=None, label=label)
+
+    assert config_preview._is_singular_message(cast(Any, field)) is expected
+
+
+@pytest.mark.unit
+def test_preview_acquire_then_absorb_keeps_staged_set_assignments_coherent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Combined previews keep staged values and render currents post-acquisition."""
+    path = _write_document(
+        tmp_path,
+        "config:\n"
+        "  lora:\n"
+        "    hop_limit: 6\n"
+        "module_config:\n"
+        "  mqtt:\n"
+        "    enabled: true\n"
+        "    username: new-preview-user\n"
+        "    password: new-preview-password\n",
+    )
+    snapshot = ConfigSnapshotCopies(
+        local_config=localonly_pb2.LocalConfig(),
+        module_config=localonly_pb2.LocalModuleConfig(),
+    )
+    snapshot.local_config.lora.hop_limit = 5
+    node = _target_node()
+    node.noProto = False
+    node._timeout = SimpleNamespace(waitForSet=lambda probe, attrs: True)
+
+    def deliver_mqtt(config_type: Any) -> None:
+        assert config_type.name == "mqtt"
+        node.moduleConfig.mqtt.enabled = True
+        node.moduleConfig.mqtt.username = "device-preview-user"
+        node.moduleConfig.mqtt.password = "device-preview-password"
+
+    node.requestConfig.side_effect = deliver_mqtt
+    iface = _interface(node)
+    hooks = _hooks()
+    sleeps = _install_clock(monkeypatch)
+
+    configure_actions._preview_configure_command(
+        hooks, iface, _configure_args(path), {}, snapshot
+    )
+
+    assert _printed_lines(hooks) == [
+        CONFIGURE_PREVIEW_HEADER,
+        "Would set lora.hop_limit = 6 (current: 3)",
+        "Would set mqtt.enabled = true (current: true)",
+        "Would set mqtt.username = <redacted> (current: <redacted>)",
+        "Would set mqtt.password = <redacted> (current: <redacted>)",
+        "Would begin settings transaction",
+        "Would write config section lora to device",
+        "Would write config section mqtt to device",
+        "Would commit settings transaction",
+    ]
+    # The staged --set candidate survives; only the section absent from the
+    # staged copies is absorbed from the post-acquisition node state.
+    assert snapshot.local_config.lora.hop_limit == 5
+    assert snapshot.module_config.HasField("mqtt")
+    assert snapshot.module_config.mqtt.enabled is True
+    node.requestConfig.assert_called_once()
+    output = "\n".join(_printed_lines(hooks))
+    for secret in (
+        "new-preview-user",
+        "new-preview-password",
+        "device-preview-user",
+        "device-preview-password",
+    ):
+        assert secret not in output
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_preview_configure_timeout_refuses_before_any_reporting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A configure preview aborts on a missing section before the header."""
+    path = _write_document(tmp_path, "module_config:\n  mqtt:\n    enabled: true\n")
+    node = _target_node()
+    node.noProto = False
+    node._timeout = SimpleNamespace(waitForSet=lambda probe, attrs: False)
+    iface = _interface(node)
+    exits: list[str] = []
+    hooks = _hooks(cli_exit=_recording_exit(exits))
+    sleeps = _install_clock(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        configure_actions._preview_configure_command(
+            hooks, iface, _configure_args(path), {}
+        )
+
+    assert exits == [
+        "ERROR: timed out waiting for the mqtt configuration section from the "
+        "device; no changes were made."
+    ]
+    assert _printed_lines(hooks) == []
+    node.requestConfig.assert_called_once()
+    _assert_no_mutations(node, sleeps)
+
+
+@pytest.mark.unit
+def test_preview_no_proto_requests_without_waiting_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NoProto previews request the section but never wait on a response."""
+    path = _write_document(tmp_path, "module_config:\n  mqtt:\n    enabled: true\n")
+    node = _target_node()
+    node.noProto = True
+    wait_for_set = MagicMock()
+    node._timeout = SimpleNamespace(waitForSet=wait_for_set)
+    iface = _interface(node)
+    hooks = _hooks()
+    sleeps = _install_clock(monkeypatch)
+
+    configure_actions._preview_configure_command(
+        hooks, iface, _configure_args(path), {}
+    )
+
+    assert "Would set mqtt.enabled = true (current: not set)" in _printed_lines(hooks)
+    node.requestConfig.assert_called_once()
+    wait_for_set.assert_not_called()
     _assert_no_mutations(node, sleeps)
 
 
