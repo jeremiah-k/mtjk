@@ -117,6 +117,30 @@ Two observable differences follow: signature introspection (for example
 `contextlib.redirect_stdout`) is honored — upstream's definition-time capture
 wrote to the original stream instead.
 
+### Local CLI configuration applies verify before reporting success
+
+Local `--set` and `--configure` runs against the directly connected node no
+longer report an unqualified success after the write is sent. The CLI now
+re-reads the affected `LocalConfig`/`LocalModuleConfig` sections from the device
+and compares them to the requested values. A value mismatch, a section that
+never reloads, or a verification readback failure exits 1 with an error naming
+the affected fields/sections (`ERROR: --set was sent, but fresh device state
+reports different values for: <fields>. The device did not apply the requested
+value(s).`, `ERROR: --set was sent, but the device did not return the
+<sections> configuration section(s) within 12 seconds; the requested value(s)
+could not be verified.`, `ERROR: local --set verification could not read fresh
+device state: <detail>.`, or the `ERROR: configuration was sent, but ...`
+messages such as `... the device did not reconnect, so the requested settings
+could not be verified.`). Previously these CLI paths exited 0 once the write
+was sent. A verified apply prints a confirming line.
+
+Explicitly unchanged: noProto `--set` runs skip verification (exit 0) and
+never claim it (`--debug` only changes logging and runs the normal verified
+path), `--dry-run` previews neither write nor verify, remote (`--dest`)
+targets keep their historical informational output, public library setter
+timing and signatures are unchanged, `requestConfig` compatibility paths are
+unchanged, and remote-node behavior is unchanged.
+
 ## CLI Compatibility
 
 CLI branding is intentionally separate from the Python import namespace:

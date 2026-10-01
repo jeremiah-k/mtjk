@@ -142,6 +142,41 @@ def _configure_reconnect_message(result: ConfigureReconnectResult) -> str:
     )
 
 
+def _configure_failure_message(result: ConfigureReconnectResult) -> str:
+    """Return a fail-closed error message for a non-verified local configure.
+
+    Parameters
+    ----------
+    result : ConfigureReconnectResult
+        Reconnect/verification outcome that is not ``VERIFIED``.
+
+    Returns
+    -------
+    str
+        Distinct actionable error text embedding the fail-soft status detail.
+    """
+    detail = _configure_reconnect_message(result)
+    if result == ConfigureReconnectResult.RECONNECT_FAILED:
+        return (
+            "ERROR: configuration was sent, but the device did not reconnect, so "
+            f"the requested settings could not be verified. {detail}"
+        )
+    if result == ConfigureReconnectResult.CONFIG_RELOAD_FAILED:
+        return (
+            "ERROR: configuration was sent, but the device configuration did not "
+            f"reload, so the requested settings could not be verified. {detail}"
+        )
+    if result == ConfigureReconnectResult.VERIFICATION_INCOMPLETE:
+        return (
+            "ERROR: configuration was sent, but fresh device state did not confirm "
+            f"the requested settings. {detail}"
+        )
+    return (
+        "ERROR: configuration was sent, but post-apply verification could not be "
+        f"completed. {detail}"
+    )
+
+
 class _ConfigureCommandResult(tuple[bool, bool]):
     """Two-item compatibility result with internal request-sent metadata.
 
@@ -1339,6 +1374,11 @@ def _report_configure_result(
 ) -> None:
     """Report post-apply reconnect/verification status for one configure run.
 
+    A local transaction whose reconnect/verification outcome is not
+    ``VERIFIED`` terminates the CLI with a nonzero exit so a dropped or
+    unverifiable apply is never reported as success. Remote targets and
+    non-transaction paths keep their historical informational output.
+
     Parameters
     ----------
     hooks : ConfigureHooks
@@ -1370,12 +1410,17 @@ def _report_configure_result(
                 verify_config_fields=config_sections or None,
                 verify_module_config_fields=module_config_sections or None,
             )
-            hooks.cli_print(_configure_reconnect_message(reconnect_result))
-        else:
-            hooks.cli_print(
-                "Post-reconnect verification skipped for remote target. Local transport "
-                "state does not confirm remote node reload status."
+            if reconnect_result == ConfigureReconnectResult.VERIFIED:
+                hooks.cli_print(_configure_reconnect_message(reconnect_result))
+                return
+            _terminate_cli(
+                hooks.cli_exit,
+                _configure_failure_message(reconnect_result),
             )
+        hooks.cli_print(
+            "Post-reconnect verification skipped for remote target. Local transport "
+            "state does not confirm remote node reload status."
+        )
         return
 
     if seturl_executed:

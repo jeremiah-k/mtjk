@@ -64,6 +64,21 @@ example is error handling: library code generally raises exceptions instead of
 terminating the host process with `sys.exit()`. Safer defaults and internal
 logging behavior may also differ from older upstream releases.
 
+Local CLI configuration writes are verified against fresh device state. After a
+local `--set` batch is written and committed, and after a local `--configure`
+reconnect/reload, the CLI re-reads the affected `LocalConfig`/`LocalModuleConfig`
+sections from the device and compares them to the requested values. A value
+mismatch, a section that never reloads, or a failed verification readback exits
+nonzero with an error naming the affected fields/sections (for example
+`ERROR: --set was sent, but fresh device state reports different values for:
+<fields>. The device did not apply the requested value(s).` or
+`ERROR: configuration was sent, but fresh device state did not confirm the
+requested settings.`); a verified apply prints a confirming line. `--dry-run`
+never writes or verifies, noProto `--set` runs skip verification (exit 0)
+and never report a device-verified success, and remote (`--dest`) targets keep
+their existing behavior. This changes CLI exit behavior only; public library
+setters keep their timing and return values.
+
 See [COMPATIBILITY.md](COMPATIBILITY.md) for the maintained compatibility
 contract and known behavioral differences.
 
