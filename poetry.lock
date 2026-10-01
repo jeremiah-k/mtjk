@@ -3368,11 +3368,12 @@ version = "1.22.2"
 description = "parse() is the opposite of format()"
 optional = false
 python-versions = "*"
-groups = ["powermon"]
+groups = ["main", "powermon"]
 files = [
     {file = "parse-1.22.2-py2.py3-none-any.whl", hash = "sha256:b8ed6f889ca625b6b3aed4ec1439eb9421fde31814c2b1d550ccd8df5733a5b6"},
     {file = "parse-1.22.2.tar.gz", hash = "sha256:8ff0b98202798b8cefa4f8fac06b670d6d00e5ec6ecbbacaf97ac0d0e93a54e6"},
 ]
+markers = {main = "extra == \"analysis\""}
 
 [[package]]
 name = "parso"
@@ -3565,11 +3566,12 @@ version = "4.12.2"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
 optional = false
 python-versions = ">=3.10"
-groups = ["analysis", "dev", "powermon"]
+groups = ["main", "analysis", "dev", "powermon"]
 files = [
     {file = "platformdirs-4.12.2-py3-none-any.whl", hash = "sha256:29dbf06d96c500bc6bdbce75fb0a14d63279c93b1842f97e72a135b33e856983"},
     {file = "platformdirs-4.12.2.tar.gz", hash = "sha256:eab5f70271a490ef74618bb314fbb86e3c7e82fa3b9c922c2ea0e0a1a155d329"},
 ]
+markers = {main = "extra == \"analysis\""}
 
 [[package]]
 name = "plotly"
@@ -3765,7 +3767,7 @@ version = "25.0.1"
 description = "Python library for Apache Arrow"
 optional = false
 python-versions = ">=3.10"
-groups = ["dev", "powermon"]
+groups = ["main", "dev", "powermon"]
 files = [
     {file = "pyarrow-25.0.1-cp310-cp310-macosx_12_0_arm64.whl", hash = "sha256:0b1edbb2f385a6a65e9711b62ba86ac54a7816a3f8d17bb3e8a5929d65fb2485"},
     {file = "pyarrow-25.0.1-cp310-cp310-macosx_12_0_x86_64.whl", hash = "sha256:a4dd8bf99a8fac133efc0ed6a92f5fddbe2adba0d0f6dd720e39ba9855cea85c"},
@@ -3811,6 +3813,7 @@ files = [
     {file = "pyarrow-25.0.1-cp314-cp314t-win_amd64.whl", hash = "sha256:4288f27577352d608ca08553b0865e4a9b3aa14820c5d95b53337218d609835b"},
     {file = "pyarrow-25.0.1.tar.gz", hash = "sha256:9150a83248bfed9813ea3c3af74c3856c1984d444aa28e58bf7733b9750ddf6a"},
 ]
+markers = {main = "extra == \"analysis\""}
 
 [[package]]
 name = "pyarrow-stubs"
@@ -5602,10 +5605,10 @@ test = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more_it
 type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [extras]
-analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs", "plotly"]
+analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs", "parse", "platformdirs", "plotly", "pyarrow"]
 cli = []
 
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11,<3.15"
-content-hash = "731c9d7fda9b31340cf9676a01e19e7f7acdfebd52585ac4eb656e2d364db68c"
+content-hash = "b00898f46ad8644ff4cebd89a7f770dfcdd375a99c718a7d8482a02f7d18d520"
