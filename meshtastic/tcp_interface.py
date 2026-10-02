@@ -25,6 +25,7 @@ from meshtastic.transport_retry import (
 )
 
 DEFAULT_TCP_PORT = 4403
+TCP_CLOSE_DRAIN_TIMEOUT_SECONDS = 0.25
 TCP_IO_EXCEPTIONS: tuple[type[BaseException], ...] = (
     OSError,
     ValueError,
@@ -332,20 +333,31 @@ class TCPInterface(StreamInterface):
     def close(self) -> None:
         """Close the TCP connection and stop the reader thread.
 
-        Requests reader shutdown, calls the base-class close logic, and tears down the
-        underlying socket (ignoring shutdown/close errors). After socket teardown,
-        attempts to join the reader thread for up to 2.0 seconds and logs a
-        warning if the thread does not exit in time.
+        Send the disconnect frame, half-close the send side, and allow a bounded
+        reader drain before forcing socket teardown. Join the reader after
+        teardown as well so a peer that keeps its send side open cannot strand
+        the reader indefinitely.
         """
         logger.debug("Closing TCP stream")
         # Request shutdown using StreamInterface shared cleanup and then perform
         # TCP-specific socket teardown before joining the reader thread.
         self._shared_close()
-        # Sometimes the socket read might be blocked in the reader thread.
-        # Therefore we force the shutdown by closing the socket here
         with self._reconnect_lock:
             sock = self.socket
             self.socket = None
+        if sock is not None:
+            # Closing with unread data can discard the final write on some
+            # platforms. Preserve the send-side FIN before disposing of the
+            # socket, while bounding the wait for a peer that never closes.
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_WR)
+            rx_thread = getattr(self, "_rxThread", None)
+            if (
+                rx_thread is not None
+                and rx_thread is not threading.current_thread()
+                and rx_thread.is_alive()
+            ):
+                rx_thread.join(timeout=TCP_CLOSE_DRAIN_TIMEOUT_SECONDS)
         self._close_socket_handle(sock)
 
         # Join after socket teardown so a blocking recv() can exit promptly.

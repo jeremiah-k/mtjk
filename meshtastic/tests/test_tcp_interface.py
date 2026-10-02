@@ -1,6 +1,7 @@
 """Meshtastic unit tests for tcp_interface.py."""
 
 import re
+import socket
 import threading
 from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
@@ -9,6 +10,49 @@ import pytest
 
 from ..protobuf import config_pb2
 from ..tcp_interface import TCPInterface
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reader_alive", [False, True])
+def test_close_half_closes_before_bounded_reader_drain(reader_alive: bool) -> None:
+    """Keep the socket open for the final write before forcing reader exit."""
+    iface = TCPInterface("localhost", noProto=True, connectNow=False)
+    sock = MagicMock()
+    reader = MagicMock()
+    reader.is_alive.return_value = reader_alive
+    iface.socket = sock
+    iface._rxThread = reader
+    events = MagicMock()
+    events.attach_mock(sock, "socket")
+    events.attach_mock(reader, "reader")
+
+    iface.close()
+
+    expected = [call.socket.shutdown(socket.SHUT_WR)]
+    if reader_alive:
+        expected.append(call.reader.join(timeout=0.25))
+    expected.extend([call.socket.shutdown(socket.SHUT_RDWR), call.socket.close()])
+    actual = [
+        event
+        for event in events.mock_calls
+        if event[0] in ("socket.shutdown", "socket.close", "reader.join")
+    ]
+    assert actual[: len(expected)] == expected
+    assert iface.socket is None
+
+
+@pytest.mark.unit
+def test_close_from_reader_does_not_join_itself() -> None:
+    """A callback may close its own transport without a thread join error."""
+    iface = TCPInterface("localhost", noProto=True, connectNow=False)
+    sock = MagicMock()
+    iface.socket = sock
+    iface._rxThread = threading.current_thread()
+    iface.close()
+    assert sock.shutdown.call_args_list == [
+        call(socket.SHUT_WR),
+        call(socket.SHUT_RDWR),
+    ]
 
 
 @pytest.mark.unit
