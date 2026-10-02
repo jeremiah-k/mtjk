@@ -13,6 +13,7 @@ from meshtastic._branding import PRIMARY_CLI_NAME
 
 EMPTY_SHELL_COMMAND_ERROR = "Empty command passed to CLI shell helper"
 EMPTY_ARGV_COMMAND_ERROR = "Empty command list passed to CLI argv helper"
+HOST_CLI_REQUEST_TIMEOUT_SECONDS = 5
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 
@@ -179,8 +180,16 @@ def _run_host_cli(
     tuple[int, str]
         Exit code and combined stdout/stderr output.
     """
+    has_request_timeout = any(
+        arg == "--timeout" or arg.startswith("--timeout=") for arg in args
+    )
+    request_timeout_args = (
+        []
+        if has_request_timeout
+        else ["--timeout", str(min(HOST_CLI_REQUEST_TIMEOUT_SECONDS, timeout))]
+    )
     result = run_cli_argv_with_timeout(
-        [meshtastic_bin, "--host", host, *args],
+        [meshtastic_bin, "--host", host, *request_timeout_args, *args],
         timeout=timeout,
     )
     return result.returncode, (result.stdout or "") + (result.stderr or "")
