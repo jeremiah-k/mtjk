@@ -232,3 +232,66 @@ def test_qr_falls_back_for_ascii_output(monkeypatch: pytest.MonkeyPatch) -> None
     rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
     assert "\x1b[" in rendered
     rendered.encode("ascii")
+
+
+@pytest.mark.unit
+def test_qr_retries_lower_error_correction_after_capacity_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive rendering should try lower correction after capacity overflow."""
+    calls: list[str] = []
+
+    class _StubCode:
+        def symbol_size(self, *, border: int) -> tuple[int, int]:
+            assert border == cli_qr.QR_BORDER_MODULES
+            return (20, 20)
+
+        def terminal(self, *, out: object, border: int, compact: bool) -> None:
+            assert border == cli_qr.QR_BORDER_MODULES
+            assert compact is True
+            out.write("<lower-level-qr>\n")  # type: ignore[attr-defined]
+
+    class _CapacityLimitedSegno:
+        @staticmethod
+        def make(
+            _value: str, *, error: str, micro: bool, boost_error: bool
+        ) -> _StubCode:
+            assert micro is False
+            assert boost_error is False
+            calls.append(error)
+            if error in ("H", "Q"):
+                raise ValueError("Data too large")
+            return _StubCode()
+
+    monkeypatch.setattr(cli_qr, "segno", _CapacityLimitedSegno())
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((80, 40))
+    )
+    assert cli_qr.renderTerminalQr("dense-value") == "<lower-level-qr>\n"
+    assert calls == ["H", "Q", "M"]
+
+
+@pytest.mark.unit
+def test_qr_preserves_overflow_when_lowest_error_correction_cannot_encode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Truly oversized data should preserve Segno's overflow exception."""
+    calls: list[str] = []
+
+    class _AlwaysOverflowSegno:
+        @staticmethod
+        def make(_value: str, *, error: str, micro: bool, boost_error: bool) -> object:
+            assert micro is False
+            assert boost_error is False
+            calls.append(error)
+            raise ValueError("Data too large")
+
+    monkeypatch.setattr(cli_qr, "segno", _AlwaysOverflowSegno())
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((200, 200))
+    )
+    with pytest.raises(ValueError, match="Data too large"):
+        cli_qr.renderTerminalQr("too-large")
+    assert calls == ["H", "Q", "M", "L"]

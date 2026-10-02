@@ -64,8 +64,16 @@ def renderTerminalQr(value: str) -> str:
         compact = False
     terminal_size = shutil.get_terminal_size() if sys.stdout.isatty() else None
     levels = QR_ERROR_CORRECTION_LEVELS if terminal_size else (QR_ERROR_CORRECTION,)
-    for level in levels:
-        code = segno.make(value, error=level, micro=False, boost_error=False)
+    for level_index, level in enumerate(levels):
+        try:
+            code = segno.make(value, error=level, micro=False, boost_error=False)
+        except ValueError:
+            # Dense content can exceed a higher correction level while still
+            # fitting at a lower one. Preserve Segno's historical exception
+            # when no lower level remains (including redirected H-only output).
+            if level_index == len(levels) - 1:
+                raise
+            continue
         if terminal_size:
             width, height = code.symbol_size(border=QR_BORDER_MODULES)
             columns = width if compact else width * 2
