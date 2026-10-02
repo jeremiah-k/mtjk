@@ -8,8 +8,10 @@ and spawn no subprocesses or virtualenvs.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import io
+import json
 import sys
 import tarfile
 import zipfile
@@ -480,3 +482,166 @@ def test_requirement_name_parsing() -> None:
     )
     assert smoke._requirement_name("Pandas_Stubs (<5)") == "pandas-stubs"
     assert smoke._requirement_name("") == ""
+
+
+def test_analysis_dependency_metadata_comparison_is_pep503_normalized(
+    write_valid_wheel: Callable[..., Path],
+) -> None:
+    """Raw pyproject dependency keys compare canonically to Requires-Dist names."""
+    expectations = dataclasses.replace(
+        EXPECTATIONS, analysis_extra_deps=("Pandas_Stubs",)
+    )
+    wheel = write_valid_wheel(
+        metadata=VALID_METADATA.replace(
+            'Requires-Dist: pyarrow (>=25.0.0) ; extra == "analysis"',
+            'Requires-Dist: pandas-stubs (>=2.3.3) ; extra == "analysis"',
+        )
+    )
+    smoke.validate_wheel_contents(wheel, expectations, PB2_STEMS)
+
+
+@pytest.mark.parametrize("stdout", ["not-json", "[]"])
+def test_parse_json_object_reports_context(stdout: str) -> None:
+    """Malformed or non-object JSON is converted to a contextual gate error."""
+    command = ["mtjk", "--list-fields", "--json"]
+    with pytest.raises(SmokeGateError) as exc_info:
+        smoke._parse_json_object(
+            stdout,
+            phase="schema",
+            profile="wheel-core",
+            command=command,
+        )
+    message = str(exc_info.value)
+    assert "phase=schema" in message
+    assert "profile=wheel-core" in message
+    assert "command=mtjk --list-fields --json" in message
+    assert stdout in message
+
+
+def test_run_probe_json_requires_an_object_and_keeps_command_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Probe JSON shares the same object-only contextual parse contract."""
+    monkeypatch.setattr(smoke, "run_command", lambda *args, **kwargs: "[]")
+    python = tmp_path / "venv" / "bin" / "python"
+    probe = tmp_path / "probe.py"
+    with pytest.raises(SmokeGateError) as exc_info:
+        smoke.run_probe_json(
+            python,
+            probe,
+            tmp_path,
+            profile="wheel-core",
+            phase="library",
+            args=["one"],
+        )
+    message = str(exc_info.value)
+    assert "phase=library" in message
+    assert "profile=wheel-core" in message
+    assert str(python) in message
+    assert str(probe) in message
+
+
+@pytest.mark.parametrize("broken_surface", ["list", "describe"])
+def test_core_schema_surfaces_wrap_non_object_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, broken_surface: str
+) -> None:
+    """Both schema CLI JSON surfaces stay inside the contextual error contract."""
+    venv_dir = tmp_path / "venv"
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in (
+        EXPECTATIONS.cli.primary,
+        *EXPECTATIONS.cli.compat,
+        EXPECTATIONS.cli.tunnel,
+    ):
+        (bin_dir / name).write_text("", encoding="utf-8")
+
+    expected_version = f"{EXPECTATIONS.cli.primary} {EXPECTATIONS.version}"
+    list_document = {
+        "config_fields": [{"field": "lora.hop_limit", "type": "uint32"}],
+        "module_config_fields": [{"field": "mux.frequency", "type": "float"}],
+    }
+    describe_document = {
+        "field": "lora.hop_limit",
+        "type": "uint32",
+        "min_value": 0,
+        "max_value": 7,
+    }
+
+    def _run_command(argv: list[str], **_kwargs: Any) -> str:
+        if argv[-2:] == ["--list-fields", "--json"]:
+            return "[]" if broken_surface == "list" else json.dumps(list_document)
+        if "--describe-field" in argv:
+            return (
+                "[]" if broken_surface == "describe" else json.dumps(describe_document)
+            )
+        if argv[-1] == "--version":
+            return expected_version
+        if argv[-1] == "--help":
+            return "help"
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(smoke, "run_command", _run_command)
+    with pytest.raises(SmokeGateError) as exc_info:
+        smoke._run_core_cli_surfaces(
+            venv_dir,
+            venv_dir / "bin" / "python",
+            tmp_path,
+            EXPECTATIONS,
+            profile="wheel-core",
+        )
+    message = str(exc_info.value)
+    assert "phase=schema" in message
+    assert "profile=wheel-core" in message
+    expected_flag = "--list-fields" if broken_surface == "list" else "--describe-field"
+    assert expected_flag in message
+
+
+def test_core_light_assertion_checks_every_analysis_distribution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Core cells probe all runtime-derived analysis extra distributions."""
+    expectations = dataclasses.replace(
+        EXPECTATIONS,
+        analysis_extra_deps=(
+            "dash",
+            "dash-bootstrap-components",
+            "parse",
+            "platformdirs",
+            "plotly",
+            "pandas",
+            "pandas-stubs",
+            "pyarrow",
+        ),
+    )
+    observed_args: list[str] = []
+
+    def _run_probe_json(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        observed_args.extend(kwargs["args"])
+        return {"unexpectedly_installed": []}
+
+    monkeypatch.setattr(smoke, "run_probe_json", _run_probe_json)
+    smoke._run_core_light_assertion(
+        tmp_path / "python",
+        tmp_path,
+        expectations,
+        profile="wheel-core",
+    )
+    assert observed_args == list(expectations.analysis_extra_deps)
+
+
+def test_install_identity_rejects_string_prefix_outside_venv(tmp_path: Path) -> None:
+    """A sibling path sharing the venv string prefix is not inside the venv."""
+    venv_dir = tmp_path / "venv"
+    outside = tmp_path / "venv-foreign" / "site-packages" / "meshtastic"
+    observed = {
+        "name": EXPECTATIONS.name,
+        "version": EXPECTATIONS.version,
+        "meshtastic_file": str(outside / "__init__.py"),
+        "protobuf_file": str(outside / "protobuf" / "__init__.py"),
+        "py_typed_via_resources": True,
+    }
+    with pytest.raises(SmokeGateError, match=r"outside the consumer venv"):
+        smoke._assert_install_identity(
+            observed, venv_dir, EXPECTATIONS, profile="wheel-core"
+        )

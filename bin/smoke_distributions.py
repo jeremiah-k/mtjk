@@ -817,7 +817,8 @@ def _validate_requires_dist(
     normalization and markers are matched tolerantly.
     """
     for dep in expectations.analysis_extra_deps:
-        lines = [line for line in requires_dist if _requirement_name(line) == dep]
+        wanted = _canonical_name(dep)
+        lines = [line for line in requires_dist if _requirement_name(line) == wanted]
         if not lines:
             raise SmokeGateError(
                 "contents",
@@ -1344,17 +1345,19 @@ print(json.dumps({
 )
 
 _CORE_LIGHT_PROBE = r"""
+import importlib.metadata as md
 import json
+import sys
 
 failures = []
-for module in ("pyarrow", "dash"):
+for dist_name in sys.argv[1:]:
     try:
-        __import__(module)
-    except ImportError:
+        md.distribution(dist_name)
+    except md.PackageNotFoundError:
         pass
     else:
-        failures.append(module)
-print(json.dumps({"unexpectedly_importable": failures}))
+        failures.append(dist_name)
+print(json.dumps({"unexpectedly_installed": failures}))
 """
 
 # Production data path probe: create_dash() is the real consumer of slog
@@ -1544,6 +1547,35 @@ def install_requirement(
     )
 
 
+def _parse_json_object(
+    stdout: str,
+    *,
+    phase: str,
+    profile: str,
+    command: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Parse child stdout as a JSON object with contextual gate failures."""
+    try:
+        document = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise SmokeGateError(
+            phase,
+            f"output is not valid JSON: {exc}",
+            profile=profile,
+            command=command,
+            detail=_tail(stdout),
+        ) from exc
+    if not isinstance(document, dict):
+        raise SmokeGateError(
+            phase,
+            "output is not a JSON object",
+            profile=profile,
+            command=command,
+            detail=_tail(stdout),
+        )
+    return document
+
+
 def run_probe_json(
     venv_python: Path,
     probe_path: Path,
@@ -1559,23 +1591,16 @@ def run_probe_json(
     ``XDG_DATA_HOME``), so neither it nor the installed code it exercises
     can write global user data.
     """
+    argv = [str(venv_python), str(probe_path), *args]
     stdout = run_command(
-        [str(venv_python), str(probe_path), *args],
+        argv,
         phase=phase,
         cwd=work_dir,
         timeout=TIMEOUT_PROBE,
         profile=profile,
         containment_dir=work_dir,
     )
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        raise SmokeGateError(
-            phase,
-            f"probe output is not valid JSON: {exc}",
-            profile=profile,
-            detail=_tail(stdout),
-        ) from exc
+    return _parse_json_object(stdout, phase=phase, profile=profile, command=argv)
 
 
 def _assert_install_identity(
@@ -1602,9 +1627,16 @@ def _assert_install_identity(
             detail=f"observed={observed.get('version')!r} "
             f"expected={expectations.version!r}",
         )
+    venv_root = venv_dir.resolve()
     for key in ("meshtastic_file", "protobuf_file"):
         origin = str(observed.get(key, ""))
-        if not origin.startswith(str(venv_dir)) or "site-packages" not in origin:
+        try:
+            origin_path = Path(origin).resolve()
+            inside_venv = origin_path.is_relative_to(venv_root)
+        except (OSError, ValueError):
+            inside_venv = False
+            origin_path = Path(origin)
+        if not inside_venv or "site-packages" not in origin_path.parts:
             raise SmokeGateError(
                 "cells",
                 f"installed {key} is outside the consumer venv",
@@ -1702,31 +1734,39 @@ def _run_core_cli_surfaces(
                 profile=profile,
                 command=argv,
             )
-    list_fields = json.loads(
+    list_argv = [str(bin_dir / expectations.cli.primary), "--list-fields", "--json"]
+    list_fields = _parse_json_object(
         run_command(
-            [str(bin_dir / expectations.cli.primary), "--list-fields", "--json"],
+            list_argv,
             phase="schema",
             cwd=work_dir,
             timeout=TIMEOUT_CLI,
             profile=profile,
             containment_dir=work_dir,
-        )
+        ),
+        phase="schema",
+        profile=profile,
+        command=list_argv,
     )
     validate_list_fields_document(list_fields)
-    describe = json.loads(
+    describe_argv = [
+        str(bin_dir / expectations.cli.primary),
+        "--describe-field",
+        SCHEMA_FIELD,
+        "--json",
+    ]
+    describe = _parse_json_object(
         run_command(
-            [
-                str(bin_dir / expectations.cli.primary),
-                "--describe-field",
-                SCHEMA_FIELD,
-                "--json",
-            ],
+            describe_argv,
             phase="schema",
             cwd=work_dir,
             timeout=TIMEOUT_CLI,
             profile=profile,
             containment_dir=work_dir,
-        )
+        ),
+        phase="schema",
+        profile=profile,
+        command=describe_argv,
     )
     validate_describe_field_document(describe)
     _LOGGER.info("[schema] %s: list-fields and %s bounds OK", profile, SCHEMA_FIELD)
@@ -1772,23 +1812,32 @@ def _run_library_surfaces(
 def _run_core_light_assertion(
     venv_python: Path,
     work_dir: Path,
+    expectations: RepoExpectations,
     *,
     profile: str,
 ) -> None:
-    """Assert the core install is lightweight (analysis deps absent)."""
+    """Assert the core install carries none of the analysis-extra distributions."""
     probe_path = work_dir / f"probe-core-light-{profile}.py"
     _write_probe(probe_path, _CORE_LIGHT_PROBE)
-    observed = run_probe_json(venv_python, probe_path, work_dir, profile=profile)
-    unexpected = observed.get("unexpectedly_importable")
+    observed = run_probe_json(
+        venv_python,
+        probe_path,
+        work_dir,
+        profile=profile,
+        args=list(expectations.analysis_extra_deps),
+    )
+    unexpected = observed.get("unexpectedly_installed")
     if unexpected:
         raise SmokeGateError(
             "cells",
             "core install must not carry analysis-only dependencies",
             profile=profile,
-            detail=f"unexpectedly importable: {unexpected}",
+            detail=f"unexpectedly installed distributions: {unexpected}",
         )
     _LOGGER.info(
-        "[cells] %s: core install stays lightweight (no pyarrow/dash)", profile
+        "[cells] %s: core install stays lightweight (analysis extra absent: %s)",
+        profile,
+        ",".join(expectations.analysis_extra_deps),
     )
 
 
@@ -1989,7 +2038,9 @@ def run_cell(
             venv_dir, venv_python, cell_dir, expectations, profile=plan.profile
         )
         _run_library_surfaces(venv_python, cell_dir, profile=plan.profile)
-        _run_core_light_assertion(venv_python, cell_dir, profile=plan.profile)
+        _run_core_light_assertion(
+            venv_python, cell_dir, expectations, profile=plan.profile
+        )
     else:
         _run_analysis_surfaces(
             venv_dir,
