@@ -896,3 +896,32 @@ def test_invalid_budget_rejected(
             module_config_fields=None,
             timeout_sec=bad_timeout,
         )
+
+
+@pytest.mark.unit
+def test_wrong_top_level_response_variant_is_not_readback_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A module-config callback cannot satisfy a local-config readback request."""
+    node = _ScriptedLocalNode()
+
+    def _send_wrong_variant(_message: Any, **kwargs: Any) -> Any:
+        raw = admin_pb2.AdminMessage()
+        raw.get_module_config_response.mqtt.enabled = True
+        kwargs["onResponse"]({"decoded": {"admin": {"raw": raw}}})
+        return SimpleNamespace(id=1)
+
+    monkeypatch.setattr(node, "_send_admin", _send_wrong_variant)
+    _install_clock(monkeypatch, node)
+
+    result = verify_local_config_apply(
+        node,
+        config_fields={"lora": {"hop_limit": 5}},
+        module_config_fields=None,
+        timeout_sec=0.2,
+    )
+
+    assert result.status is LocalApplyStatus.RELOAD_FAILED
+    assert result.missing_sections == ("lora",)
+    assert node.moduleConfig.HasField("mqtt")
+    assert not node.localConfig.HasField("lora")
