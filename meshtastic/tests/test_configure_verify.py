@@ -14,6 +14,36 @@ from meshtastic.configure_verify import (
 from meshtastic.protobuf import apponly_pb2, channel_pb2, config_pb2, localonly_pb2
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("use_preset", [False, True])
+@pytest.mark.parametrize("coding_rate", [0, 5, 6])
+def test_channel_url_verification_accepts_preset_derived_values(
+    use_preset: bool, coding_rate: int
+) -> None:
+    """Preset-derived scalars can change during a device configuration round-trip."""
+    requested = apponly_pb2.ChannelSet()
+    requested.settings.add(name="test", psk=b"\x01")
+    requested.lora_config.use_preset = use_preset
+    requested.lora_config.hop_limit = 3
+    device = apponly_pb2.ChannelSet()
+    device.CopyFrom(requested)
+    device.lora_config.spread_factor = 11
+    device.lora_config.bandwidth = 250
+    device.lora_config.coding_rate = coding_rate
+
+    def _url(channel_set: apponly_pb2.ChannelSet) -> str:
+        encoded = base64.urlsafe_b64encode(channel_set.SerializeToString()).decode()
+        return f"https://meshtastic.org/e/#{encoded}"
+
+    requested_bytes = requested.SerializeToString()
+    device_bytes = device.SerializeToString()
+    assert _verify_channel_url_match(_url(requested), _url(device)) is (
+        use_preset and coding_rate in (0, 5)
+    )
+    assert requested.SerializeToString() == requested_bytes
+    assert device.SerializeToString() == device_bytes
+
+
 def _make_channel_url(
     settings_list: list[channel_pb2.ChannelSettings],
     *,

@@ -22,10 +22,11 @@ from meshtastic.node_runtime.admin_wait import (
 from meshtastic.node_runtime.settings_runtime.message import (  # pylint: disable=no-name-in-module
     _NodeSettingsMessageBuilder,
 )
-from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2
+from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2, config_pb2
 
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
+_LORA_DEFAULT_CODING_RATE = 5
 
 
 def _neighbor_info_effective_default_equivalence(
@@ -400,9 +401,21 @@ def _lora_config_match(
                 dev_has_lora,
             )
         return False
-    if req_has_lora and (
-        req.lora_config.SerializeToString() != dev.lora_config.SerializeToString()
-    ):
+    requested = config_pb2.Config.LoRaConfig()
+    requested.CopyFrom(req.lora_config)
+    device = config_pb2.Config.LoRaConfig()
+    device.CopyFrom(dev.lora_config)
+    if requested.use_preset and device.use_preset:
+        # Presets own bandwidth and spread factor. Firmware can materialize
+        # these ignored scalars when storing a config. Coding rate remains
+        # significant because it can raise a preset's rate; only its zero
+        # default and the minimum rate of 4/5 are equivalent for all presets.
+        for lora in (requested, device):
+            lora.ClearField("bandwidth")
+            lora.ClearField("spread_factor")
+            if lora.coding_rate == 0:
+                lora.coding_rate = _LORA_DEFAULT_CODING_RATE
+    if req_has_lora and requested.SerializeToString() != device.SerializeToString():
         if emit_warnings:
             logger.warning(
                 "Channel URL verification: lora_config differs between requested and device URLs."
