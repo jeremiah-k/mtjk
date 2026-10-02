@@ -165,6 +165,13 @@ The CLI niceties (`segno` for `--qr`, `print-color`, `argcomplete`,
 CLI, including QR rendering. The `cli` extra is still accepted as a
 no-op, so `mtjk[cli]` keeps working for existing scripts.
 
+`--qr`, `--qr-all`, and `--qr-contact` use compact Unicode blocks.
+Interactive output selects the strongest error correction that fits the
+terminal while preserving the QR quiet zone. If no complete code fits,
+enlarge the terminal or open the displayed URL. Redirected output keeps
+maximum error correction; output encodings without block glyphs use ANSI
+rendering.
+
 Python code continues to use the familiar imports:
 
 ```python
