@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-import re
+import io
+import math
+import os
+import sys
 
 import pytest
 
 from meshtastic.cli import qr as cli_qr
 
-# Characters that may appear in segno's ANSI terminal rendering:
-# escape sequences (ESC [ <digits> m), spaces, and newlines.
-_TERMINAL_ALLOWED_CHARS = set(" \n\x1b[0123456789m")
+# Compact output packs two module rows into each terminal row.
+_TERMINAL_ALLOWED_CHARS = set(" \n▀▄█")
 
-# ANSI color/control sequences (e.g. "\x1b[7m", "\x1b[0m").
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+@pytest.fixture(autouse=True)
+def _redirected_utf8_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep terminal-size policy independent of the test runner screen."""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
 
 
 @pytest.fixture
@@ -63,8 +68,8 @@ def test_renderTerminalQr_pins_segno_parameters(
     terminal_calls: list[dict[str, object]] = []
 
     class _StubCode:
-        def terminal(self, *, out: object, border: int) -> None:
-            terminal_calls.append({"out": out, "border": border})
+        def terminal(self, *, out: object, border: int, compact: bool) -> None:
+            terminal_calls.append({"out": out, "border": border, "compact": compact})
             out.write("<stub-terminal-qr>\n")  # type: ignore[attr-defined]
 
     class _StubSegno:
@@ -89,6 +94,7 @@ def test_renderTerminalQr_pins_segno_parameters(
     assert len(terminal_calls) == 1
     assert terminal_calls[0]["border"] == cli_qr.QR_BORDER_MODULES
     assert terminal_calls[0]["border"] == 4
+    assert terminal_calls[0]["compact"] is True
 
 
 @pytest.mark.unit
@@ -105,7 +111,7 @@ def test_renderTerminalQr_raises_without_segno(
 @pytest.mark.unit
 @pytest.mark.usefixtures("_require_segno")
 def test_renderTerminalQr_output_is_terminal_text() -> None:
-    """Rendered output should be newline-terminated ANSI terminal text.
+    """Rendered output should be newline-terminated compact terminal text.
 
     Do not assert exact matrix bytes: valid QR mask choices may differ between
     library versions. Structure (row count, charset) is the stable contract.
@@ -140,15 +146,16 @@ def test_renderTerminalQr_matches_full_qr_geometry() -> None:
     module_cols = len(code.matrix[0])
     quiet = 2 * cli_qr.QR_BORDER_MODULES
     lines = rendered.splitlines()
-    assert len(lines) == module_rows + quiet
+    assert len(lines) == math.ceil((module_rows + quiet) / 2)
 
-    # Two terminal columns per module (segno doubles width for terminal
-    # aspect ratio): after stripping ANSI escapes, every row must span the
-    # full quiet-zoned code width, so a rendering that dropped or doubled
-    # columns would fail here.
-    stripped = [re.sub(_ANSI_ESCAPE_RE, "", line) for line in lines]
-    assert {len(line) for line in stripped} == {2 * (module_cols + quiet)}
-    assert all(line for line in stripped)
+    assert {len(line) for line in lines} == {module_cols + quiet}
+    # Recover every module, including the complete quiet zone, from the blocks.
+    pixels = {" ": (1, 1), "▀": (0, 1), "▄": (1, 0), "█": (0, 0)}
+    decoded = []
+    for line in lines:
+        decoded.extend([[pixels[char][half] for char in line] for half in (0, 1)])
+    expected = [list(row) for row in code.matrix_iter(border=4)]
+    assert decoded[: len(expected)] == expected
 
 
 @pytest.mark.unit
@@ -165,3 +172,126 @@ def test_renderTerminalQr_uses_high_error_correction() -> None:
         boost_error=False,
     )
     assert code.error == "H"
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_require_segno")
+@pytest.mark.parametrize("level", ["H", "Q", "M", "L"])
+@pytest.mark.parametrize("limiting_dimension", ["columns", "rows"])
+def test_qr_selects_highest_error_correction_that_fits(
+    monkeypatch: pytest.MonkeyPatch, level: str, limiting_dimension: str
+) -> None:
+    """Adapt dense URLs without wrapping or removing the quiet zone."""
+    import segno
+
+    value = "https://meshtastic.org/e/#" + "aZ012bcD" * 30
+    code = segno.make(value, error=level, micro=False, boost_error=False)
+    width, height = (int(size) for size in code.symbol_size(border=4))
+    rows = math.ceil(height / 2) + 4
+    if limiting_dimension == "columns":
+        rows = 200
+    else:
+        width = 200
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((width, rows))
+    )
+    rendered = cli_qr.renderTerminalQr(value)
+    expected = io.StringIO()
+    code.terminal(out=expected, border=4, compact=True)
+    assert rendered == expected.getvalue()
+    assert max(map(len, rendered.splitlines())) <= width
+    assert len(rendered.splitlines()) <= rows - 4
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_require_segno")
+def test_qr_explains_when_no_complete_code_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tiny terminal should get a usable instruction instead of wrapped modules."""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((10, 10))
+    )
+    rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
+    assert "Widen" in rendered
+    assert "URL" in rendered
+    assert not set("▀▄█") & set(rendered)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_require_segno")
+def test_qr_falls_back_for_ascii_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The compact renderer must not crash on terminals without block glyphs."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        cli_qr.sys, "stdout", SimpleNamespace(encoding="ascii", isatty=lambda: False)
+    )
+    rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
+    assert "\x1b[" in rendered
+    rendered.encode("ascii")
+
+
+@pytest.mark.unit
+def test_qr_retries_lower_error_correction_after_capacity_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive rendering should try lower correction after capacity overflow."""
+    calls: list[str] = []
+
+    class _StubCode:
+        def symbol_size(self, *, border: int) -> tuple[int, int]:
+            assert border == cli_qr.QR_BORDER_MODULES
+            return (20, 20)
+
+        def terminal(self, *, out: object, border: int, compact: bool) -> None:
+            assert border == cli_qr.QR_BORDER_MODULES
+            assert compact is True
+            out.write("<lower-level-qr>\n")  # type: ignore[attr-defined]
+
+    class _CapacityLimitedSegno:
+        @staticmethod
+        def make(
+            _value: str, *, error: str, micro: bool, boost_error: bool
+        ) -> _StubCode:
+            assert micro is False
+            assert boost_error is False
+            calls.append(error)
+            if error in ("H", "Q"):
+                raise ValueError("Data too large")
+            return _StubCode()
+
+    monkeypatch.setattr(cli_qr, "segno", _CapacityLimitedSegno())
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((80, 40))
+    )
+    assert cli_qr.renderTerminalQr("dense-value") == "<lower-level-qr>\n"
+    assert calls == ["H", "Q", "M"]
+
+
+@pytest.mark.unit
+def test_qr_preserves_overflow_when_lowest_error_correction_cannot_encode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Truly oversized data should preserve Segno's overflow exception."""
+    calls: list[str] = []
+
+    class _AlwaysOverflowSegno:
+        @staticmethod
+        def make(_value: str, *, error: str, micro: bool, boost_error: bool) -> object:
+            assert micro is False
+            assert boost_error is False
+            calls.append(error)
+            raise ValueError("Data too large")
+
+    monkeypatch.setattr(cli_qr, "segno", _AlwaysOverflowSegno())
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((200, 200))
+    )
+    with pytest.raises(ValueError, match="Data too large"):
+        cli_qr.renderTerminalQr("too-large")
+    assert calls == ["H", "Q", "M", "L"]
