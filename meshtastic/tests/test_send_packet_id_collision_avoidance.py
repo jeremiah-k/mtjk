@@ -19,6 +19,9 @@ import pytest
 
 import meshtastic.mesh_interface as mesh_interface_module
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.mesh_interface_runtime.request_wait import (
+    RETIRED_WAIT_REQUEST_ID_TTL_SECONDS,
+)
 from meshtastic.node_runtime.admin_wait import WAIT_ATTR_NAK
 
 # Distinct 22-bit random parts used to craft deterministic draws. A generated
@@ -31,6 +34,68 @@ _RANDOM_PART_3 = 0x3C3C3C
 _COLLISION_ID_1 = (_RANDOM_PART_1 << 10) | 1
 _COLLISION_ID_2 = (_RANDOM_PART_2 << 10) | 2
 _FRESH_ID_3 = (_RANDOM_PART_3 << 10) | 3
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize(
+    "send_kwargs",
+    [
+        {},
+        {"wantAck": True},
+        {"wantResponse": True},
+        {"response_wait_attr": WAIT_ATTR_NAK},
+    ],
+)
+def test_retired_request_ids_cannot_receive_a_later_request(
+    monkeypatch: pytest.MonkeyPatch, scoped: bool, send_kwargs: dict[str, Any]
+) -> None:
+    """Retirement quarantines an id even when only its callback was enrolled."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        runtime.add_response_handler(_COLLISION_ID_1, MagicMock(), ack_permitted=False)
+        if scoped:
+            runtime.clear_wait_error(WAIT_ATTR_NAK, request_id=_COLLISION_ID_1)
+        runtime.retire_wait_request(WAIT_ATTR_NAK, request_id=_COLLISION_ID_1)
+        iface.currentPacketId = 0
+        _install_randint_draws(monkeypatch, [_RANDOM_PART_1, _RANDOM_PART_2])
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+        callback = MagicMock()
+        packet = iface._send_pipeline._send_data_with_wait(
+            b"ping", onResponse=callback if not send_kwargs else None, **send_kwargs
+        )
+        assert packet.id == _COLLISION_ID_2
+        runtime.correlate_inbound_response(
+            packet_dict={"decoded": {"requestId": _COLLISION_ID_1}},
+            skip_response_callback_for_decode_failure=False,
+            extract_request_id=iface._extract_request_id_from_packet,
+        )
+        callback.assert_not_called()
+
+
+@pytest.mark.unit
+def test_registration_rejects_retired_id_until_quarantine_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atomic claims reject recently retired ids and permit reuse after expiry."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        runtime.clear_wait_error(WAIT_ATTR_NAK, request_id=77)
+        runtime.retire_wait_request(WAIT_ATTR_NAK, request_id=77)
+        callback = MagicMock()
+        assert not runtime.add_response_handler(
+            77, callback, ack_permitted=False, reject_if_registered=True
+        )
+        assert 77 not in iface.responseHandlers
+        retired_at = iface._retired_wait_request_ids[WAIT_ATTR_NAK][77]
+        monkeypatch.setattr(
+            "meshtastic.mesh_interface_runtime.request_wait.time.monotonic",
+            lambda: retired_at + RETIRED_WAIT_REQUEST_ID_TTL_SECONDS + 1,
+        )
+        assert runtime.add_response_handler(
+            77, callback, ack_permitted=False, reject_if_registered=True
+        )
 
 
 def _install_randint_draws(
@@ -284,8 +349,8 @@ def test_send_data_with_wait_atomic_registration_rejects_late_collision(
         # while the atomic registration lock still sees the actual live handler.
         monkeypatch.setattr(
             iface._send_pipeline,  # noqa: SLF001
-            "_live_response_handlers",
-            lambda: {},
+            "_reserved_response_ids",
+            lambda: set(),
         )
         iface._response_wait_errors[(WAIT_ATTR_NAK, request_id)] = (  # noqa: SLF001
             "existing wait state"
@@ -338,3 +403,99 @@ def test_send_data_with_wait_still_fails_after_all_zero_draws(
             iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
                 b"ping", onResponse=MagicMock()
             )
+
+
+@pytest.mark.unit
+def test_wait_only_send_atomically_rejects_late_handler_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scoped wait must not overwrite a handler that wins after ID selection."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        colliding_id = _COLLISION_ID_1
+        fresh_id = _COLLISION_ID_2
+        old_callback = MagicMock(name="callback-old")
+        old_handler: Any = None
+        original_try_activate = runtime._try_activate_wait_request
+        first_attempt = True
+
+        def _race(acknowledgment_attr: str, request_id: int) -> bool:
+            nonlocal first_attempt, old_handler
+            if first_attempt:
+                first_attempt = False
+                assert request_id == colliding_id
+                assert runtime.add_response_handler(
+                    request_id,
+                    old_callback,
+                    ack_permitted=False,
+                    reject_if_registered=True,
+                )
+                old_handler = iface.responseHandlers[request_id]
+            return original_try_activate(acknowledgment_attr, request_id)
+
+        monkeypatch.setattr(runtime, "_try_activate_wait_request", _race)
+        # The advisory selection view is stale; the atomic wait claim must still
+        # observe the handler installed between selection and registration.
+        monkeypatch.setattr(
+            iface._send_pipeline, "_reserved_response_ids", lambda: set()
+        )
+        iface.currentPacketId = 0
+        _install_randint_draws(monkeypatch, [_RANDOM_PART_1, _RANDOM_PART_2])
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        packet = iface._send_pipeline._send_data_with_wait(
+            b"ping", response_wait_attr=WAIT_ATTR_NAK
+        )
+
+        assert packet.id == fresh_id
+        assert sent == [packet]
+        assert iface.responseHandlers[colliding_id] is old_handler
+        assert iface.responseHandlers[colliding_id].callback is old_callback
+        active_waits = iface._active_wait_request_ids.get(WAIT_ATTR_NAK, set())
+        assert colliding_id not in active_waits
+        assert fresh_id in active_waits
+
+
+@pytest.mark.unit
+def test_wait_only_send_does_not_claim_id_before_packet_fields_validate() -> None:
+    """Packet construction failures must happen before scoped wait registration."""
+    with MeshInterface(noProto=True) as iface:
+        with pytest.raises((TypeError, ValueError)):
+            iface._send_pipeline._send_data_with_wait(
+                b"ping",
+                response_wait_attr=WAIT_ATTR_NAK,
+                replyId=-1,
+            )
+        assert not iface._active_wait_request_ids.get(WAIT_ATTR_NAK)
+
+
+@pytest.mark.unit
+def test_wait_only_send_fails_after_all_atomic_claims_collide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exhausting scoped-wait ID candidates must not create partial wait state."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        constant_random_part = 777
+        for counter in range(1, 12):
+            runtime.add_response_handler(
+                (constant_random_part << 10) | counter,
+                MagicMock(),
+                ack_permitted=False,
+            )
+        iface.currentPacketId = 0
+        _install_randint_draws(monkeypatch, [], fallback=constant_random_part)
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        with pytest.raises(
+            MeshInterface.MeshInterfaceError,
+            match="Failed to generate packet ID not already used",
+        ):
+            iface._send_pipeline._send_data_with_wait(
+                b"ping", response_wait_attr=WAIT_ATTR_NAK
+            )
+
+        assert sent == []
+        assert not iface._active_wait_request_ids.get(WAIT_ATTR_NAK)
