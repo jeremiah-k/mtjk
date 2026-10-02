@@ -32,3 +32,24 @@ def test_host_cli_bounds_device_waits(
         [cli_test_utils.PRIMARY_CLI_NAME, "--host", "localhost:4403", *expected, *args],
         timeout=30,
     )
+
+
+@pytest.mark.unit
+def test_host_cli_failure_reports_the_exact_bounded_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure diagnostics should include the timeout actually passed to the CLI."""
+    monkeypatch.setattr(
+        cli_test_utils,
+        "run_cli_argv_with_timeout",
+        MagicMock(
+            return_value=subprocess.CompletedProcess(
+                [], 1, stdout="", stderr="verification failed"
+            )
+        ),
+    )
+    with pytest.raises(AssertionError) as excinfo:
+        cli_test_utils._run_host_cli_ok("localhost:4403", "--configure", "config.yaml")
+    message = str(excinfo.value)
+    assert "--timeout 5" in message
+    assert "--configure config.yaml" in message
