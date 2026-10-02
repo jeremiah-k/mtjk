@@ -39,7 +39,6 @@ from meshtastic.traceroute import TraceRouteResult
 from meshtastic.util import Acknowledgment, Timeout, stripnl
 
 if TYPE_CHECKING:
-    from meshtastic._response_types import ResponseHandler
     from meshtastic.node import Node
 
 logger = logging.getLogger(__name__)
@@ -162,16 +161,9 @@ class SendPipeline:
         """Return the request wait runtime from the parent interface."""
         return self._port.request_wait_runtime
 
-    def _live_response_handlers(self) -> dict[int, ResponseHandler]:
-        """Return the live request-id-keyed response-handler registrations.
-
-        This is the same mapping the request-wait runtime correlates inbound
-        responses against (the interface's public ``responseHandlers`` dict,
-        which the runtime registers into through its handler factory), so
-        containment checks here mirror the key space used at registration
-        time.
-        """
-        return self._port.facade.responseHandlers
+    def _reserved_response_ids(self) -> set[int]:
+        """Snapshot callback, active-wait, and quarantined correlation ids."""
+        return self._request_wait_runtime._reserved_response_ids()
 
     @property
     def _queue_send_runtime(self) -> _QueueSendRuntime:
@@ -369,10 +361,10 @@ class SendPipeline:
         meshPacket.decoded.want_response = wantResponse
         # Response correlation keys live handlers by request id alone, so any
         # send that can elicit correlated routing/data feedback must not reuse
-        # an id that already owns a callback/matcher. Zero-id regeneration
-        # stays unconditional. Callback-bearing sends then claim the handler id
+        # an id owned by a callback, active wait, or reply quarantine. Zero-id
+        # regeneration stays unconditional. Callback-bearing sends then claim the handler id
         # under the response-state lock so a late registration collision is
-        # rejected before the packet is sent. The checks above are unlocked
+        # rejected before the packet is sent. Selection snapshots are locked
         # advisory reads, and feedback-only sends (no callback) have no
         # registration-time claim, so a concurrent registration between the
         # final check and transmit can still reuse an id for those sends;
@@ -388,7 +380,7 @@ class SendPipeline:
         for _ in range(PACKET_ID_GENERATION_MAX_RETRIES):
             if meshPacket.id != 0 and not (
                 expects_correlated_feedback
-                and meshPacket.id in self._live_response_handlers()
+                and meshPacket.id in self._reserved_response_ids()
             ):
                 break
             meshPacket.id = self._port.generate_packet_id()
@@ -397,11 +389,11 @@ class SendPipeline:
                 raise self._port.error_type("Failed to generate non-zero packet ID")
             if (
                 expects_correlated_feedback
-                and meshPacket.id in self._live_response_handlers()
+                and meshPacket.id in self._reserved_response_ids()
             ):
                 raise self._port.error_type(
                     "Failed to generate packet ID not already used by a live "
-                    "response handler"
+                    "response handler or quarantined request"
                 )
         if replyId is not None:
             meshPacket.decoded.reply_id = replyId
@@ -420,7 +412,7 @@ class SendPipeline:
             )
             if not handler_registered:
                 raise self._port.error_type(
-                    f"Packet id {meshPacket.id} is already used by a live response handler"
+                    f"Packet id {meshPacket.id} is already used by a live response handler or quarantined request"
                 )
         try:
             if response_wait_attr is not None:

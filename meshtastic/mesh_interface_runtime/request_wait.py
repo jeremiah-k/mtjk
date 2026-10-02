@@ -138,13 +138,17 @@ class _RequestWaitRuntime:
         """Register a managed response callback for a request id.
 
         Returns ``False`` without changing state when ``reject_if_registered``
-        is true and the request id already belongs to a live handler.
+        is true and the request id belongs to a callback, active wait, or
+        unexpired reply quarantine.
         """
         now = time.monotonic()
         with self._lock:
             self._prune_stale_response_handlers_locked(now=now)
             response_handlers = self._get_response_handlers()
-            if reject_if_registered and request_id in response_handlers:
+            if (
+                reject_if_registered
+                and request_id in self._reserved_response_ids_locked()
+            ):
                 return False
             response_handler = ResponseHandler(
                 callback=callback,
@@ -166,6 +170,20 @@ class _RequestWaitRuntime:
             else:
                 self._response_feedback_matchers.pop(request_id, None)
         return True
+
+    def _reserved_response_ids_locked(self) -> set[int]:
+        """Snapshot correlation ids, pruning expired quarantine entries."""
+        reserved = set(self._get_response_handlers())
+        for active_ids in self._get_active_wait_request_ids().values():
+            reserved.update(active_ids)
+        for attr in list(self._get_retired_wait_request_ids()):
+            reserved.update(self.prune_retired_wait_request_ids_locked(attr))
+        return reserved
+
+    def _reserved_response_ids(self) -> set[int]:
+        """Return ids owned by callbacks, active waits, or the reply quarantine."""
+        with self._lock:
+            return self._reserved_response_ids_locked()
 
     def drop_response_handler(self, request_id: int) -> None:
         """Remove a response callback registration if present."""
@@ -462,12 +480,13 @@ class _RequestWaitRuntime:
 
             active_request_ids = active_wait_request_ids.get(acknowledgment_attr, set())
             if request_id is not None:
+                retired_request_ids = retired_wait_request_ids.setdefault(
+                    acknowledgment_attr, {}
+                )
+                retired_request_ids[request_id] = time.monotonic()
+                self.prune_retired_wait_request_ids_locked(acknowledgment_attr)
                 if request_id in active_request_ids:
                     active_request_ids.discard(request_id)
-                    retired_request_ids = retired_wait_request_ids.setdefault(
-                        acknowledgment_attr, {}
-                    )
-                    retired_request_ids[request_id] = time.monotonic()
                     if not active_request_ids:
                         active_wait_request_ids.pop(acknowledgment_attr, None)
                         wait_errors.pop(
@@ -485,7 +504,11 @@ class _RequestWaitRuntime:
                 wait_acks.discard((acknowledgment_attr, request_id))
             else:
                 if acknowledgment_attr in active_wait_request_ids:
+                    retired_ids = retired_wait_request_ids.setdefault(
+                        acknowledgment_attr, {}
+                    )
                     for active_request_id in active_request_ids:
+                        retired_ids[active_request_id] = time.monotonic()
                         self._remove_response_handler_locked(active_request_id)
                         wait_errors.pop((acknowledgment_attr, active_request_id), None)
                         wait_acks.discard((acknowledgment_attr, active_request_id))
