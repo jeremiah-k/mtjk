@@ -29,6 +29,21 @@ _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
 _LORA_DEFAULT_CODING_RATE = 5
 
 
+def _lora_default_coding_rate_equivalence(
+    proto_message: Any, field_name: str, requested: Any, actual: Any
+) -> bool:
+    """Accept a preset's zero/default coding rate while preserving higher overrides."""
+    return (
+        isinstance(proto_message, config_pb2.Config.LoRaConfig)
+        and proto_message.use_preset
+        and field_name == "coding_rate"
+        and isinstance(requested, int)
+        and not isinstance(requested, bool)
+        and requested in (0, _LORA_DEFAULT_CODING_RATE)
+        and actual in (0, _LORA_DEFAULT_CODING_RATE)
+    )
+
+
 def _neighbor_info_effective_default_equivalence(
     section_path: str, field_name: str, requested: Any, actual: Any
 ) -> bool:
@@ -245,6 +260,9 @@ def _verify_requested_fields(
                     and not _neighbor_info_effective_default_equivalence(
                         section_path, snake_key, scalar, actual
                     )
+                    and not _lora_default_coding_rate_equivalence(
+                        proto_message, snake_key, scalar, actual
+                    )
                 ):
                     mismatches.append(f"{section_path}.{snake_key}")
     return mismatches
@@ -405,16 +423,20 @@ def _lora_config_match(
     requested.CopyFrom(req.lora_config)
     device = config_pb2.Config.LoRaConfig()
     device.CopyFrom(dev.lora_config)
-    if requested.use_preset and device.use_preset:
-        # Presets own bandwidth and spread factor. Firmware can materialize
-        # these ignored scalars when storing a config. Coding rate remains
-        # significant because it can raise a preset's rate; only its zero
-        # default and the minimum rate of 4/5 are equivalent for all presets.
+    if requested.use_preset == device.use_preset:
+        # Firmware uses exactly one side of the preset/custom modem choice.
+        # The dormant side can still be materialized or preserved across a
+        # round-trip, so compare only fields that affect the effective radio.
         for lora in (requested, device):
-            lora.ClearField("bandwidth")
-            lora.ClearField("spread_factor")
-            if lora.coding_rate == 0:
-                lora.coding_rate = _LORA_DEFAULT_CODING_RATE
+            if lora.use_preset:
+                lora.ClearField("bandwidth")
+                lora.ClearField("spread_factor")
+                # Firmware permits coding-rate overrides above the preset's
+                # rate. Only zero and the default minimum rate are equivalent.
+                if lora.coding_rate == 0:
+                    lora.coding_rate = _LORA_DEFAULT_CODING_RATE
+            else:
+                lora.ClearField("modem_preset")
     if req_has_lora and requested.SerializeToString() != device.SerializeToString():
         if emit_warnings:
             logger.warning(

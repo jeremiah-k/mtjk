@@ -16,7 +16,7 @@ from meshtastic.protobuf import apponly_pb2, channel_pb2, config_pb2, localonly_
 
 @pytest.mark.unit
 @pytest.mark.parametrize("use_preset", [False, True])
-@pytest.mark.parametrize("coding_rate", [0, 5, 6])
+@pytest.mark.parametrize("coding_rate", [0, 5, 6, 8])
 def test_channel_url_verification_accepts_preset_derived_values(
     use_preset: bool, coding_rate: int
 ) -> None:
@@ -40,6 +40,48 @@ def test_channel_url_verification_accepts_preset_derived_values(
     assert _verify_channel_url_match(_url(requested), _url(device)) is (
         use_preset and coding_rate in (0, 5)
     )
+    assert requested.SerializeToString() == requested_bytes
+    assert device.SerializeToString() == device_bytes
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("use_preset", [False, True])
+@pytest.mark.parametrize("coding_rate", [0, 5, 6, 8])
+def test_direct_lora_readback_accepts_only_preset_default_coding_rate(
+    use_preset: bool, coding_rate: int
+) -> None:
+    """A zero preset coding rate can materialize as five without changing the radio."""
+    lora = config_pb2.Config.LoRaConfig(use_preset=use_preset, coding_rate=coding_rate)
+    mismatches = _verify_requested_fields({"codingRate": 0}, lora, "lora")
+    expected_match = coding_rate == 0 or (use_preset and coding_rate == 5)
+    assert mismatches == ([] if expected_match else ["lora.coding_rate"])
+
+
+@pytest.mark.unit
+def test_channel_url_verification_ignores_dormant_preset_in_custom_mode() -> None:
+    """The preset enum is irrelevant while custom modem parameters are active."""
+    requested = apponly_pb2.ChannelSet()
+    requested.settings.add(name="test", psk=b"\x01")
+    requested.lora_config.use_preset = False
+    requested.lora_config.bandwidth = 125
+    requested.lora_config.spread_factor = 7
+    requested.lora_config.coding_rate = 5
+    requested.lora_config.modem_preset = (
+        config_pb2.Config.LoRaConfig.ModemPreset.LONG_FAST
+    )
+    device = apponly_pb2.ChannelSet()
+    device.CopyFrom(requested)
+    device.lora_config.modem_preset = (
+        config_pb2.Config.LoRaConfig.ModemPreset.SHORT_FAST
+    )
+
+    def _url(channel_set: apponly_pb2.ChannelSet) -> str:
+        encoded = base64.urlsafe_b64encode(channel_set.SerializeToString()).decode()
+        return f"https://meshtastic.org/e/#{encoded}"
+
+    requested_bytes = requested.SerializeToString()
+    device_bytes = device.SerializeToString()
+    assert _verify_channel_url_match(_url(requested), _url(device)) is True
     assert requested.SerializeToString() == requested_bytes
     assert device.SerializeToString() == device_bytes
 
