@@ -1,4 +1,4 @@
-.PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
+.PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
 
 POETRY_RUN := poetry run
 API_BASELINE_FILE := meshtastic/tests/api_baselines/api_baseline.json
@@ -74,6 +74,13 @@ smoke1-destructive:
 # local install
 install:
 	poetry install
+
+# build the sdist+wheel from this tree and prove them as installed
+# distributions in isolated consumer venvs (same command as the CI `artifacts`
+# job). Requires: python3 with venv, pip, network for dependency resolution,
+# and `pip install build` for the invoking interpreter.
+check-artifacts:
+	python3 bin/smoke_distributions.py
 
 # generate the docs (for local use)
 # -d numpy: project docstrings use numpy-style parameter sections

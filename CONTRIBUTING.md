@@ -152,6 +152,26 @@ make ci
 
 This runs the same checks as CI (pylint for library code, ruff for tests, mypy, pytest with coverage).
 
+### Artifact smoke gate
+
+`make check-artifacts` (or `python3 bin/smoke_distributions.py`) builds the
+final-candidate sdist and wheel from the current checkout with
+`python -m build`, then proves them as installed distributions in fresh
+isolated consumer venvs: wheel/core, wheel/analysis, sdist/core, sdist/analysis.
+It checks wheel RECORD/metadata/entry-points contents, protobuf roundtrips and
+the `meshtastic.protobuf` namespace plus its compatibility facade, offline CLI
+surfaces (`--version`, `--help`, `--list-fields`, `--describe-field`), and a
+real Feather read plus `mesh-analysis --no-server --slog` run in the analysis
+cells. Any failure exits nonzero with the failing phase, artifact, profile,
+and command.
+
+Prerequisites: a `python3` with the `venv` module, `pip`, network access for
+dependency resolution, and `pip install build` for the interpreter that runs
+the gate. To validate retained artifacts instead of building fresh, pass
+`--dist-dir PATH --skip-build`. `--work-dir PATH` relocates the gate's owned
+scratch workspace (consumer venvs, probes, pip cache) when the default system
+temporary directory is unsuitable.
+
 ### Quality-tool ownership
 
 Trunk is the repository-wide linter orchestrator and the version source for
