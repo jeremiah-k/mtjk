@@ -13,6 +13,7 @@ from meshtastic._branding import PRIMARY_CLI_NAME
 
 EMPTY_SHELL_COMMAND_ERROR = "Empty command passed to CLI shell helper"
 EMPTY_ARGV_COMMAND_ERROR = "Empty command list passed to CLI argv helper"
+HOST_CLI_REQUEST_TIMEOUT_SECONDS = 5
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 
@@ -153,6 +154,25 @@ def run_cli_argv_with_timeout(
     return runCliArgvWithTimeout(cmd, timeout=timeout)
 
 
+def _host_cli_argv(
+    host: str,
+    args: tuple[str, ...],
+    *,
+    timeout: int | float,
+    meshtastic_bin: str,
+) -> list[str]:
+    """Build the exact host CLI argv, including the bounded request timeout."""
+    has_request_timeout = any(
+        arg == "--timeout" or arg.startswith("--timeout=") for arg in args
+    )
+    request_timeout_args = (
+        []
+        if has_request_timeout
+        else ["--timeout", str(min(HOST_CLI_REQUEST_TIMEOUT_SECONDS, timeout))]
+    )
+    return [meshtastic_bin, "--host", host, *request_timeout_args, *args]
+
+
 def _run_host_cli(
     host: str,
     *args: str,
@@ -180,7 +200,7 @@ def _run_host_cli(
         Exit code and combined stdout/stderr output.
     """
     result = run_cli_argv_with_timeout(
-        [meshtastic_bin, "--host", host, *args],
+        _host_cli_argv(host, args, timeout=timeout, meshtastic_bin=meshtastic_bin),
         timeout=timeout,
     )
     return result.returncode, (result.stdout or "") + (result.stderr or "")
@@ -223,8 +243,12 @@ def _run_host_cli_ok(
         timeout=timeout,
         meshtastic_bin=meshtastic_bin,
     )
-    quoted_args = " ".join(shlex.quote(arg) for arg in args)
-    rendered_command = f"{shlex.quote(meshtastic_bin)} --host {shlex.quote(host)} {quoted_args}".strip()
+    rendered_command = " ".join(
+        shlex.quote(arg)
+        for arg in _host_cli_argv(
+            host, args, timeout=timeout, meshtastic_bin=meshtastic_bin
+        )
+    )
     assert returncode == 0, (
         f"Command failed (rc={returncode}) on {host}\n"
         f"Command: {rendered_command}\n"

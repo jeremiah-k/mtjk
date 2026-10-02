@@ -152,7 +152,8 @@ def test_meshtasticd_export_and_configure_roundtrip(
                 str(mutated_path),
                 meshtastic_bin=meshtastic_bin,
             )
-            assert "Writing modified configuration to device" in configure_output
+            assert "Configuration transaction committed." in configure_output
+            assert "all requested settings were verified." in configure_output
 
             _wait_for_host_ready(HOST, meshtastic_bin)
             info_output = _run_host_cli_ok(
@@ -179,7 +180,8 @@ def test_meshtasticd_export_and_configure_roundtrip(
                     str(export_path),
                     meshtastic_bin=meshtastic_bin,
                 )
-                assert "Writing modified configuration to device" in restore_output
+                assert "Configuration transaction committed." in restore_output
+                assert "all requested settings were verified." in restore_output
                 _wait_for_host_ready(HOST, meshtastic_bin)
             except Exception:
                 if original_exc is not None:
