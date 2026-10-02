@@ -22,10 +22,26 @@ from meshtastic.node_runtime.admin_wait import (
 from meshtastic.node_runtime.settings_runtime.message import (  # pylint: disable=no-name-in-module
     _NodeSettingsMessageBuilder,
 )
-from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2
+from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2, config_pb2
 
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
+_LORA_DEFAULT_CODING_RATE = 5
+
+
+def _lora_default_coding_rate_equivalence(
+    proto_message: Any, field_name: str, requested: Any, actual: Any
+) -> bool:
+    """Accept a preset's zero/default coding rate while preserving higher overrides."""
+    return (
+        isinstance(proto_message, config_pb2.Config.LoRaConfig)
+        and proto_message.use_preset
+        and field_name == "coding_rate"
+        and isinstance(requested, int)
+        and not isinstance(requested, bool)
+        and requested in (0, _LORA_DEFAULT_CODING_RATE)
+        and actual in (0, _LORA_DEFAULT_CODING_RATE)
+    )
 
 
 def _neighbor_info_effective_default_equivalence(
@@ -244,6 +260,9 @@ def _verify_requested_fields(
                     and not _neighbor_info_effective_default_equivalence(
                         section_path, snake_key, scalar, actual
                     )
+                    and not _lora_default_coding_rate_equivalence(
+                        proto_message, snake_key, scalar, actual
+                    )
                 ):
                     mismatches.append(f"{section_path}.{snake_key}")
     return mismatches
@@ -400,9 +419,25 @@ def _lora_config_match(
                 dev_has_lora,
             )
         return False
-    if req_has_lora and (
-        req.lora_config.SerializeToString() != dev.lora_config.SerializeToString()
-    ):
+    requested = config_pb2.Config.LoRaConfig()
+    requested.CopyFrom(req.lora_config)
+    device = config_pb2.Config.LoRaConfig()
+    device.CopyFrom(dev.lora_config)
+    if requested.use_preset == device.use_preset:
+        # Firmware uses exactly one side of the preset/custom modem choice.
+        # The dormant side can still be materialized or preserved across a
+        # round-trip, so compare only fields that affect the effective radio.
+        for lora in (requested, device):
+            if lora.use_preset:
+                lora.ClearField("bandwidth")
+                lora.ClearField("spread_factor")
+                # Firmware permits coding-rate overrides above the preset's
+                # rate. Only zero and the default minimum rate are equivalent.
+                if lora.coding_rate == 0:
+                    lora.coding_rate = _LORA_DEFAULT_CODING_RATE
+            else:
+                lora.ClearField("modem_preset")
+    if req_has_lora and requested.SerializeToString() != device.SerializeToString():
         if emit_warnings:
             logger.warning(
                 "Channel URL verification: lora_config differs between requested and device URLs."
