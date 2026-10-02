@@ -314,7 +314,7 @@ def test_combined_set_then_configure_verifies_each_stage(
 
     node.writeConfig = MagicMock(side_effect=_record_write)
 
-    def _device_send_admin(message: Any, **_kwargs: Any) -> None:
+    def _device_send_admin(message: Any, **kwargs: Any) -> None:
         """Model the device answering the set-stage readback from device truth."""
         variant = message.WhichOneof("payload_variant")
         if variant != "get_config_request":
@@ -325,6 +325,11 @@ def test_combined_set_then_configure_verifies_each_stage(
         node.localConfig.ClearField(section)
         if cast(Any, device_truth).HasField(section):
             getattr(node.localConfig, section).CopyFrom(getattr(device_truth, section))
+            response = admin_pb2.AdminMessage()
+            getattr(response.get_config_response, section).CopyFrom(
+                getattr(device_truth, section)
+            )
+            kwargs["onResponse"]({"decoded": {"admin": {"raw": response}}})
 
     node._send_admin = MagicMock(side_effect=_device_send_admin)
     original_begin = node.beginSettingsTransaction

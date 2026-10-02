@@ -18,6 +18,7 @@ from meshtastic.configure_verify import (
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.mesh_interface_runtime.request_wait import _RequestWaitRuntime
 from meshtastic.protobuf import (
+    admin_pb2,
     config_pb2,
     localonly_pb2,
     module_config_pb2,
@@ -52,6 +53,7 @@ class _ScriptedLocalNode:
         self.legacy_requests: list[Any] = []
         self.fail_next_send: Exception | None = None
         self._next_packet_id = 0
+        self._response_callback: Any = None
         self._replies: list[tuple[float | None, str, str, Any]] = []
 
     # test helpers ---------------------------------------------------------
@@ -73,7 +75,7 @@ class _ScriptedLocalNode:
         for reply in self._replies:
             due_at, root_attr, section_snake, payload = reply
             if due_at is not None and due_at <= now:
-                getattr(getattr(self, root_attr), section_snake).CopyFrom(payload)
+                self._deliver_reply(root_attr, section_snake, payload)
             else:
                 pending.append(reply)
         self._replies = pending
@@ -84,16 +86,35 @@ class _ScriptedLocalNode:
         for reply in self._replies:
             due_at, root_attr, section_snake, payload = reply
             if due_at is None:
-                getattr(getattr(self, root_attr), section_snake).CopyFrom(payload)
+                self._deliver_reply(root_attr, section_snake, payload)
             else:
                 pending.append(reply)
         self._replies = pending
 
     # node surface ---------------------------------------------------------
 
+    def _deliver_reply(self, root_attr: str, section: str, payload: Any) -> None:
+        raw = admin_pb2.AdminMessage()
+        variant = (
+            "get_config_response"
+            if root_attr == "localConfig"
+            else "get_module_config_response"
+        )
+        getattr(getattr(raw, variant), section).CopyFrom(payload)
+        callback = self._response_callback or self.onResponseRequestSettings
+        callback({"decoded": {"admin": {"raw": raw}}})
+
     def onResponseRequestSettings(self, packet: Any) -> None:
         """Record the packets the send machinery routes to the handler."""
         self.handler_packets.append(packet)
+        raw = packet["decoded"]["admin"]["raw"]
+        for variant, root_attr in (
+            ("get_config_response", "localConfig"),
+            ("get_module_config_response", "moduleConfig"),
+        ):
+            config = getattr(raw, variant)
+            for field, payload in config.ListFields():
+                getattr(getattr(self, root_attr), field.name).CopyFrom(payload)
 
     def _send_admin(self, message: Any, **kwargs: Any) -> Any:
         """Transport seam: register the handler, record, deliver replies.
@@ -106,7 +127,6 @@ class _ScriptedLocalNode:
             failure, self.fail_next_send = self.fail_next_send, None
             raise failure
         self.sent_admin.append((message, kwargs))
-        self.apply_immediate_replies()
         self._next_packet_id += 1
         request_id = self._next_packet_id
         runtime = getattr(self.iface, "_request_wait_runtime", None)
@@ -114,6 +134,8 @@ class _ScriptedLocalNode:
             runtime.add_response_handler(
                 request_id, kwargs["onResponse"], ack_permitted=False
             )
+        self._response_callback = kwargs["onResponse"]
+        self.apply_immediate_replies()
         return SimpleNamespace(id=request_id)
 
     def requestConfig(self, field_desc: Any) -> None:
@@ -521,9 +543,9 @@ def test_late_reply_cannot_flip_decided_reload_failed(
 
     assert result.status is LocalApplyStatus.RELOAD_FAILED
     assert clock.elapsed <= 0.3
-    # The late reply lands after the operation already decided.
+    # Retired callbacks cannot apply a late reply to the node cache.
     node.apply_due_replies(99.0)
-    assert node.localConfig.HasField("lora")
+    assert not node.localConfig.HasField("lora")
     assert result.status is LocalApplyStatus.RELOAD_FAILED
 
 
@@ -831,8 +853,7 @@ def test_readback_send_enrolls_no_scoped_wait_and_bounded_by_budget() -> None:
     assert "responseWaitAttr" not in kwargs
     assert kwargs["wantResponse"] is True
     handler = kwargs["onResponse"]
-    assert handler == node.onResponseRequestSettings
-    assert getattr(handler, "__self__", None) is node
+    assert callable(handler)
     assert message.get_config_request == 5  # LORA_CONFIG
     assert node.legacy_requests == []
 
