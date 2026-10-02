@@ -26,6 +26,7 @@ from meshtastic.transport_retry import (
 
 DEFAULT_TCP_PORT = 4403
 TCP_CLOSE_DRAIN_TIMEOUT_SECONDS = 0.25
+TCP_CLOSE_DRAIN_BUFFER_BYTES = 4096
 TCP_IO_EXCEPTIONS: tuple[type[BaseException], ...] = (
     OSError,
     ValueError,
@@ -341,27 +342,53 @@ class TCPInterface(StreamInterface):
         logger.debug("Closing TCP stream")
         # Request shutdown using StreamInterface shared cleanup and then perform
         # TCP-specific socket teardown before joining the reader thread.
-        self._shared_close()
+        try:
+            self._shared_close()
+        finally:
+            self._close_socket_and_join_reader()
+
+    def _close_socket_and_join_reader(self) -> None:
+        """Release the TCP handle even when shared close cleanup fails."""
         with self._reconnect_lock:
             sock = self.socket
             self.socket = None
-        if sock is not None:
-            # Closing with unread data can discard the final write on some
-            # platforms. Preserve the send-side FIN before disposing of the
-            # socket, while bounding the wait for a peer that never closes.
-            with contextlib.suppress(OSError):
-                sock.shutdown(socket.SHUT_WR)
-            rx_thread = getattr(self, "_rxThread", None)
-            if (
-                rx_thread is not None
-                and rx_thread is not threading.current_thread()
-                and rx_thread.is_alive()
-            ):
-                rx_thread.join(timeout=TCP_CLOSE_DRAIN_TIMEOUT_SECONDS)
-        self._close_socket_handle(sock)
+        try:
+            if sock is not None:
+                deadline = time.monotonic() + TCP_CLOSE_DRAIN_TIMEOUT_SECONDS
+                with contextlib.suppress(OSError):
+                    sock.shutdown(socket.SHUT_WR)
+                rx_thread = getattr(self, "_rxThread", None)
+                if (
+                    rx_thread is not None
+                    and rx_thread is not threading.current_thread()
+                    and rx_thread.is_alive()
+                ):
+                    rx_thread.join(timeout=TCP_CLOSE_DRAIN_TIMEOUT_SECONDS)
+                # The normal reader stops on shutdown intent, often leaving
+                # buffered bytes. Consume them without publishing callbacks,
+                # but never race another reader or extend the close budget.
+                if (
+                    rx_thread is None
+                    or rx_thread is threading.current_thread()
+                    or not rx_thread.is_alive()
+                ):
+                    self._drain_closing_socket(sock, deadline=deadline)
+        finally:
+            self._close_socket_handle(sock)
+            # Unblock a reader that outlived the graceful close window.
+            self._join_reader_thread()
 
-        # Join after socket teardown so a blocking recv() can exit promptly.
-        self._join_reader_thread()
+    @staticmethod
+    def _drain_closing_socket(sock: socket.socket, *, deadline: float) -> None:
+        """Discard pending input until EOF or the shared close deadline."""
+        try:
+            while (remaining := deadline - time.monotonic()) > 0:
+                readable, _, _ = select.select([sock], [], [], remaining)
+                if not readable or not sock.recv(TCP_CLOSE_DRAIN_BUFFER_BYTES):
+                    break
+        except TCP_IO_EXCEPTIONS:
+            # The reader or another shutdown path may have closed the handle.
+            pass
 
     def connect(self) -> None:
         """Ensure socket availability, then run shared StreamInterface startup.

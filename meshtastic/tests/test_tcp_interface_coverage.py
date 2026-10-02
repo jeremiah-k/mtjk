@@ -1245,8 +1245,9 @@ def test_TCPInterface_close_exception_from_shared_close_propagates() -> None:
                 with pytest.raises(RuntimeError, match="Shared close failed"):
                     iface.close()
 
-            # Socket should NOT be closed because exception propagated before teardown
-            mock_socket.close.assert_not_called()
+            # Cleanup errors must propagate after releasing the socket.
+            mock_socket.close.assert_called_once()
+            assert iface.socket is None
         finally:
             pass
 
