@@ -403,3 +403,99 @@ def test_send_data_with_wait_still_fails_after_all_zero_draws(
             iface._send_pipeline._send_data_with_wait(  # noqa: SLF001
                 b"ping", onResponse=MagicMock()
             )
+
+
+@pytest.mark.unit
+def test_wait_only_send_atomically_rejects_late_handler_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scoped wait must not overwrite a handler that wins after ID selection."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        colliding_id = _COLLISION_ID_1
+        fresh_id = _COLLISION_ID_2
+        old_callback = MagicMock(name="callback-old")
+        old_handler: Any = None
+        original_try_activate = runtime._try_activate_wait_request
+        first_attempt = True
+
+        def _race(acknowledgment_attr: str, request_id: int) -> bool:
+            nonlocal first_attempt, old_handler
+            if first_attempt:
+                first_attempt = False
+                assert request_id == colliding_id
+                assert runtime.add_response_handler(
+                    request_id,
+                    old_callback,
+                    ack_permitted=False,
+                    reject_if_registered=True,
+                )
+                old_handler = iface.responseHandlers[request_id]
+            return original_try_activate(acknowledgment_attr, request_id)
+
+        monkeypatch.setattr(runtime, "_try_activate_wait_request", _race)
+        # The advisory selection view is stale; the atomic wait claim must still
+        # observe the handler installed between selection and registration.
+        monkeypatch.setattr(
+            iface._send_pipeline, "_reserved_response_ids", lambda: set()
+        )
+        iface.currentPacketId = 0
+        _install_randint_draws(monkeypatch, [_RANDOM_PART_1, _RANDOM_PART_2])
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        packet = iface._send_pipeline._send_data_with_wait(
+            b"ping", response_wait_attr=WAIT_ATTR_NAK
+        )
+
+        assert packet.id == fresh_id
+        assert sent == [packet]
+        assert iface.responseHandlers[colliding_id] is old_handler
+        assert iface.responseHandlers[colliding_id].callback is old_callback
+        active_waits = iface._active_wait_request_ids.get(WAIT_ATTR_NAK, set())
+        assert colliding_id not in active_waits
+        assert fresh_id in active_waits
+
+
+@pytest.mark.unit
+def test_wait_only_send_does_not_claim_id_before_packet_fields_validate() -> None:
+    """Packet construction failures must happen before scoped wait registration."""
+    with MeshInterface(noProto=True) as iface:
+        with pytest.raises((TypeError, ValueError)):
+            iface._send_pipeline._send_data_with_wait(
+                b"ping",
+                response_wait_attr=WAIT_ATTR_NAK,
+                replyId=-1,
+            )
+        assert not iface._active_wait_request_ids.get(WAIT_ATTR_NAK)
+
+
+@pytest.mark.unit
+def test_wait_only_send_fails_after_all_atomic_claims_collide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exhausting scoped-wait ID candidates must not create partial wait state."""
+    with MeshInterface(noProto=True) as iface:
+        runtime = iface._request_wait_runtime
+        constant_random_part = 777
+        for counter in range(1, 12):
+            runtime.add_response_handler(
+                (constant_random_part << 10) | counter,
+                MagicMock(),
+                ack_permitted=False,
+            )
+        iface.currentPacketId = 0
+        _install_randint_draws(monkeypatch, [], fallback=constant_random_part)
+        sent: list[Any] = []
+        _install_capture_send(monkeypatch, iface, sent)
+
+        with pytest.raises(
+            MeshInterface.MeshInterfaceError,
+            match="Failed to generate packet ID not already used",
+        ):
+            iface._send_pipeline._send_data_with_wait(
+                b"ping", response_wait_attr=WAIT_ATTR_NAK
+            )
+
+        assert sent == []
+        assert not iface._active_wait_request_ids.get(WAIT_ATTR_NAK)

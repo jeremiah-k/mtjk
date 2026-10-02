@@ -165,6 +165,14 @@ class SendPipeline:
         """Snapshot callback, active-wait, and quarantined correlation ids."""
         return self._request_wait_runtime._reserved_response_ids()
 
+    def _try_activate_wait_request(
+        self, acknowledgment_attr: str, request_id: int
+    ) -> bool:
+        """Atomically reserve a fresh request id for a scoped wait."""
+        return self._request_wait_runtime._try_activate_wait_request(
+            acknowledgment_attr, request_id
+        )
+
     @property
     def _queue_send_runtime(self) -> _QueueSendRuntime:
         """Return the queue send runtime from the parent interface."""
@@ -376,18 +384,35 @@ class SendPipeline:
             or wantResponse
             or response_wait_attr is not None
         )
+        wait_request_registered = False
         meshPacket.id = self._port.generate_packet_id()
         for _ in range(PACKET_ID_GENERATION_MAX_RETRIES):
-            if meshPacket.id != 0 and not (
-                expects_correlated_feedback
-                and meshPacket.id in self._reserved_response_ids()
-            ):
-                break
+            if meshPacket.id != 0:
+                if response_wait_attr is not None and onResponse is None:
+                    wait_request_registered = self._try_activate_wait_request(
+                        response_wait_attr, meshPacket.id
+                    )
+                    if wait_request_registered:
+                        break
+                elif not (
+                    expects_correlated_feedback
+                    and meshPacket.id in self._reserved_response_ids()
+                ):
+                    break
             meshPacket.id = self._port.generate_packet_id()
         else:
             if meshPacket.id == 0:
                 raise self._port.error_type("Failed to generate non-zero packet ID")
-            if (
+            if response_wait_attr is not None and onResponse is None:
+                wait_request_registered = self._try_activate_wait_request(
+                    response_wait_attr, meshPacket.id
+                )
+                if not wait_request_registered:
+                    raise self._port.error_type(
+                        "Failed to generate packet ID not already used by a live "
+                        "response handler or quarantined request"
+                    )
+            elif (
                 expects_correlated_feedback
                 and meshPacket.id in self._reserved_response_ids()
             ):
@@ -395,9 +420,14 @@ class SendPipeline:
                     "Failed to generate packet ID not already used by a live "
                     "response handler or quarantined request"
                 )
-        if replyId is not None:
-            meshPacket.decoded.reply_id = replyId
-        meshPacket.priority = priority
+        try:
+            if replyId is not None:
+                meshPacket.decoded.reply_id = replyId
+            meshPacket.priority = priority
+        except (TypeError, ValueError, OverflowError):
+            if wait_request_registered and response_wait_attr is not None:
+                self._retire_wait_request(response_wait_attr, request_id=meshPacket.id)
+            raise
 
         handler_registered = False
         if onResponse is not None:
@@ -415,7 +445,7 @@ class SendPipeline:
                     f"Packet id {meshPacket.id} is already used by a live response handler or quarantined request"
                 )
         try:
-            if response_wait_attr is not None:
+            if response_wait_attr is not None and not wait_request_registered:
                 self._clear_wait_error(response_wait_attr, request_id=meshPacket.id)
             return self._port.send_packet(
                 meshPacket,
