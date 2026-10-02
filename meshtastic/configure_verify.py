@@ -7,6 +7,7 @@ import dataclasses
 import enum
 import logging
 import math
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, cast
@@ -21,7 +22,7 @@ from meshtastic.node_runtime.admin_wait import (
 from meshtastic.node_runtime.settings_runtime.message import (  # pylint: disable=no-name-in-module
     _NodeSettingsMessageBuilder,
 )
-from meshtastic.protobuf import apponly_pb2, channel_pb2
+from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2
 
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
@@ -556,7 +557,12 @@ def _verification_poll_interval(target_node: Any) -> float:
 
 
 def _wait_for_section_reload_under_deadline(
-    target_node: Any, proto_config: Any, section_snake: str, *, deadline: float
+    target_node: Any,
+    proto_config: Any,
+    section_snake: str,
+    *,
+    deadline: float,
+    response_received: threading.Event | None = None,
 ) -> bool:
     """Wait for one section to reappear, bounded by a shared monotonic deadline.
 
@@ -575,6 +581,8 @@ def _wait_for_section_reload_under_deadline(
         Snake-case name of the cleared section being re-requested.
     deadline : float
         Operation-wide ``time.monotonic()`` deadline.
+    response_received : threading.Event | None
+        Optional completion signal set after a correlated payload is copied.
 
     Returns
     -------
@@ -586,15 +594,21 @@ def _wait_for_section_reload_under_deadline(
     if not callable(has_field):
         return True
     probe = _SectionReloadProbe(cast(Callable[[str], bool], has_field), section_snake)
+
+    def _received() -> bool:
+        return (
+            response_received is None or response_received.is_set()
+        ) and probe.is_set()
+
     poll_interval = _verification_poll_interval(target_node)
     while time.monotonic() < deadline:
-        if probe.is_set():
+        if _received():
             return True
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         time.sleep(min(poll_interval, remaining))
-    return probe.is_set()
+    return _received()
 
 
 def _reload_requested_sections(
@@ -718,7 +732,10 @@ def _send_refresh_request_via_request_config(
 
 
 def _send_section_refresh_request(
-    target_node: Any, field_desc: Any
+    target_node: Any,
+    field_desc: Any,
+    *,
+    on_response: Callable[[dict[str, Any]], Any] | None = None,
 ) -> tuple[bool, int | None]:
     """Send one bounded section readback without enrolling a scoped wait.
 
@@ -739,6 +756,8 @@ def _send_section_refresh_request(
         Node whose configuration is re-requested.
     field_desc : Any
         Field descriptor of the section to re-request.
+    on_response : Callable[[dict[str, Any]], Any] | None
+        Optional operation-owned callback used to capture readback evidence.
 
     Returns
     -------
@@ -746,7 +765,8 @@ def _send_section_refresh_request(
         Whether a request was issued and the sent request id for caller
         retirement (``None`` on the fallback path).
     """
-    on_response = getattr(target_node, "onResponseRequestSettings", None)
+    if on_response is None:
+        on_response = getattr(target_node, "onResponseRequestSettings", None)
     if callable(on_response) and callable(getattr(target_node, "_send_admin", None)):
         message = _NodeSettingsMessageBuilder(target_node).build_request_message(
             field_desc
@@ -1029,8 +1049,8 @@ def verify_local_config_apply(
 
     For every requested section the node's cached section is cleared, a
     fresh ``requestConfig`` is sent, and the operation waits for the device
-    to repopulate the section (``HasField``) before comparing requested
-    values against the fresh device state. Cached or staged values alone are
+    to return that section before comparing requested values against the
+    captured device state. Cached or staged values alone are
     never accepted as evidence: a section that stays cleared (for example
     because firmware silently dropped the preceding write) yields
     ``RELOAD_FAILED`` even when the cleared cache previously held the
@@ -1054,26 +1074,17 @@ def verify_local_config_apply(
     private send seams: there the node's wait owner bounds the wait, not
     this budget.
 
-    Correlation strength and limits: on the real transport the section
-    response is applied by the response handler registered for the sent
-    request id, further gated by the admin response contract (response
-    variant and source must match, including the local-only source-0
-    allowance), so presence is normally satisfied only by a reply belonging
-    to this operation's own request. A stale or duplicate reply that still
-    matches the contract can in principle satisfy the presence probe; if it
-    carries different values the operation reports ``MISMATCH`` rather than
-    a false success, and a stale-but-identical reply is value-equivalent
-    evidence of the same device state. Wrong-source or wrong-variant replies
-    never repopulate the probed section through the registered handler, so
-    they cannot produce ``VERIFIED`` beyond what presence plus value
-    comparison already proves.
+    Correlation: each readback callback captures its requested section from
+    the reply payload into an operation-owned snapshot. The transport gates
+    delivery by request id, response variant and source (including the
+    local-only source-0 allowance). Replies to other settings requests may
+    update the shared node cache without supplying verification evidence.
 
-    Cleanup: the operation registers no callbacks, markers, or wait state of
-    its own and never holds locks across sends or callbacks. Every readback
-    request id it sends is retired in an operation-level ``finally`` through
-    the interface's request-wait runtime (the same retirement the bounded
-    admin getters use), so no managed response handler or wait bookkeeping
-    outlives the operation on success, mismatch, timeout, or send failure.
+    Cleanup: every sent readback request id is retired in an operation-level
+    ``finally`` through the interface's request-wait runtime. Callbacks stop
+    accepting responses when the operation finishes. No managed response
+    handler or wait bookkeeping outlives success, mismatch, timeout or send
+    failure, and no locks are held across sends or callbacks.
 
     Failure behavior: send failures (including transport errors raised by
     the private readback send) PROPAGATE as exceptions (typically
@@ -1082,10 +1093,12 @@ def verify_local_config_apply(
     errors is the caller's responsibility.
 
     Cache side effect: requested sections are cleared and reloaded from
-    fresh device replies. If a section fails to repopulate (or the operation
-    raises mid-way), the affected cached section may remain cleared: the
-    cache then honestly reflects "device state unknown" instead of stale
-    values.
+    fresh device replies. Comparison uses operation-owned payload snapshots
+    on the correlated send path, so an earlier settings request cannot supply
+    verification evidence through the shared node cache. If a section fails
+    to repopulate (or the operation raises mid-way), the affected cached
+    section may remain cleared: the cache then honestly reflects "device
+    state unknown" instead of stale values.
 
     Parameters
     ----------
@@ -1150,10 +1163,73 @@ def verify_local_config_apply(
         )
 
     deadline = time.monotonic() + budget
+    on_response = getattr(target_node, "onResponseRequestSettings", None)
+    correlated_readback = callable(on_response) and callable(
+        getattr(target_node, "_send_admin", None)
+    )
+    roots: dict[str, Any] = {
+        "localConfig": getattr(target_node, "localConfig", None),
+        "moduleConfig": getattr(target_node, "moduleConfig", None),
+    }
+    # Compare only payloads delivered to this operation's callbacks. An earlier
+    # pending settings request may legitimately update the shared node cache.
+    readback_roots: dict[str, Any] = {
+        name: type(root)() if correlated_readback and root is not None else root
+        for name, root in roots.items()
+    }
+    response_events: dict[tuple[str, str], threading.Event] = {}
+    accepting_responses = threading.Event()
+    accepting_responses.set()
+
+    def _send_bounded(node: Any, field_desc: Any) -> tuple[bool, int | None]:
+        if not correlated_readback:
+            return _send_section_refresh_request(node, field_desc)
+        root_name = (
+            "localConfig"
+            if field_desc.containing_type.name == "LocalConfig"
+            else "moduleConfig"
+        )
+        response_variant = (
+            "get_config_response"
+            if root_name == "localConfig"
+            else "get_module_config_response"
+        )
+        received = threading.Event()
+        response_events[(root_name, field_desc.name)] = received
+
+        def _capture_response(packet: dict[str, Any]) -> None:
+            if not accepting_responses.is_set():
+                return
+            cast(Callable[[dict[str, Any]], Any], on_response)(packet)
+            decoded = packet.get("decoded")
+            admin = decoded.get("admin") if isinstance(decoded, dict) else None
+            raw = admin.get("raw") if isinstance(admin, dict) else None
+            if (
+                not isinstance(raw, admin_pb2.AdminMessage)
+                or raw.WhichOneof("payload_variant") != response_variant
+            ):
+                return
+            config = getattr(raw, response_variant)
+            if accepting_responses.is_set() and config.HasField(field_desc.name):
+                getattr(readback_roots[root_name], field_desc.name).CopyFrom(
+                    getattr(config, field_desc.name)
+                )
+                received.set()
+
+        return _send_section_refresh_request(
+            node, field_desc, on_response=_capture_response
+        )
 
     def _wait_bounded(node: Any, proto_config: Any, section_snake: str) -> bool:
+        root_name = (
+            "localConfig" if proto_config is roots["localConfig"] else "moduleConfig"
+        )
         return _wait_for_section_reload_under_deadline(
-            node, proto_config, section_snake, deadline=deadline
+            node,
+            readback_roots[root_name],
+            section_snake,
+            deadline=deadline,
+            response_received=response_events.get((root_name, section_snake)),
         )
 
     sent_request_ids: list[int] = []
@@ -1165,7 +1241,7 @@ def verify_local_config_apply(
             target_node,
             config_fields=config_fields,
             module_config_fields=module_config_fields,
-            send_request=_send_section_refresh_request,
+            send_request=_send_bounded,
             wait_for_section=_wait_bounded,
             sent_request_ids=sent_request_ids,
         )
@@ -1180,7 +1256,7 @@ def verify_local_config_apply(
             mismatches.extend(
                 _collect_section_mismatches(
                     config_fields,
-                    target_node.localConfig,
+                    readback_roots["localConfig"],
                     absent_sections=absent_sections,
                 )
             )
@@ -1188,7 +1264,7 @@ def verify_local_config_apply(
             mismatches.extend(
                 _collect_section_mismatches(
                     module_config_fields,
-                    target_node.moduleConfig,
+                    readback_roots["moduleConfig"],
                     absent_sections=absent_sections,
                 )
             )
@@ -1204,6 +1280,7 @@ def verify_local_config_apply(
             )
         return LocalApplyVerification(LocalApplyStatus.VERIFIED, (), ())
     finally:
+        accepting_responses.clear()
         # Retire every readback request id this operation sent so no managed
         # response handler or wait bookkeeping outlives the operation on any
         # exit path (the same retirement the bounded admin getters use).

@@ -147,10 +147,19 @@ def _build_local_set_interface(
 
     node.writeConfig = MagicMock(side_effect=_write_config)
 
-    def _apply_refresh(section: str, staged: Any, device: Any) -> None:
+    def _apply_refresh(section: str, staged: Any, device: Any, callback: Any) -> None:
         _refresh_from_device(staged, device, section, deliver=deliver_on_request)
+        if deliver_on_request and device.HasField(section):
+            raw = admin_pb2.AdminMessage()
+            variant = (
+                "get_config_response"
+                if staged is staged_local
+                else "get_module_config_response"
+            )
+            getattr(getattr(raw, variant), section).CopyFrom(getattr(device, section))
+            callback({"decoded": {"admin": {"raw": raw}}})
 
-    def _device_send_admin(message: Any, **_kwargs: Any) -> None:
+    def _device_send_admin(message: Any, **kwargs: Any) -> None:
         """Model the device answering a settings readback from device truth."""
         variant = message.WhichOneof("payload_variant")
         staged: Any
@@ -170,10 +179,12 @@ def _build_local_set_interface(
             return
         calls.append(f"readback:{section}")
         if delivery_delay is None:
-            _apply_refresh(section, staged, device)
+            _apply_refresh(section, staged, device, kwargs["onResponse"])
             return
         timer = threading.Timer(
-            delivery_delay, _apply_refresh, args=(section, staged, device)
+            delivery_delay,
+            _apply_refresh,
+            args=(section, staged, device, kwargs["onResponse"]),
         )
         timer.daemon = True
         timer.start()
