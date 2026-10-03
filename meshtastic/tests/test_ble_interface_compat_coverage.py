@@ -74,7 +74,7 @@ class TestBleInterfaceImportFailure:
                 importlib.import_module("meshtastic.ble_interface")
 
             assert "BLE support requires the 'bleak' package" in str(ctx.value)
-            assert "poetry install" in str(ctx.value)
+            assert "uv sync --locked" in str(ctx.value)
         finally:
             builtins.__import__ = original_import
             _restore_modules(module_snapshot, _BLE_IMPORT_TEST_MODULE_PREFIXES)

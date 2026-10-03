@@ -78,8 +78,8 @@ if ! command -v docker >/dev/null 2>&1; then
 	exit 1
 fi
 
-if ! command -v poetry >/dev/null 2>&1; then
-	echo "poetry is required to run smokevirt against meshtasticd." >&2
+if ! command -v uv >/dev/null 2>&1; then
+	echo "uv is required to run smokevirt against meshtasticd." >&2
 	exit 1
 fi
 
@@ -94,7 +94,7 @@ if ((MESHTASTICD_PORT_DEC < 1 || MESHTASTICD_PORT_DEC > 65535)); then
 fi
 
 MESHTASTICD_PARSED_HOST_AND_PORT="$(
-	poetry run python - "${MESHTASTICD_HOST}" "${MESHTASTICD_PORT_DEC}" <<'PY'
+	uv run --locked python - "${MESHTASTICD_HOST}" "${MESHTASTICD_PORT_DEC}" <<'PY'
 import sys
 
 from meshtastic.host_port import parseHostAndPort
@@ -172,9 +172,9 @@ docker run -d \
 	"${MESHTASTICD_IMAGE}" \
 	bash -c 'while true; do meshtasticd -s --fsdir=/var/lib/meshtasticd; echo "meshtasticd exited with code $?, restarting in 2s..."; sleep 2; done' >/dev/null
 
-primary_cli="$(poetry run python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
+primary_cli="$(uv run --locked python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
 deadline=$((SECONDS + 10#${MESHTASTICD_READY_TIMEOUT_SECONDS}))
-until poetry run "${primary_cli}" --timeout 5 --host "${MESHTASTICD_HOST}" --info >>"${READY_LOG_FILE}" 2>&1; do
+until uv run --locked "${primary_cli}" --timeout 5 --host "${MESHTASTICD_HOST}" --info >>"${READY_LOG_FILE}" 2>&1; do
 	if ! docker ps --format '{{.Names}}' | grep -Fxq "${MESHTASTICD_CONTAINER}"; then
 		echo "${MESHTASTICD_CONTAINER} exited before becoming ready." >&2
 		if [[ -f ${READY_LOG_FILE} ]]; then
@@ -257,7 +257,7 @@ if [[ -z ${MESHTASTICD_PYTEST_MARK_EXPR} ]]; then
 	fi
 fi
 
-PYTEST_CMD=(poetry run pytest)
+PYTEST_CMD=(uv run --locked pytest)
 if [[ -n ${MESHTASTICD_PYTEST_MARK_EXPR} ]]; then
 	PYTEST_CMD+=(-m "${MESHTASTICD_PYTEST_MARK_EXPR}")
 fi

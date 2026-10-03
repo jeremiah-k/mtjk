@@ -1,5 +1,5 @@
 # OSV-Scanner configuration file
-# Place in same directory as poetry.lock to ignore specific vulnerabilities
+# Place in same directory as uv.lock to ignore specific vulnerabilities
 # Documentation: https://google.github.io/osv-scanner/configuration/
 
 [[IgnoredVulns]]

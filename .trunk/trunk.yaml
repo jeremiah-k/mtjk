@@ -47,48 +47,48 @@ lint:
       paths:
         # Test device config with non-secret MQTT credentials for local testing.
         - test_config.yaml
-    - linters: [mypy-poetry]
+    - linters: [mypy-uv]
       paths:
         # Keep Trunk's mypy scope aligned with CI (meshtastic/ only).
         - bin/**
         - examples/**
         - tests/**
-    - linters: [pylint-poetry]
+    - linters: [pylint-uv]
       paths:
         # Keep Trunk's pylint scope aligned with CI (meshtastic/ + examples/).
         - bin/**
         - tests/**
         - meshtastic/tests/**
   definitions:
-    - name: mypy-poetry
-      description: Run mypy via Poetry using the project's pinned dependencies.
+    - name: mypy-uv
+      description: Run mypy via uv using the project's pinned dependencies.
       files: [python, python-interface]
       suggest_if: files_present
       direct_configs:
         - pyproject.toml
-        - poetry.lock
+        - uv.lock
       commands:
         - name: lint
           output: mypy
-          run: poetry -C ${workspace} run mypy meshtastic/
+          run: uv run --locked --project ${workspace} mypy meshtastic/
           target: meshtastic
           run_from: ${root_or_parent_with_any_config}
           disable_upstream: true
           success_codes: [0]
           batch: true
           stdin: false
-    - name: pylint-poetry
-      description: Run pylint via Poetry with the project's pinned dependencies.
+    - name: pylint-uv
+      description: Run pylint via uv with the project's pinned dependencies.
       files: [python]
       suggest_if: files_present
       direct_configs:
         - pyproject.toml
-        - poetry.lock
+        - uv.lock
         - .pylintrc
       commands:
         - name: lint
           output: pylint
-          run: poetry -C ${workspace} run pylint --exit-zero --output ${tmpfile} --output-format json ${target}
+          run: uv run --locked --project ${workspace} pylint --exit-zero --output ${tmpfile} --output-format json ${target}
           read_output_from: tmp_file
           run_from: ${root_or_parent_with_any_config}
           disable_upstream: true
@@ -113,8 +113,8 @@ lint:
     - trivy@0.75.0
     - trufflehog@3.97.9
     - yamllint@1.38.0
-    - mypy-poetry
-    - pylint-poetry
+    - mypy-uv
+    - pylint-uv
 runtimes:
   enabled:
     - go@1.21.0

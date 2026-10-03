@@ -17,7 +17,7 @@ for upstream standalone-installation background.
 
 This standalone build includes the core mtjk CLI and the optional `cli` extras.
 It does not bundle the separate tunnel, analysis, or power-monitor dependency
-stacks; install mtjk with Python/Poetry when those optional features are needed.
+stacks; install mtjk with Python/uv when those optional features are needed.
 
 The Python package namespace remains `meshtastic`; the standalone executable name
 does not change the public Python API.

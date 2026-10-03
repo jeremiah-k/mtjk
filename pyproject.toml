@@ -1,131 +1,122 @@
-# Includes PEP 561 py.typed marker for type checker support
-[tool.poetry]
+# Includes PEP 561 py.typed marker for type checker support.
+[project]
 # Keep this static install-time identity synchronized with meshtastic/_branding.py.
 name = "mtjk"
 version = "2.7.11.post8"
 description = "Python API & client shell for talking to Meshtastic devices"
-authors = ["Meshtastic Developers (upstream project authors)"]
-maintainers = ["Jeremiah K. <jeremiahk@gmx.com>"]
+authors = [{ name = "Meshtastic Developers (upstream project authors)" }]
+maintainers = [{ name = "Jeremiah K.", email = "jeremiahk@gmx.com" }]
 license = "GPL-3.0-only"
+license-files = ["LICENSE.md"]
 readme = "README.md"
-homepage = "https://github.com/jeremiah-k/mtjk"
-repository = "https://github.com/jeremiah-k/mtjk"
-packages = [{ include = "meshtastic" }]
-include = [{ path = "meshtastic/py.typed", format = ["sdist", "wheel"] }]
-
-[tool.poetry.dependencies]
-python = "^3.11,<3.15"
-pyserial = "^3.5"
-protobuf = ">=5.29.5"
-typing-extensions = { version = ">=4.15.0", python = "<3.13" }
-tabulate = "^0.10.0"
-requests = "^2.33.0"
-pyyaml = "^6.0.1"
-# Keep pypubsub >=4.0.7 for PEP 561 `py.typed` metadata in strict type checking.
-pypubsub = "^4.0.7"
-bleak = "^3.0.1"
-packaging = "^26.0"
-argcomplete = "^3.5.2"
-segno = "^1.6.6"
-print-color = "^0.4.6"
-dash = { version = "^4.0.0", optional = true }
-dash-bootstrap-components = { version = "^2.0.4", optional = true }
-plotly = { version = "^7.0.0", optional = true }
-pandas = { version = "^2.2.2", optional = true }
-pandas-stubs = { version = "^2.3.3.260113", optional = true }
-# slog/analysis runtime imports: meshtastic/slog/slog.py and meshtastic/slog/arrow.py
-# import these at module load, and meshtastic/analysis/__main__.py pulls them in via
-# `from ..slog import rootDir`. The core client path never imports them, so they are
-# declared optional: only the analysis extra (not a core install) carries them. The
-# powermon-group copies are load-bearing for `poetry install --with powermon` without
-# the analysis extra; keep the two constraint pairs in sync.
-pyarrow = { version = "^25.0.0", optional = true }
-parse = { version = "^1.20.2", optional = true }
-platformdirs = { version = "^4.2.2", optional = true }
-wcwidth = "^0.9.0"
-
-[tool.poetry.group.dev.dependencies]
-hypothesis = "6.168.3"
-pytest = "9.1.1"
-pytest-cov = "7.1.0"
-pytest-timeout = "2.5.0"
-pdoc = "16.0.0"
-pylint = "4.1.1"
-pyinstaller = "6.22.3"
-mypy = "2.4.0"
-mypy-protobuf = "5.1.0"
-types-protobuf = "^6.32.1.20250221"
-types-tabulate = "^0.9.0.20241207"
-types-requests = "^2.32.4.20260107"
-types-setuptools = "^82.0.0.20260210"
-types-pyyaml = "^6.0.12.20250915"
-pyarrow-stubs = "^20.0.0.20251215"
-
-[tool.poetry.group.powermon]
-optional = true
-
-[tool.poetry.group.powermon.dependencies]
-# Git dependency: pinned to an immutable commit SHA. The historical
-# "#1.2.1" URL fragment is not a safe pin: the committed lock recorded
-# reference = "HEAD" (resolved to 27fd58f0, master at the time), while the
-# 1.2.1 tag points at a different commit -- either way, regenerating the
-# lock would silently move this dependency. Verify any new pin against
-# https://github.com/geeksville/riden before changing it.
-riden = { git = "https://github.com/geeksville/riden.git", rev = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9" }
-ppk2-api = "^0.9.2"
-parse = "^1.20.2"
-pyarrow = "^25.0.0"
-platformdirs = "^4.2.2"
-
-# If you are doing power analysis you might want these extra devtools
-[tool.poetry.group.analysis]
-optional = true
-
-[tool.poetry.group.analysis.dependencies]
-jupyterlab = "^4.2.2"
-matplotlib = "^3.9.0"
-ipympl = "^0.10.0"
-ipywidgets = "^8.1.3"
-jupyterlab-widgets = "^3.0.11"
-
-[tool.poetry.extras]
-# The CLI niceties (segno, print-color, argcomplete, wcwidth) are core
-# dependencies. The `cli` extra is an intentional empty no-op so
-# `mtjk[cli]` keeps installing for existing users/scripts; listing the
-# packages here would re-impose the extra marker and undo that.
-cli = []
-analysis = [
-  "dash",
-  "dash-bootstrap-components",
-  "parse",
-  "platformdirs",
-  "plotly",
-  "pandas",
-  "pandas-stubs",
-  "pyarrow",
+requires-python = ">=3.11,<3.15"
+# Keep pypubsub >=4.0.7 for its PEP 561 typing metadata.
+dependencies = [
+  "pyserial>=3.5,<4.0",
+  "protobuf>=5.29.5",
+  "typing-extensions>=4.15.0; python_version < \"3.13\"",
+  "tabulate>=0.10.0,<0.11.0",
+  "requests>=2.33.0,<3.0.0",
+  "pyyaml>=6.0.1,<7.0.0",
+  "pypubsub>=4.0.7,<5.0.0",
+  "bleak>=3.0.1,<4.0.0",
+  "packaging>=26.0,<27.0",
+  "argcomplete>=3.5.2,<4.0.0",
+  "segno>=1.6.6,<2.0.0",
+  "print-color>=0.4.6,<0.5.0",
+  "wcwidth>=0.9.0,<0.10.0",
 ]
 
-[tool.poetry.scripts]
+[project.urls]
+Homepage = "https://github.com/jeremiah-k/mtjk"
+Repository = "https://github.com/jeremiah-k/mtjk"
+
+[project.optional-dependencies]
+# CLI niceties are core dependencies; retain the historical no-op cli extra.
+cli = []
+# slog imports these at module load; the core client does not import slog.
+analysis = [
+  "dash>=4.0.0,<5.0.0",
+  "dash-bootstrap-components>=2.0.4,<3.0.0",
+  "parse>=1.20.2,<2.0.0",
+  "platformdirs>=4.2.2,<5.0.0",
+  "plotly>=7.0.0,<8.0.0",
+  "pandas>=2.2.2,<3.0.0",
+  "pandas-stubs>=2.3.3.260113,<3.0.0.0",
+  "pyarrow>=25.0.0,<26.0.0",
+]
+
+[project.scripts]
 # Primary/compatibility CLI keys are enforced by test_branding.py.
 mtjk = "meshtastic.__main__:main"
 meshtastic = "meshtastic.__main__:main"
-# The tunnel uses the in-tree LinuxTunDevice adapter (stdlib only); no extra needed.
+# The tunnel uses the in-tree LinuxTunDevice adapter (stdlib only).
 mesh-tunnel = "meshtastic.__main__:tunnelMain"
 mesh-analysis = "meshtastic.analysis.__main__:main [analysis]"
 
-# "Poe the poet" (optional) provides an easy way of running non python tools inside the poetry virtualenv
-# if you would like to use it run "pipx install poe"
-# then you can do stuff like "poe code" to run vscode inside this environment
+[dependency-groups]
+dev = [
+  "hypothesis==6.168.3",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "pytest-timeout==2.5.0",
+  "pdoc==16.0.0",
+  "pylint==4.1.1",
+  "pyinstaller==6.22.3",
+  "mypy==2.4.0",
+  "mypy-protobuf==5.1.0",
+  "types-protobuf>=6.32.1.20250221,<7.0.0.0",
+  "types-tabulate>=0.9.0.20241207,<0.10.0.0",
+  "types-requests>=2.32.4.20260107,<3.0.0.0",
+  "types-setuptools>=82.0.0.20260210,<83.0.0.0",
+  "types-pyyaml>=6.0.12.20250915,<7.0.0.0",
+  "pyarrow-stubs>=20.0.0.20251215,<21.0.0.0",
+]
+# Keep shared analysis/powermon dependency constraints synchronized.
+powermon = [
+  "riden",
+  "ppk2-api>=0.9.2,<0.10.0",
+  "parse>=1.20.2,<2.0.0",
+  "pyarrow>=25.0.0,<26.0.0",
+  "platformdirs>=4.2.2,<5.0.0",
+]
+analysis = [
+  "jupyterlab>=4.2.2,<5.0.0",
+  "matplotlib>=3.9.0,<4.0.0",
+  "ipympl>=0.10.0,<0.11.0",
+  "ipywidgets>=8.1.3,<9.0.0",
+  "jupyterlab-widgets>=3.0.11,<4.0.0",
+]
+
+[tool.uv]
+required-version = ">=0.12.22"
+default-groups = ["dev"]
+
+[tool.uv.sources]
+# Immutable source pin; see DEPENDENCY_POLICY.md before changing it.
+riden = { git = "https://github.com/geeksville/riden.git", rev = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9" }
+
+[tool.uv.build-backend]
+module-name = "meshtastic"
+module-root = ""
+# Keep local test outputs out of wheels and source distributions.
+source-exclude = [
+  "**/.coverage*",
+  "**/.pytest_cache/**",
+  "**/.mypy_cache/**",
+  "**/.hypothesis/**",
+  "meshtastic/tests/api_baselines/*_test.json",
+]
+
+# Optional: pipx install poethepoet, then run poe code inside the project environment.
 [tool.poe.tasks]
 code = "code ."
-juypter = "poetry run jupyter lab"
+jupyter = "uv run --locked --extra analysis --group analysis jupyter lab"
 
 [tool.isort]
-# Trunk runs bare `isort` (no CLI flags); without this profile isort 9+ uses
-# grid-style wrapping that black reverts, causing autofix loops. Keep in sync
-# with black: single style, no disagreement.
+# Keep bare isort aligned with Black to avoid conflicting formatter output.
 profile = "black"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.12.22,<0.13"]
+build-backend = "uv_build"

@@ -40,16 +40,16 @@ source of truth for `mtjk` maintenance policy.
 
 ## Python and typing baseline
 
-- Runtime baseline is Python 3.11+ (see `pyproject.toml`: `python = "^3.11,<3.15"`).
+- Runtime baseline is Python 3.11+ (see `pyproject.toml`: `requires-python = ">=3.11,<3.15"`).
 - Use PEP 604 unions (`X | None`, `A | B`) and built-in generics
   (`dict[K, V]`, `list[T]`, `tuple[T, ...]`) for new and edited annotations.
 - Do not churn code with typing-only mass rewrites; normalize typing style only
   in areas already being edited.
 - If your LSP/type checker suggests replacing `|` with `Optional`/`Union`,
-  fix the tool's interpreter/version configuration first (Poetry-managed env),
+  fix the tool's interpreter/version configuration first (uv-managed env),
   rather than rewriting annotations for legacy pre-3.11 compatibility.
 - Do not require contributors to manually create/activate a venv; use
-  `poetry install ...` and run tools via `poetry run ...`.
+  `uv sync --locked ...` and run tools via `uv run --locked ...`.
 
 ## Docstring style
 
@@ -106,12 +106,33 @@ Historical required BLE wrappers and warning policy are tracked in
 
 ## Local setup and validation
 
-Install the repository environment with Poetry. For the broadest local check,
-include the optional CLI/analysis extras and power-monitor group:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
+`uv sync --locked` to create the local `.venv` with the core package and the
+default development group. Python 3.11–3.14 is supported; use `--python 3.13`
+to select an interpreter explicitly. For the same dependency selection as CI,
+include the optional analysis extra and power-monitor group:
 
 ```bash
-poetry install --all-extras --with dev,powermon
+uv sync --locked --all-extras --group powermon
 ```
+
+Use `uv sync --locked --no-dev` for a core-only environment and
+`uv run --locked --no-dev mtjk --version` to keep development tools excluded.
+The published analysis extra is
+selected with `--extra analysis`; the separate `analysis` dependency group
+contains notebook and plotting tools and is selected with `--group analysis`.
+For notebooks, install both with `uv sync --locked --extra analysis --group analysis`.
+
+Project commands use `uv run --locked` so stale lockfiles fail instead of being
+rewritten implicitly. Use `uv add`, `uv remove`, and `uv lock` deliberately when
+changing dependencies, and commit both `pyproject.toml` and `uv.lock`.
+`uv lock --upgrade-package NAME` updates one locked dependency. For a local
+wheel and source build, run `uv build`; consumers can install either artifact
+with pip without having uv installed.
+
+Standalone asset recovery for historical tags without a uv lockfile uses an
+isolated, pinned Poetry tool through uv. The build script selects the tagged
+lockfile; development and CI use uv directly.
 
 ### Updating protobufs
 
@@ -180,44 +201,42 @@ scanners. Their pins live in `.trunk/trunk.yaml`; do not copy them into a
 second versions file. The standalone Ruff CI job reads its install version
 directly from that configuration through `bin/check_quality_tool_versions.py`.
 
-Poetry owns the Python environment and pins project-aware Python tools such as
-Pylint and Mypy in `pyproject.toml` and `poetry.lock`. Trunk's
-`pylint-poetry` and `mypy-poetry` definitions orchestrate those
-Poetry-installed tools rather than installing competing copies. Pylint behavior
+uv owns the Python environment and pins project-aware Python tools such as
+Pylint and Mypy in `pyproject.toml` and `uv.lock`. Trunk's
+`pylint-uv` and `mypy-uv` definitions orchestrate those
+uv-installed tools rather than installing competing copies. Pylint behavior
 is configured in `.pylintrc`, and Ruff behavior is configured in `ruff.toml`
 plus Trunk's managed base configuration.
 
-The Poetry application version used to install those dependencies is a build
-tool rather than a project dependency. It is pinned in CI and container builds,
-and one Renovate custom manager updates every `poetry==X.Y.Z` installation in a
-single dependency branch. The container-only export plugin is independently
-pinned and maintained by Renovate so image dependency resolution is
-reproducible without adding the plugin to every development environment.
+The uv application version is pinned in CI and container builds. Renovate's
+PEP 621 manager maintains dependencies and the uv lockfile; a custom manager
+keeps the uv version aligned across setup actions and container installation.
+The uv build backend is declared separately in the standard build-system table.
 
 Mypy is the canonical Python type checker for this repository. Pyright is not
 part of the quality gate: maintaining two overlapping type-checker baselines
 added cost without a distinct compatibility guarantee, and a static Pyright
-virtualenv path cannot reliably identify Poetry's environment across machines.
+virtualenv path cannot reliably identify uv's environment across machines.
 
 ### Unified lint/type check via Trunk
 
-Run lint and type checks (including Poetry-managed `pylint` + `mypy`) with one command:
+Run lint and type checks (including uv-managed `pylint` + `mypy`) with one command:
 
 ```bash
 TRUNK_INTERACTIVE=0 .trunk/trunk check --fix --show-existing
 ```
 
-This does not run `pytest`; use `make ci` (or `poetry run pytest ...`) for test execution.
+This does not run `pytest`; use `make ci` (or `uv run --locked pytest ...`) for test execution.
 
 ### Manual checks
 
 Alternatively, run each check individually:
 
 ```bash
-poetry run pytest --cov=meshtastic --cov-report=xml
-poetry run pylint meshtastic examples/
+uv run --locked pytest --cov=meshtastic --cov-report=xml
+uv run --locked pylint meshtastic examples/
 .trunk/trunk check --filter=ruff meshtastic/tests tests
-poetry run mypy meshtastic/
+uv run --locked mypy meshtastic/
 ```
 
 To run the `meshtasticd` simulator integration lane locally (same flow as CI):
@@ -265,7 +284,7 @@ user-visible compatibility notes in the same change.
 For stricter type checking (optional, not required by CI):
 
 ```bash
-poetry run mypy meshtastic/ --strict
+uv run --locked mypy meshtastic/ --strict
 ```
 
 For more commands see [CI workflow](.github/workflows/ci.yml)

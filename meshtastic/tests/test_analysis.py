@@ -24,7 +24,7 @@ try:
     import pandas as pd
     from pyarrow import feather
 
-    # Depends upon matplotlib & other packages in poetry's analysis group, not installed by default
+    # Depends upon matplotlib & other packages in uv's analysis group, not installed by default
     from meshtastic import powermon_pb2
     from meshtastic.analysis import __main__ as analysis_main
     from meshtastic.analysis.__main__ import (

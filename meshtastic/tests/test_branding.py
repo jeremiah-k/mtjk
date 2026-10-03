@@ -56,10 +56,10 @@ def test_packaging_metadata_tracks_branding_contract() -> None:
     pyproject = tomllib.loads(
         (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    poetry = pyproject["tool"]["poetry"]
-    scripts = poetry["scripts"]
+    project = pyproject["project"]
+    scripts = project["scripts"]
 
-    assert poetry["name"] == branding.DISTRIBUTION_NAME
+    assert project["name"] == branding.DISTRIBUTION_NAME
     expected_cli_names = {
         branding.PRIMARY_CLI_NAME,
         *branding.COMPATIBILITY_CLI_NAMES,

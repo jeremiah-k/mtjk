@@ -4,7 +4,7 @@
   "forkProcessing": "enabled",
   "mode": "full",
   "enabledManagers": [
-    "poetry",
+    "pep621",
     "github-actions",
     "git-submodules",
     "custom.regex"
@@ -39,7 +39,7 @@
     },
     {
       "description": "Manually reviewed 2026-09-16 (see DEPENDENCY_POLICY.md): release-sparse but source-active dependencies; suppress the release-age abandonment signal",
-      "matchManagers": ["poetry"],
+      "matchManagers": ["pep621"],
       "matchPackageNames": ["pyserial", "segno"],
       "abandonmentThreshold": null
     },
@@ -81,22 +81,16 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the Poetry installer version aligned across CI and container builds",
+      "description": "Keep uv aligned across workflow setup and container builds",
       "managerFilePatterns": [
         "/^Containerfile$/",
         "/^\\.github/workflows/[^/]+\\.ya?ml$/"
       ],
-      "matchStrings": ["poetry==(?<currentValue>[^\\s\"']+)"],
-      "depNameTemplate": "poetry",
-      "datasourceTemplate": "pypi",
-      "versioningTemplate": "pep440"
-    },
-    {
-      "customType": "regex",
-      "description": "Keep the container's Poetry export plugin reproducibly pinned",
-      "managerFilePatterns": ["/^Containerfile$/"],
-      "matchStrings": ["poetry-plugin-export==(?<currentValue>[^\\s\"']+)"],
-      "depNameTemplate": "poetry-plugin-export",
+      "matchStrings": [
+        "uv==(?<currentValue>[^\\s\"']+)",
+        "astral-sh/setup-uv@[^\\n]+\\n\\s+with:\\n\\s+version: (?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "uv",
       "datasourceTemplate": "pypi",
       "versioningTemplate": "pep440"
     }

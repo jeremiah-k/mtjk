@@ -415,7 +415,7 @@ def _handle_long_running_services(
             _terminate_cli(
                 hooks.cli_exit,
                 "The powermon module could not be loaded. "
-                "You may need to run `poetry install --with powermon`. "
+                "You may need to run `uv sync --locked --group powermon`. "
                 f"Import Error was: {hooks.powermon_error()}",
             )
 

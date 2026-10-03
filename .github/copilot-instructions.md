@@ -6,8 +6,8 @@ This is the Meshtastic Python library and CLI - a Python API for interacting wit
 
 ## Technology Stack
 
-- **Language**: Python 3.10+
-- **Package Manager**: Poetry
+- **Language**: Python 3.11+
+- **Package Manager**: uv
 - **Testing**: pytest with hypothesis for property-based testing
 - **Linting**: pylint, Ruff
 - **Type Checking**: mypy (working toward strict mode)
@@ -64,11 +64,11 @@ protobufs/            # Protocol Buffer source definitions
 ### Type Annotations
 
 - Add type hints to all new code
-- Project typing baseline is Python 3.10+.
+- Project typing baseline is Python 3.11+.
 - Use PEP 604 unions (`X | None`, `A | B`) and built-in generics (`dict[K, V]`, `list[T]`, `tuple[T, ...]`) in new and edited annotations.
 - Do not convert `|` unions to `Optional`/`Union` for compatibility with Python 3.9 (that is out of scope for this project).
 - Avoid mass formatting-only annotation churn; normalize types in the area you are already changing.
-- If LSP/type-checking appears to reject PEP 604 syntax, fix the interpreter/version configuration (project `venv` / Poetry environment) before editing code.
+- If LSP/type-checking appears to reject PEP 604 syntax, fix the interpreter/version configuration (project `venv` / uv environment) before editing code.
 - Protobuf types are in `meshtastic.protobuf.*_pb2` modules
 
 ### Naming Conventions
@@ -201,14 +201,14 @@ pub.subscribe(on_receive, "meshtastic.receive")
 ## Development Workflow
 
 Trunk is the repository's linter orchestrator. It pins standalone tools such as
-Ruff, while Poetry pins project-aware Python tools such as Pylint and Mypy;
-Trunk invokes the latter through the `pylint-poetry` and `mypy-poetry`
+Ruff, while uv pins project-aware Python tools such as Pylint and Mypy;
+Trunk invokes the latter through the `pylint-uv` and `mypy-uv`
 definitions. Mypy is the canonical Python type checker.
 
-1. Install dependencies: `poetry install --all-extras --with dev`
+1. Install dependencies: `uv sync --locked --all-extras`
 2. Make changes
 3. Run unified lint/type checks: `TRUNK_INTERACTIVE=0 .trunk/trunk check --fix --show-existing`
-4. Run tests: `poetry run pytest -m unit`
+4. Run tests: `uv run --locked pytest -m unit`
 5. Update documentation if needed
 
 ## CLI Development
@@ -238,7 +238,7 @@ The CLI is in `meshtastic/__main__.py`. When adding new CLI commands:
 - `cli` extra: `segno`, `print-color`, `argcomplete`, `wcwidth`
 - `analysis` extra: `dash`, `dash-bootstrap-components`, `plotly`, `pandas`, `pandas-stubs`, `pyarrow`, `parse`, `platformdirs`
 - tunnel support is built in (in-tree `LinuxTunDevice`, stdlib only)
-- `powermon` Poetry group (`--with powermon`): `riden`, `ppk2-api`, `parse`, `pyarrow`, `platformdirs`
+- `powermon` dependency group (`--group powermon`): `riden`, `ppk2-api`, `parse`, `pyarrow`, `platformdirs`
 
 ## Important Notes
 
