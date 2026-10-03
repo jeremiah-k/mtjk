@@ -2085,7 +2085,7 @@ def _create_power_meter() -> None:
     if not have_powermon:
         _cli_exit(
             "The powermon module could not be loaded. "
-            "You may need to run `poetry install --with powermon`. "
+            "You may need to run `uv sync --locked --group powermon`. "
             f"Import Error was: {powermon_exception}"
         )
     voltage = _validated_power_voltage(args)

@@ -19,7 +19,7 @@ jobs:
     name: API Baseline vs Upstream Master (py3.14)
     runs-on: ubuntu-latest
     env:
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
       UPSTREAM_REPO: meshtastic/python
       UPSTREAM_REF: master
     steps:
@@ -29,25 +29,17 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Cache Poetry artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          path: |
-            ~/.cache/pypoetry
-            ~/.cache/pip
-          key: ${{ runner.os }}-3.14-poetry-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-3.14-poetry-
-            ${{ runner.os }}-poetry-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.1"
+          version: 0.12.22
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install configured CLI from local
         run: |
-          poetry install ${{ env.POETRY_INSTALL_ARGS }}
-          primary_cli="$(poetry run python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
-          poetry run "${primary_cli}" --version
+          uv sync --locked ${{ env.UV_SYNC_ARGS }}
+          primary_cli="$(uv run --locked python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
+          uv run --locked "${primary_cli}" --version
       - name: Checkout API baseline branch (upstream master)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,9 +47,9 @@ jobs:
           ref: ${{ env.UPSTREAM_REF }}
           path: base-checkout
       - name: Extract base API surface (upstream master)
-        run: poetry run python3 bin/extract_api_surface.py base-checkout/meshtastic > base_surface.json
+        run: uv run --locked python3 bin/extract_api_surface.py base-checkout/meshtastic > base_surface.json
       - name: Extract PR API surface
-        run: poetry run python3 bin/extract_api_surface.py meshtastic > pr_surface.json
+        run: uv run --locked python3 bin/extract_api_surface.py meshtastic > pr_surface.json
       - name: Compare API surfaces vs upstream master
         run: python3 bin/compare_api_surfaces.py base_surface.json pr_surface.json --base-label "upstream/${{ env.UPSTREAM_REF }}"
 
@@ -66,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: api-baseline-master
     env:
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
       API_BASELINE_REF: develop
     steps:
       - name: Checkout PR branch (current)
@@ -75,34 +67,26 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Cache Poetry artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          path: |
-            ~/.cache/pypoetry
-            ~/.cache/pip
-          key: ${{ runner.os }}-3.14-poetry-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-3.14-poetry-
-            ${{ runner.os }}-poetry-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.1"
+          version: 0.12.22
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install configured CLI from local
         run: |
-          poetry install ${{ env.POETRY_INSTALL_ARGS }}
-          primary_cli="$(poetry run python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
-          poetry run "${primary_cli}" --version
+          uv sync --locked ${{ env.UV_SYNC_ARGS }}
+          primary_cli="$(uv run --locked python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
+          uv run --locked "${primary_cli}" --version
       - name: Checkout API baseline branch (develop)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.API_BASELINE_REF }}
           path: base-checkout
       - name: Extract base API surface (develop)
-        run: poetry run python3 bin/extract_api_surface.py base-checkout/meshtastic > base_surface.json
+        run: uv run --locked python3 bin/extract_api_surface.py base-checkout/meshtastic > base_surface.json
       - name: Extract PR API surface
-        run: poetry run python3 bin/extract_api_surface.py meshtastic > pr_surface.json
+        run: uv run --locked python3 bin/extract_api_surface.py meshtastic > pr_surface.json
       - name: Compare API surfaces vs develop
         run: |
           python3 bin/compare_api_surfaces.py \

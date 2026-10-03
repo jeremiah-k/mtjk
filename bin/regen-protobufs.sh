@@ -12,20 +12,8 @@ NANOPB_DOWNLOAD_FALLBACK_URL="${NANOPB_DOWNLOAD_FALLBACK_URL:-https://jpa.kapsi.
 #gsed -i 's/import "\//import ".\//g' ./protobufs/meshtastic/*
 #gsed -i 's/package meshtastic;//g' ./protobufs/meshtastic/*
 
-POETRYDIR="$(poetry env info --path 2>/dev/null || true)"
-
-if [[ -z ${POETRYDIR} ]]; then
-	poetry install
-	POETRYDIR="$(poetry env info --path)"
-fi
-
-# protoc looks for mypy plugin in the python path
-if [[ -z ${POETRYDIR} || ! -f "${POETRYDIR}/bin/activate" ]]; then
-	echo "Unable to resolve Poetry virtualenv activate script at ${POETRYDIR}/bin/activate" >&2
-	exit 1
-fi
-# shellcheck disable=SC1090,SC1091
-source "${POETRYDIR}/bin/activate"
+# uv run exposes the locked mypy plugin on PATH for protoc.
+uv sync --locked
 
 if [[ -z ${PROTOC-} ]]; then
 	for PROTOC_CANDIDATE in \
@@ -60,16 +48,16 @@ fi
 echo "Using protoc: ${PROTOC}"
 "${PROTOC}" --version
 
-# Put our temp files in the poetry build directory
-TMPDIR=./build/meshtastic/protofixup
-echo "Fixing up protobuf paths in ${TMPDIR} temp directory"
+# Put generated files in the project's build directory.
+PROTO_WORK_DIR=./build/meshtastic/protofixup
+echo "Fixing up protobuf paths in ${PROTO_WORK_DIR} temp directory"
 
 # Ensure a clean build
-[[ -e ${TMPDIR} ]] && rm -r "${TMPDIR}"
+[[ -e ${PROTO_WORK_DIR} ]] && rm -r "${PROTO_WORK_DIR}"
 
-INDIR=${TMPDIR}/in/meshtastic/protobuf
-OUTDIR=${TMPDIR}/out
-PYIDIR=${TMPDIR}/out
+INDIR=${PROTO_WORK_DIR}/in/meshtastic/protobuf
+OUTDIR=${PROTO_WORK_DIR}/out
+PYIDIR=${PROTO_WORK_DIR}/out
 mkdir -p "${OUTDIR}" "${INDIR}" "${PYIDIR}"
 cp ./protobufs/meshtastic/*.proto "${INDIR}"
 cp ./protobufs/nanopb.proto "${INDIR}"
@@ -78,7 +66,7 @@ cp ./protobufs/meshtastic/*.options "${INDIR}"
 # Rewrite the upstream protobuf namespace consistently before generation,
 # including package declarations, import paths, and code-level qualified
 # references such as (meshtastic.field_metadata).
-python3 ./bin/fixup_protobuf_namespace.py "${INDIR}"
+uv run --locked python ./bin/fixup_protobuf_namespace.py "${INDIR}"
 
 # OS-X sed is apparently a little different and expects an arg for -i
 if [[ ${OSTYPE-} == darwin* ]]; then
@@ -96,12 +84,12 @@ for OPTS_FILE in "${INDIR}"/*.options; do
 	BASENAME=$(basename "${OPTS_FILE}" .options)
 	PROTO_FILE="${INDIR}/${BASENAME}.proto"
 	if [[ -f ${PROTO_FILE} ]]; then
-		python3 ./bin/inject_nanopb_options.py "${OPTS_FILE}" "${PROTO_FILE}"
+		uv run --locked python ./bin/inject_nanopb_options.py "${OPTS_FILE}" "${PROTO_FILE}"
 	fi
 done
 
 # Generate the python files
-"${PROTOC}" -I="${TMPDIR}/in" --python_out "${OUTDIR}" "--mypy_out=${PYIDIR}" "${INDIR}"/*.proto
+uv run --locked "${PROTOC}" -I="${PROTO_WORK_DIR}/in" --python_out "${OUTDIR}" "--mypy_out=${PYIDIR}" "${INDIR}"/*.proto
 
 # Change "from meshtastic.protobuf import" to "from . import"
 "${SEDCMD[@]}" 's/^from meshtastic.protobuf import/from . import/' "${OUTDIR}"/meshtastic/protobuf/*pb2*.py

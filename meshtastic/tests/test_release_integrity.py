@@ -361,20 +361,31 @@ def _write_fake_standalone(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("legacy_lock", [False, True])
 def test_standalone_build_copies_configured_distribution_metadata(
     tmp_path: Path,
+    legacy_lock: bool,
 ) -> None:
     """The frozen executable must carry metadata used by importlib.metadata.version()."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     pyinstaller_args = tmp_path / "pyinstaller-args.txt"
-    poetry = fake_bin / "poetry"
+    uv = fake_bin / "uv"
+    (tmp_path / ("poetry.lock" if legacy_lock else "uv.lock")).touch()
     compatibility_names = " ".join(COMPATIBILITY_CLI_NAMES)
-    poetry.write_text(
+    uv.write_text(
         f"""#!/usr/bin/env bash
 set -euo pipefail
-if [[ $1 == install ]]; then
+printf '%s\\n' "$*" >> "${{BUILD_TOOL_ARGS}}"
+if [[ $1 == tool ]]; then
+  shift 5
+fi
+if [[ $1 == sync || $1 == install ]]; then
   exit 0
+fi
+if [[ $1 == run && $2 == --locked ]]; then
+  shift 2
+  set -- run "$@"
 fi
 if [[ $1 == run && $2 == python && $3 == -c ]]; then
   case $4 in
@@ -396,10 +407,14 @@ exit 2
 """,
         encoding="utf-8",
     )
-    poetry.chmod(0o755)
+    uv.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
     env["PYINSTALLER_ARGS"] = str(pyinstaller_args)
+    tool_args = tmp_path / "tool-args.txt"
+    github_output = tmp_path / "github-output.txt"
+    env["BUILD_TOOL_ARGS"] = str(tool_args)
+    env["GITHUB_OUTPUT"] = str(github_output)
 
     result = subprocess.run(
         [str(_BUILD_BIN)],
@@ -411,6 +426,20 @@ exit 2
     )
 
     assert result.returncode == 0, result.stderr
+    commands = tool_args.read_text(encoding="utf-8").splitlines()
+    if legacy_lock:
+        assert commands[0] == (
+            "tool run --from poetry==2.5.1 poetry install --extras cli --with dev"
+        )
+        assert all(
+            command.startswith("tool run --from poetry==2.5.1") for command in commands
+        )
+    else:
+        assert commands[0] == "sync --locked --extra cli"
+        assert all(command.startswith("run --locked") for command in commands[1:])
+    assert github_output.read_text(encoding="utf-8") == (
+        f"primary={PRIMARY_CLI_NAME}\ncompatibility={compatibility_names}\n"
+    )
     args = pyinstaller_args.read_text(encoding="utf-8").splitlines()
     metadata_index = args.index("--copy-metadata")
     assert args[metadata_index + 1] == DISTRIBUTION_NAME
@@ -560,8 +589,9 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     assert (
         "RELEASE_VERSION: ${{ steps.release_source.outputs.version }}" in release_assets
     )
-    assert "from meshtastic._branding import PRIMARY_CLI_NAME" in release_assets
-    assert "from meshtastic._branding import COMPATIBILITY_CLI_NAMES" in release_assets
+    assert "id: cli_branding" in release_assets
+    assert "steps.cli_branding.outputs.primary" in release_assets
+    assert "steps.cli_branding.outputs.compatibility" in release_assets
     assert "workflow_dispatch:" in release_assets
     assert "release_tag:" in release_assets
     assert 'gh release view "${RELEASE_TAG}"' in release_assets

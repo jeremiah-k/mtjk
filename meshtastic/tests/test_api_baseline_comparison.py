@@ -5,7 +5,7 @@ captured from master/develop. This ensures that public API changes are intention
 and tracked, preventing accidental breaking changes.
 
 To update baselines after intentional API changes:
-    poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines
+    uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines
 
 The baselines are stored in:
     meshtastic/tests/api_baselines/api_baseline.json
@@ -325,7 +325,7 @@ class TestNodeAPIAgainstBaseline:
             msg = "Node API differs from baseline:\n" + "\n".join(
                 f"  {d}" for d in differences
             )
-            msg += "\n\nTo accept these changes, run: poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
+            msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
     def test_node_critical_methods_present(self, current_baseline):
@@ -387,7 +387,7 @@ class TestMeshInterfaceAPIAgainstBaseline:
             msg = "MeshInterface API differs from baseline:\n" + "\n".join(
                 f"  {d}" for d in differences
             )
-            msg += "\n\nTo accept these changes, run: poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
+            msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
     def test_mesh_interface_critical_methods_present(self, current_baseline):
@@ -444,7 +444,7 @@ class TestTopLevelExportsAgainstBaseline:
             msg = "Top-level exports differ from baseline:\n" + "\n".join(
                 f"  {d}" for d in differences
             )
-            msg += "\n\nTo accept these changes, run: poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
+            msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
     def test_essential_exports_present(self, current_baseline):
@@ -500,7 +500,7 @@ class TestLegacyImportPathsAgainstBaseline:
             msg = "Legacy import paths differ from baseline:\n" + "\n".join(
                 f"  {d}" for d in differences
             )
-            msg += "\n\nTo accept these changes, run: poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
+            msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
 
@@ -755,5 +755,5 @@ if __name__ == "__main__":
     print(f"Top-level exports: {len(baseline['top_level_exports'])}")
     print(f"Legacy import paths: {len(baseline['legacy_import_paths'])}")
     print(
-        "\nRun tests with: poetry run pytest meshtastic/tests/test_api_baseline_comparison.py -v"
+        "\nRun tests with: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v"
     )

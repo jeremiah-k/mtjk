@@ -36,12 +36,12 @@ def test_runner_selects_integration_tests(
     docker = fake_bin / "docker"
     docker.write_text("#!/bin/sh\nexit 0\n")
     docker.chmod(0o755)
-    poetry = fake_bin / "poetry"
-    poetry.write_text(
+    uv = fake_bin / "uv"
+    uv.write_text(
         f"#!{sys.executable}\n"
         "import json, os, sys\n"
         "from pathlib import Path\n"
-        "args = sys.argv[1:]\n"
+        "args = [arg for arg in sys.argv[1:] if arg != '--locked']\n"
         "if args[:2] == ['run', 'pytest']:\n"
         "    Path(os.environ['RUNNER_CAPTURE']).write_text(json.dumps(args[2:]))\n"
         "elif args[:3] == ['run', 'python', '-']:\n"
@@ -49,7 +49,7 @@ def test_runner_selects_integration_tests(
         "elif args[:3] == ['run', 'python', '-c']:\n"
         "    print('mtjk')\n"
     )
-    poetry.chmod(0o755)
+    uv.chmod(0o755)
     env = {
         key: value
         for key, value in os.environ.items()

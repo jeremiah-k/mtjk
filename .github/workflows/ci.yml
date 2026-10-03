@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: ${{ matrix.python-version }}
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
     strategy:
       fail-fast: false
       matrix:
@@ -43,34 +43,25 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - &cache_poetry_step
-        name: Cache Poetry artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - &setup_uv_step
+        name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          path: |
-            ~/.cache/pypoetry
-            ~/.cache/pip
-          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-poetry-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.PYTHON_VERSION }}-poetry-
-            ${{ runner.os }}-poetry-
-      - &install_dependencies_step
-        name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.1"
+          version: 0.12.22
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - &install_local_step
         name: Install configured CLI from local
         run: |
-          poetry install ${{ env.POETRY_INSTALL_ARGS }}
-          primary_cli="$(poetry run python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
-          poetry run "${primary_cli}" --version
+          uv sync --locked ${{ env.UV_SYNC_ARGS }}
+          primary_cli="$(uv run --locked ${{ env.UV_SYNC_ARGS }} python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
+          uv run --locked ${{ env.UV_SYNC_ARGS }} "${primary_cli}" --version
       - name: Run tests with pytest
         run: |
           if [ "${{ matrix.python-version }}" = "3.13" ]; then
-            poetry run pytest --cov=meshtastic --cov-report=xml --junitxml=junit.xml
+            uv run --locked pytest --cov=meshtastic --cov-report=xml --junitxml=junit.xml
           else
-            poetry run pytest --cov=meshtastic --junitxml=junit.xml
+            uv run --locked pytest --cov=meshtastic --junitxml=junit.xml
           fi
       - name: Upload coverage reports to Codecov
         if: ${{ matrix.python-version == '3.13' }}
@@ -95,15 +86,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Run pylint
-        run: poetry run pylint meshtastic examples/
+        run: uv run --locked pylint meshtastic examples/
   ruff-tests:
     name: Ruff Tests (py3.13)
     runs-on: ubuntu-latest
@@ -121,26 +111,24 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Check types with mypy
-        run: poetry run mypy meshtastic/
+        run: uv run --locked mypy meshtastic/
   docs:
     name: Docs generation (py3.13)
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Smoke-test documentation generation
         run: make docs
@@ -157,12 +145,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Validate compatibility markers inventory
         run: |
@@ -173,7 +160,7 @@ jobs:
           fi
       - name: Run compatibility alias checks
         run: |
-          poetry run pytest \
+          uv run --locked pytest \
             tests/test_ble_naming_compatibility.py \
             tests/test_ble_runner.py::TestBLECoroutineRunner::test_run_coroutine_threadsafe_timeout_alias_warns_deprecated \
             tests/test_ble_runner.py::TestBLECoroutineRunner::test_run_coroutine_threadsafe_timeout_alias_warns_once \
@@ -192,7 +179,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
       MESHTASTICD_IMAGE: meshtastic/meshtasticd:2.8.1-alpha-debian@sha256:b1519a2eb29b274dbb50009ed7d5aea63839bc01550e2af957fd3e97b3867938
       MESHTASTICD_HOST: localhost:4401
       MESHTASTICD_PORT: "4401"
@@ -202,8 +189,7 @@ jobs:
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Run meshtasticd integration tests against simulator
         run: ./bin/run-smokevirt-with-meshtasticd.sh
@@ -235,7 +221,7 @@ jobs:
           - daily
     env:
       PYTHON_VERSION: "3.13"
-      POETRY_INSTALL_ARGS: --all-extras --with dev,powermon
+      UV_SYNC_ARGS: --all-extras --group powermon
       MESHTASTICD_SIM_LOG_DIR: ${{ github.workspace }}/.meshtasticd-logs/simradio/${{ matrix.channel }}
       SIMRADIO_RESULT_DIR: ${{ github.workspace }}/.test-results/simradio/${{ matrix.channel }}
       MESHTASTICD_CHANNEL: "${{ matrix.channel }}"
@@ -243,8 +229,7 @@ jobs:
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
       - name: Install meshtasticd (${{ matrix.channel }}) from PPA
         run: |
@@ -287,7 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${SIMRADIO_RESULT_DIR}"
-          poetry run pytest -m simradio -vv --tb=long --durations=20 \
+          uv run --locked pytest -m simradio -vv --tb=long --durations=20 \
             --junitxml="${SIMRADIO_RESULT_DIR}/junit.xml" 2>&1 \
             | tee "${SIMRADIO_RESULT_DIR}/pytest.log"
       - name: Upload simradio firmware logs and test results
@@ -308,7 +293,7 @@ jobs:
     env:
       PYTHON_VERSION: ${{ matrix.python-version }}
       # Validate base package installs without extras.
-      POETRY_INSTALL_ARGS: ""
+      UV_SYNC_ARGS: --no-dev
     strategy:
       fail-fast: false
       matrix:
@@ -320,8 +305,7 @@ jobs:
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
-      - *install_dependencies_step
+      - *setup_uv_step
       - *install_local_step
   # Installed-distribution artifact smoke gate: builds the sdist and wheel
   # with `python -m build` from this checkout and proves them as installed
@@ -337,7 +321,7 @@ jobs:
     steps:
       - *checkout_step
       - *setup_python_step
-      - *cache_poetry_step
+      - *setup_uv_step
       - name: Install build tool
         # Pinned to the exact `build` version used by the verified local gate
         # run; a drifted build backend could change wheel metadata shape.

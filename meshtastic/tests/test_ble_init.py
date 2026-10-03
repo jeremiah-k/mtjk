@@ -72,7 +72,7 @@ class TestBLEPackageInit:
             except ImportError as exc:
                 message = str(exc).lower()
                 assert "bleak" in message
-                assert "poetry install" in message
+                assert "uv sync --locked" in message
             else:
                 raise AssertionError("expected BLE package import to fail without bleak")
             """)
