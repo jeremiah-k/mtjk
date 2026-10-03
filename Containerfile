@@ -6,7 +6,7 @@
 # Build stage
 FROM docker.io/library/python:3.14-slim-bookworm AS builder
 
-# git is required for pip VCS installs (e.g. riden) and poetry build metadata.
+# git is required for the immutable riden VCS dependency.
 # build-essential and libffi-dev provide gcc and ffi.h for compiling native
 # extensions (cffi, msgpack, rapidfuzz) from source when needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,38 +15,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install poetry and the export plugin in an isolated venv so their
-# dependencies (packaging, requests, etc.) do not pollute the system Python.
-# Without isolation, pip's --prefix=/install skips shared deps it considers
-# "already installed", causing missing modules in the runtime image.
-RUN python -m venv /opt/poetry && \
-    /opt/poetry/bin/pip install --no-cache-dir \
-    poetry==2.5.1 poetry-plugin-export==1.10.1
+# Install uv in an isolated tool environment.
+RUN python -m venv /opt/uv && \
+    /opt/uv/bin/pip install --no-cache-dir uv==0.12.22
 
-# --- Layer 1: Dependency resolution and install (cached unless lock changes) ---
-COPY pyproject.toml poetry.lock README.md ./
+# --- Layer 1: Locked dependencies (cached unless project metadata changes) ---
+COPY pyproject.toml uv.lock README.md LICENSE.md ./
 
-# Export all pinned deps (extras + powermon group) to requirements.txt, then
-# install them to the relocatable prefix.  This layer is only rebuilt when
-# pyproject.toml or poetry.lock changes — source edits do NOT invalidate it.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    /opt/poetry/bin/poetry export \
-    --format requirements.txt \
-    --extras cli --extras analysis \
-    --with powermon \
-    --without dev \
-    --without-hashes \
-    --output requirements.txt && \
-    pip install --no-cache-dir --no-deps --prefix=/install -r requirements.txt
+# Export registry dependencies with their lockfile hashes. The immutable riden
+# Git dependency cannot participate in pip's hash-checking mode, so derive its
+# exact locked VCS requirement separately and install it only after the hashed
+# registry set succeeds.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/uv/bin/uv export --locked --all-extras --group powermon --no-dev \
+    --no-emit-project --no-emit-package riden --format requirements-txt \
+    --output-file requirements-registry.txt && \
+    /opt/uv/bin/uv export --locked --all-extras --group powermon --no-dev \
+    --no-hashes --no-emit-project --format requirements-txt \
+    --output-file requirements-all.txt && \
+    grep -xE 'riden @ git\+https://github\.com/geeksville/riden\.git@[0-9a-f]{40}' \
+    requirements-all.txt > requirements-riden.txt && \
+    test "$(wc -l < requirements-riden.txt)" -eq 1 && \
+    pip install --no-cache-dir --no-deps --require-hashes --prefix=/install \
+    -r requirements-registry.txt && \
+    pip install --no-cache-dir --no-deps --prefix=/install \
+    -r requirements-riden.txt
 
 # --- Layer 2: Source + wheel build (rebuilt on every source change) ---
 COPY meshtastic/ meshtastic/
 
-# Build the wheel and install it on top of the already-installed deps.
-# --no-deps avoids re-resolving; all transitive deps are in Layer 1.
-RUN /opt/poetry/bin/poetry build --format wheel --no-interaction && \
-    pip install --no-cache-dir --no-deps --prefix=/install \
-    ./dist/*.whl
+# Install the wheel over dependencies already installed in the first layer.
+RUN /opt/uv/bin/uv build --wheel && \
+    pip install --no-cache-dir --no-deps --prefix=/install ./dist/*.whl
 
 # Runtime stage
 FROM docker.io/library/python:3.14-slim-bookworm

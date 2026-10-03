@@ -179,23 +179,20 @@ def fixture_write_valid_wheel(tmp_path: Path) -> Callable[..., Path]:
 def _write_synthetic_repo(
     repo_root: Path,
     *,
-    dependencies: str,
     extras: str,
 ) -> Path:
     """Create a minimal checkout (pyproject + branding) for preflight tests."""
     (repo_root / "pyproject.toml").write_text(
-        "[tool.poetry]\n"
+        "[project]\n"
         'name = "mtjk"\n'
         'version = "9.9.9"\n'
         "\n"
-        "[tool.poetry.dependencies]\n"
-        'python = "^3.11,<3.15"\n'
-        f"{dependencies}\n"
+        'requires-python = ">=3.11,<3.15"\n'
         "\n"
-        "[tool.poetry.extras]\n"
+        "[project.optional-dependencies]\n"
         f"{extras}\n"
         "\n"
-        "[tool.poetry.scripts]\n"
+        "[project.scripts]\n"
         'mtjk = "meshtastic.__main__:main"\n'
         'meshtastic = "meshtastic.__main__:main"\n'
         'mesh-tunnel = "meshtastic.__main__:tunnelMain"\n'
@@ -265,6 +262,17 @@ def test_record_unaccounted_member_fails(
     )
     with pytest.raises(SmokeGateError, match=r"RECORD does not account for 1"):
         smoke.validate_wheel_contents(wheel, EXPECTATIONS, PB2_STEMS)
+
+
+def test_directory_entries_do_not_need_record_rows(
+    write_valid_wheel: Callable[..., Path],
+) -> None:
+    """Explicit ZIP directories may be omitted from the installed-file ledger."""
+    wheel = write_valid_wheel()
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("meshtastic/", "")
+        archive.writestr("meshtastic/protobuf/", "")
+    smoke.validate_wheel_contents(wheel, EXPECTATIONS, PB2_STEMS)
 
 
 def test_missing_console_script_fails(write_valid_wheel: Callable[..., Path]) -> None:
@@ -386,8 +394,13 @@ def test_load_repo_expectations_derives_cli_roles(tmp_path: Path) -> None:
     """Preflight derives script targets, analysis deps, and CLI roles."""
     repo_root = _write_synthetic_repo(
         tmp_path,
-        dependencies='pyarrow = { version = "*", optional = true }\n',
-        extras='cli = []\nanalysis = ["pyarrow"]\n',
+        extras="""\
+cli = []
+analysis = [
+  "PyArrow>=25.0.0; python_version >= '3.11'",
+  "Pandas_Stubs>=2.3.3",
+]
+""",
     )
     expectations = smoke.load_repo_expectations(repo_root)
     assert expectations.scripts == (
@@ -405,20 +418,17 @@ def test_load_repo_expectations_derives_cli_roles(tmp_path: Path) -> None:
         tunnel="mesh-tunnel",
         analysis="mesh-analysis",
     )
-    assert expectations.analysis_extra_deps == ("pyarrow",)
+    assert expectations.analysis_extra_deps == ("pandas-stubs", "pyarrow")
 
 
-def test_optional_dependency_without_extra_fails(tmp_path: Path) -> None:
-    """An optional dependency belonging to no extra must fail preflight."""
+@pytest.mark.parametrize("extras", ["cli = []\n", "cli = []\nanalysis = []\n"])
+def test_missing_analysis_dependencies_fail(tmp_path: Path, extras: str) -> None:
+    """An absent or empty analysis extra must fail preflight."""
     repo_root = _write_synthetic_repo(
         tmp_path,
-        dependencies=(
-            'pyarrow = { version = "*", optional = true }\n'
-            'orphan-dep = { version = "*", optional = true }\n'
-        ),
-        extras='cli = []\nanalysis = ["pyarrow"]\n',
+        extras=extras,
     )
-    with pytest.raises(SmokeGateError, match=r"belong to no extra"):
+    with pytest.raises(SmokeGateError, match=r"no optional dependencies"):
         smoke.load_repo_expectations(repo_root)
 
 

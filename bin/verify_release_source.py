@@ -68,7 +68,7 @@ def _parse_package_metadata(pyproject_text: str) -> tuple[str, str]:
     """Return unambiguous package name and version from TOML text.
 
     PEP 621 ``[project]`` metadata is preferred when present, while legacy
-    ``[tool.poetry]`` fields remain supported for the current project layout.
+    ``[tool.poetry]`` fields remain supported for historical release tags.
     If both sections explicitly declare a value, they must agree so release
     provenance cannot depend on which metadata consumer happens to read it.
 

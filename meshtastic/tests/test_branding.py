@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -56,10 +57,10 @@ def test_packaging_metadata_tracks_branding_contract() -> None:
     pyproject = tomllib.loads(
         (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    poetry = pyproject["tool"]["poetry"]
-    scripts = poetry["scripts"]
+    project = pyproject["project"]
+    scripts = project["scripts"]
 
-    assert poetry["name"] == branding.DISTRIBUTION_NAME
+    assert project["name"] == branding.DISTRIBUTION_NAME
     expected_cli_names = {
         branding.PRIMARY_CLI_NAME,
         *branding.COMPATIBILITY_CLI_NAMES,
@@ -68,3 +69,40 @@ def test_packaging_metadata_tracks_branding_contract() -> None:
         name for name, target in scripts.items() if target == "meshtastic.__main__:main"
     }
     assert actual_cli_names == expected_cli_names
+
+
+@pytest.mark.unit
+def test_shared_optional_dependency_constraints_stay_synchronized() -> None:
+    """Powermon copies of analysis dependencies must retain identical bounds."""
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    analysis = {
+        requirement.name: str(requirement.specifier)
+        for value in pyproject["project"]["optional-dependencies"]["analysis"]
+        for requirement in (Requirement(value),)
+    }
+    powermon = {
+        requirement.name: str(requirement.specifier)
+        for value in pyproject["dependency-groups"]["powermon"]
+        for requirement in (Requirement(value),)
+    }
+
+    for shared_name in ("parse", "platformdirs", "pyarrow"):
+        assert powermon[shared_name] == analysis[shared_name]
+
+
+@pytest.mark.unit
+def test_uv_build_backend_is_exactly_pinned() -> None:
+    """Release artifacts must not drift to a newer build backend implicitly."""
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    backend_requirements = pyproject["build-system"]["requires"]
+
+    assert len(backend_requirements) == 1
+    backend = Requirement(backend_requirements[0])
+    exact_pins = list(backend.specifier)
+    assert backend.name == "uv_build"
+    assert len(exact_pins) == 1
+    assert exact_pins[0].operator == "=="

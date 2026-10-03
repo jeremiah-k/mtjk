@@ -6,5 +6,5 @@
 !examples/
 !extra/
 !meshtastic/
-!poetry.lock
+!uv.lock
 !pyproject.toml

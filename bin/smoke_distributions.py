@@ -198,9 +198,8 @@ class RepoExpectations:
     extras : tuple[str, ...]
         Extra names that must appear in built metadata.
     analysis_extra_deps : tuple[str, ...]
-        Dependencies that are BOTH declared ``optional = true`` and listed in
-        the analysis extra; each must carry the ``extra == "analysis"``
-        marker in built metadata.
+        Dependencies declared in the analysis extra; each must carry the
+        ``extra == "analysis"`` marker in built metadata.
     python_requires : str
         Required Python specifier that must be present in built metadata.
     """
@@ -573,7 +572,7 @@ def load_repo_expectations(repo_root: Path) -> RepoExpectations:
     ------
     SmokeGateError
         When required packaging declarations are missing or inconsistent
-        (for example an optional dependency belonging to no extra).
+        (for example a missing analysis extra).
     """
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.is_file():
@@ -585,52 +584,26 @@ def load_repo_expectations(repo_root: Path) -> RepoExpectations:
             "preflight", f"pyproject.toml is not valid TOML: {exc}"
         ) from exc
     try:
-        poetry = raw["tool"]["poetry"]
-        name = str(poetry["name"])
-        version = str(poetry["version"])
-        scripts = tuple(sorted(str(key) for key in poetry["scripts"]))
+        project = raw["project"]
+        name = str(project["name"])
+        version = str(project["version"])
+        scripts = tuple(sorted(str(key) for key in project["scripts"]))
         script_targets = {
-            str(key): str(value) for key, value in poetry["scripts"].items()
+            str(key): str(value) for key, value in project["scripts"].items()
         }
-        extras = tuple(sorted(str(key) for key in poetry["extras"]))
+        extra_requirements = project["optional-dependencies"]
+        extras = tuple(sorted(str(key) for key in extra_requirements))
         extras_dependencies = {
-            str(extra): tuple(str(dep) for dep in poetry["extras"][extra])
-            for extra in poetry["extras"]
+            str(extra): tuple(_requirement_name(dep) for dep in requirements)
+            for extra, requirements in extra_requirements.items()
         }
-        python_requires = str(poetry["dependencies"]["python"])
-        optional_deps = tuple(
-            sorted(
-                str(dep)
-                for dep, spec in poetry["dependencies"].items()
-                if isinstance(spec, Mapping) and spec.get("optional") is True
-            )
-        )
+        python_requires = str(project["requires-python"])
     except (KeyError, TypeError) as exc:
         raise SmokeGateError(
             "preflight",
             f"pyproject.toml is missing required packaging declarations: {exc!r}",
         ) from exc
-    covered = {
-        _canonical_name(dep)
-        for members in extras_dependencies.values()
-        for dep in members
-    }
-    orphans = [dep for dep in optional_deps if _canonical_name(dep) not in covered]
-    if orphans:
-        raise SmokeGateError(
-            "preflight",
-            "optional dependencies belong to no extra (real packaging "
-            f"defect): {orphans}",
-        )
-    analysis_deps = tuple(
-        dep
-        for dep in optional_deps
-        if _canonical_name(dep)
-        in {
-            _canonical_name(member)
-            for member in extras_dependencies.get(ANALYSIS_EXTRA, ())
-        }
-    )
+    analysis_deps = tuple(sorted(extras_dependencies.get(ANALYSIS_EXTRA, ())))
     if not analysis_deps:
         raise SmokeGateError(
             "preflight",
@@ -798,7 +771,7 @@ def _requirement_name(line: str) -> str:
 
 
 # Tolerant marker matching: whitespace and quote style may vary between
-# poetry-core versions and metadata normalizers.
+# build backends and metadata normalizers.
 _ANY_EXTRA_MARKER_RE = re.compile(r"extra\s*==")
 _ANALYSIS_EXTRA_MARKER_RE = re.compile(
     rf"extra\s*==\s*['\"]{re.escape(ANALYSIS_EXTRA)}['\"]"
@@ -810,11 +783,9 @@ def _validate_requires_dist(
 ) -> None:
     """Require every analysis-extra dependency to carry the analysis marker.
 
-    Only dependencies that are BOTH declared ``optional = true`` in pyproject
-    AND listed in the analysis extra are held to the marker requirement, so
-    optional dependencies of other extras (or of no extra, rejected earlier)
-    are never conflated with it. Names are compared after PEP 503
-    normalization and markers are matched tolerantly.
+    Dependencies declared in the analysis extra are held to the marker
+    requirement, without conflating dependencies of other extras. Names are
+    compared after PEP 503 normalization and markers are matched tolerantly.
     """
     for dep in expectations.analysis_extra_deps:
         wanted = _canonical_name(dep)
@@ -842,37 +813,6 @@ def _validate_requires_dist(
                 f"dependency '{dep}' does not carry the " 'extra == "analysis" marker',
                 detail="\n".join(lines),
             )
-
-
-def _expand_poetry_caret(constraint: str) -> str:
-    """Expand poetry caret constraints to PEP 440 bounds, per comma part.
-
-    For example ``^3.11`` becomes ``>=3.11,<4.0.0`` and ``^0.2.3`` becomes
-    ``>=0.2.3,<0.3.0``. Non-caret parts pass through unchanged.
-    """
-    expanded = []
-    for part in constraint.split(","):
-        part = part.strip()
-        match = re.fullmatch(r"\^(\d+)(?:\.(\d+))?(?:\.(\d+))?", part)
-        if match is None:
-            expanded.append(part)
-            continue
-        major = int(match.group(1))
-        minor = match.group(2)
-        patch = match.group(3)
-        floor = part[1:]
-        if minor is None:
-            cap = f"{major + 1}.0.0"
-        elif patch is None:
-            cap = f"0.{int(minor) + 1}.0" if major == 0 else f"{major + 1}.0.0"
-        elif major == 0 and int(minor) == 0:
-            cap = f"0.0.{int(patch) + 1}"
-        elif major == 0:
-            cap = f"0.{int(minor) + 1}.0"
-        else:
-            cap = f"{major + 1}.0.0"
-        expanded.append(f">={floor},<{cap}")
-    return ",".join(expanded)
 
 
 def _compare_release_versions(left: str, right: str) -> int:
@@ -949,13 +889,12 @@ def _validate_requires_python(
 ) -> None:
     """Prove built Requires-Python matches the source-derived expectation.
 
-    The pyproject constraint uses poetry syntax (caret bounds); it is
-    expanded to PEP 440, and both sides are reduced to (floor, cap) bounds
+    The PEP 440 constraints on both sides are reduced to (floor, cap) bounds
     that must agree exactly, so a metadata drift such as a silently widened
     or narrowed Python range cannot pass.
     """
     expected_floor, expected_cap = _python_range_bounds(
-        _expand_poetry_caret(expectations.python_requires), phase="contents"
+        expectations.python_requires, phase="contents"
     )
     built_floor, built_cap = _python_range_bounds(requires_python, phase="contents")
 
@@ -1023,7 +962,7 @@ def _normalize_script_target(value: str) -> str:
 
     Collapses whitespace runs and glues the legacy ``[extra]`` suffix onto
     the callable, so pyproject's ``module:attr [extra]`` compares equal to
-    the ``module:attr[extra]`` form poetry-core writes into
+    the ``module:attr[extra]`` form a build backend may write into
     entry_points.txt.
     """
     collapsed = " ".join(value.split())
@@ -1037,7 +976,7 @@ def _validate_entry_points(
 
     Every script VALUE from the built entry_points.txt is compared against
     the ``module:attr[extra]`` target derived from pyproject
-    ``[tool.poetry.scripts]`` (whitespace-normalized); a script whose
+    ``[project.scripts]`` (whitespace-normalized); a script whose
     pyproject target carries the ``[analysis]`` extra marker must keep it.
 
     Raises
@@ -1104,7 +1043,8 @@ def validate_wheel_contents(
         module; expectations are runtime-derived.
     """
     with zipfile.ZipFile(wheel) as archive:
-        names = archive.namelist()
+        # ZIP directory entries are not installed files and need no RECORD row.
+        names = [entry.filename for entry in archive.infolist() if not entry.is_dir()]
         metadata_paths = sorted(
             name for name in names if name.endswith(".dist-info/METADATA")
         )

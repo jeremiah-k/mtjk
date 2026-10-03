@@ -30,7 +30,7 @@ git -C "${REPO_ROOT}" archive "${MASTER_SHA}" meshtastic | tar -x -C "${tmpdir}"
 
 (
 	cd "${REPO_ROOT}"
-	poetry run python bin/extract_api_surface.py "${tmpdir}/meshtastic" \
+	uv run --locked --all-extras --group powermon python bin/extract_api_surface.py "${tmpdir}/meshtastic" \
 		--provenance-ref "${MASTER_REF}" \
 		--provenance-sha "${MASTER_SHA}" \
 		>"${OUT_FILE}"

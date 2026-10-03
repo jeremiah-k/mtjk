@@ -65,21 +65,17 @@ jobs:
           RELEASE_COMMIT: ${{ steps.release_source.outputs.commit }}
         run: git checkout --detach "${RELEASE_COMMIT}"
 
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "poetry==2.5.1"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.22
+          # This privileged release job is infrequent; avoid restoring a mutable
+          # dependency cache across release builds.
+          enable-cache: false
 
       - name: Build standalone assets
-        run: "${RUNNER_TEMP}/build-bin.sh"
-
-      - name: Read CLI branding
         id: cli_branding
-        run: |
-          primary="$(poetry run python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
-          compatibility="$(poetry run python -c 'from meshtastic._branding import COMPATIBILITY_CLI_NAMES; print(" ".join(COMPATIBILITY_CLI_NAMES))')"
-          echo "primary=${primary}" >> "${GITHUB_OUTPUT}"
-          echo "compatibility=${compatibility}" >> "${GITHUB_OUTPUT}"
+        run: "${RUNNER_TEMP}/build-bin.sh"
 
       - name: Smoke-test standalone executables
         env:

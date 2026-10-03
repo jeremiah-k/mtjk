@@ -1,6 +1,6 @@
 .PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
 
-POETRY_RUN := poetry run
+UV_RUN := uv run --locked
 API_BASELINE_FILE := meshtastic/tests/api_baselines/api_baseline.json
 API_BASELINE_REF ?= upstream/master
 
@@ -12,27 +12,27 @@ clean:
 
 # only run the fast unit tests
 test:
-	$(POETRY_RUN) pytest -m unit
+	$(UV_RUN) pytest -m unit
 
 # run baseline CI checks locally
 # Runs the first CI stages in order:
 # pytest (with coverage) -> pylint -> ruff (tests)
 ci-base:
-	$(POETRY_RUN) pytest --cov=meshtastic --cov-report=xml
+	$(UV_RUN) pytest --cov=meshtastic --cov-report=xml
 	$(MAKE) lint
 	$(MAKE) lint-tests
 
 ci:
 	$(MAKE) ci-base
-	$(POETRY_RUN) mypy meshtastic/
+	$(UV_RUN) mypy meshtastic/
 
 # generate the markdown configuration field reference
 field-reference:
-	$(POETRY_RUN) python bin/generate_field_reference.py
+	$(UV_RUN) python bin/generate_field_reference.py
 
 # generate API baseline from current working tree
 api-baseline:
-	$(POETRY_RUN) python bin/extract_api_surface.py meshtastic > $(API_BASELINE_FILE)
+	$(UV_RUN) --all-extras --group powermon python bin/extract_api_surface.py meshtastic > $(API_BASELINE_FILE)
 
 # generate API baseline from the upstream source snapshot (upstream/master;
 # add the remote first if needed: git remote add upstream
@@ -43,11 +43,11 @@ api-baseline-master:
 # run CI checks with strict mypy (for maintainers)
 ci-strict:
 	$(MAKE) ci-base
-	$(POETRY_RUN) mypy meshtastic/ --strict
+	$(UV_RUN) mypy meshtastic/ --strict
 
 # only run the smoke tests against the virtual device
 virt:
-	$(POETRY_RUN) pytest -m smokevirt
+	$(UV_RUN) pytest -m smokevirt
 
 # run meshtasticd simulator integration tests (defaults to test_meshtasticd_ci.py + test_meshtasticd_tcp_interface_ci.py unless MESHTASTICD_PYTEST_TARGETS is set)
 virt-meshtasticd:
@@ -61,19 +61,19 @@ virt-smokevirt-meshtasticd:
 
 # run process-managed native meshtasticd single/multi-node smoke tests
 simradio:
-	$(POETRY_RUN) pytest -m simradio -v --durations=20
+	$(UV_RUN) pytest -m simradio -v --durations=20
 
 # run stable non-destructive smoke1 hardware checks
 smoke1:
-	$(POETRY_RUN) pytest -m "smoke1 and not smoke1_destructive" -s -vv
+	$(UV_RUN) pytest -m "smoke1 and not smoke1_destructive" -s -vv
 
 # run destructive smoke1 hardware checks (reboot/reset/config mutation)
 smoke1-destructive:
-	$(POETRY_RUN) pytest -m "smoke1 and smoke1_destructive" -s -vv
+	$(UV_RUN) pytest -m "smoke1 and smoke1_destructive" -s -vv
 
 # local install
 install:
-	poetry install
+	uv sync --locked
 
 # build the sdist+wheel from this tree and prove them as installed
 # distributions in isolated consumer venvs (same command as the CI `artifacts`
@@ -91,11 +91,11 @@ check-artifacts:
 # in protobuf 6) and spews per-module stub-parsing errors; excluding the
 # generated modules keeps the run clean.
 docs:
-	$(POETRY_RUN) pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
+	$(UV_RUN) pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
 
 # lint the codebase (same command as CI)
 lint:
-	PYLINTHOME=$${TMPDIR:-/tmp}/pylint-cache $(POETRY_RUN) pylint meshtastic examples/
+	PYLINTHOME=$${TMPDIR:-/tmp}/pylint-cache $(UV_RUN) pylint meshtastic examples/
 
 # lint tests with the canonical Ruff version (same scope as CI)
 lint-tests:
@@ -103,7 +103,7 @@ lint-tests:
 
 # show the slowest unit tests
 slow:
-	$(POETRY_RUN) pytest -m unit --durations=5
+	$(UV_RUN) pytest -m unit --durations=5
 
 protobufs: FORCE
 	git submodule update --init --recursive
@@ -126,12 +126,12 @@ open-coverage:
 	fi
 
 cov:
-	$(POETRY_RUN) pytest --cov-report html --cov=meshtastic
+	$(UV_RUN) pytest --cov-report html --cov=meshtastic
 	@$(MAKE) open-coverage
 
 # run cli examples
 examples: FORCE
-	$(POETRY_RUN) pytest -m examples
+	$(UV_RUN) pytest -m examples
 
 # Makefile hack to get the examples to always run
 FORCE: ;
