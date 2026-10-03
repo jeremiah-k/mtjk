@@ -321,7 +321,6 @@ jobs:
     steps:
       - *checkout_step
       - *setup_python_step
-      - *setup_uv_step
       - name: Install build tool
         # Pinned to the exact `build` version used by the verified local gate
         # run; a drifted build backend could change wheel metadata shape.

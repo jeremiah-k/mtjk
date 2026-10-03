@@ -22,12 +22,24 @@ RUN python -m venv /opt/uv && \
 # --- Layer 1: Locked dependencies (cached unless project metadata changes) ---
 COPY pyproject.toml uv.lock README.md LICENSE.md ./
 
-# Export runtime extras and the powermon group without the project or dev tools.
+# Export registry dependencies with their lockfile hashes. The immutable riden
+# Git dependency cannot participate in pip's hash-checking mode, so derive its
+# exact locked VCS requirement separately and install it only after the hashed
+# registry set succeeds.
 RUN --mount=type=cache,target=/root/.cache/uv \
     /opt/uv/bin/uv export --locked --all-extras --group powermon --no-dev \
+    --no-emit-project --no-emit-package riden --format requirements-txt \
+    --output-file requirements-registry.txt && \
+    /opt/uv/bin/uv export --locked --all-extras --group powermon --no-dev \
     --no-hashes --no-emit-project --format requirements-txt \
-    --output-file requirements.txt && \
-    pip install --no-cache-dir --no-deps --prefix=/install -r requirements.txt
+    --output-file requirements-all.txt && \
+    grep -xE 'riden @ git\+https://github\.com/geeksville/riden\.git@[0-9a-f]{40}' \
+    requirements-all.txt > requirements-riden.txt && \
+    test "$(wc -l < requirements-riden.txt)" -eq 1 && \
+    pip install --no-cache-dir --no-deps --require-hashes --prefix=/install \
+    -r requirements-registry.txt && \
+    pip install --no-cache-dir --no-deps --prefix=/install \
+    -r requirements-riden.txt
 
 # --- Layer 2: Source + wheel build (rebuilt on every source change) ---
 COPY meshtastic/ meshtastic/

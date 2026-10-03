@@ -536,6 +536,19 @@ def test_standalone_smoke_contract_rejects_missing_required_surface(
 
 
 @pytest.mark.unit
+def test_container_install_preserves_registry_hash_verification() -> None:
+    """Registry dependencies stay hash-checked while pinned VCS deps stay isolated."""
+    containerfile = (_REPO_ROOT / "Containerfile").read_text(encoding="utf-8")
+
+    assert "--no-emit-package riden" in containerfile
+    assert containerfile.count("--no-hashes") == 1
+    assert "requirements-registry.txt" in containerfile
+    assert "requirements-riden.txt" in containerfile
+    assert "--require-hashes --prefix=/install" in containerfile
+    assert "geeksville/riden\\.git@[0-9a-f]{40}" in containerfile
+
+
+@pytest.mark.unit
 def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     """Keep PyPI simple while standalone/container releases retain provenance checks."""
     pypi_path = _REPO_ROOT / ".github" / "workflows" / "pypi-publish.yml"
@@ -564,7 +577,7 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     assert "package_version=" in pypi
     assert "tomllib.load(open(" in pypi
     assert 'test "${RELEASE_TAG#v}" = "${package_version}"' in pypi
-    assert "python -m pip install build" in pypi
+    assert "python -m pip install build==1.5.0" in pypi
     assert "run: python -m build\n" in pypi
     assert "pypa/gh-action-pypi-publish@" in pypi
     for obsolete in (
@@ -628,6 +641,8 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
         in release_assets
     )
     assert "tag_name: ${{ steps.release_source.outputs.tag }}" in release_assets
+    assert "enable-cache: false" in release_assets
+    assert "cache-dependency-glob" not in release_assets
 
     container = container_path.read_text(encoding="utf-8")
     assert "RELEASE_VERSION: ${{ steps.release_source.outputs.version }}" in container

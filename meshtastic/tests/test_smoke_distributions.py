@@ -394,7 +394,13 @@ def test_load_repo_expectations_derives_cli_roles(tmp_path: Path) -> None:
     """Preflight derives script targets, analysis deps, and CLI roles."""
     repo_root = _write_synthetic_repo(
         tmp_path,
-        extras='cli = []\nanalysis = ["PyArrow>=25.0.0; python_version >= \'3.11\'", "Pandas_Stubs>=2.3.3"]\n',
+        extras="""\
+cli = []
+analysis = [
+  "PyArrow>=25.0.0; python_version >= '3.11'",
+  "Pandas_Stubs>=2.3.3",
+]
+""",
     )
     expectations = smoke.load_repo_expectations(repo_root)
     assert expectations.scripts == (

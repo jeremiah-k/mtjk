@@ -72,7 +72,7 @@ dev = [
   "types-pyyaml>=6.0.12.20250915,<7.0.0.0",
   "pyarrow-stubs>=20.0.0.20251215,<21.0.0.0",
 ]
-# Keep shared analysis/powermon dependency constraints synchronized.
+# Shared analysis/powermon constraints are enforced by test_branding.py.
 powermon = [
   "riden",
   "ppk2-api>=0.9.2,<0.10.0",
@@ -118,5 +118,5 @@ jupyter = "uv run --locked --extra analysis --group analysis jupyter lab"
 profile = "black"
 
 [build-system]
-requires = ["uv_build>=0.12.22,<0.13"]
+requires = ["uv_build==0.12.22"]
 build-backend = "uv_build"
