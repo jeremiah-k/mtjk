@@ -707,6 +707,8 @@ class ModuleConfig(_message.Message):
             """
             LOGTEXT: ModuleConfig.SerialConfig._Serial_Mode.ValueType  # 10
             """only text (channel & DM)"""
+            MODBUS: ModuleConfig.SerialConfig._Serial_Mode.ValueType  # 11
+            """Modbus-RTU master, polls an RS485 sensor and sends telemetry"""
 
         class Serial_Mode(_Serial_Mode, metaclass=_Serial_ModeEnumTypeWrapper):
             """
@@ -736,6 +738,8 @@ class ModuleConfig(_message.Message):
         """
         LOGTEXT: ModuleConfig.SerialConfig.Serial_Mode.ValueType  # 10
         """only text (channel & DM)"""
+        MODBUS: ModuleConfig.SerialConfig.Serial_Mode.ValueType  # 11
+        """Modbus-RTU master, polls an RS485 sensor and sends telemetry"""
 
         ENABLED_FIELD_NUMBER: _builtins.int
         ECHO_FIELD_NUMBER: _builtins.int
