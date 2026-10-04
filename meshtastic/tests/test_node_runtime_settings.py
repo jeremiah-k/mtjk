@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.protobuf.descriptor import FieldDescriptor
 
 from ..node_runtime.settings_runtime import (
     _NodeAdminCommandRuntime,
@@ -93,16 +94,28 @@ class TestNodeSettingsMessageBuilder:
     """Tests for _NodeSettingsMessageBuilder."""
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("config_type_int", [0, 123])
     def test_build_request_message_with_int_sets_get_config_request(
-        self, mock_node_for_settings: MagicMock
+        self, mock_node_for_settings: MagicMock, config_type_int: int
     ) -> None:
         """build_request_message with int config_type sets get_config_request."""
         builder = _NodeSettingsMessageBuilder(mock_node_for_settings)
-        config_type_int = admin_pb2.AdminMessage.ConfigType.DEVICE_CONFIG
-
         result = builder.build_request_message(config_type_int)
 
         assert result.get_config_request == config_type_int
+
+    @pytest.mark.unit
+    def test_build_request_message_rejects_descriptor_without_containing_message(
+        self, mock_node_for_settings: MagicMock
+    ) -> None:
+        """An unbound field descriptor fails with a configuration diagnostic."""
+        builder = _NodeSettingsMessageBuilder(mock_node_for_settings)
+        field = MagicMock(spec=FieldDescriptor)
+        field.name = "device"
+        field.containing_type = None
+
+        with pytest.raises(ValueError, match="device has no containing message"):
+            builder.build_request_message(field)
 
     @pytest.mark.unit
     def test_build_request_message_with_local_config_field_descriptor(

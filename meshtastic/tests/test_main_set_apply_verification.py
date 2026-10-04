@@ -211,8 +211,8 @@ def _build_local_set_interface(
             (staged_local, device_local),
             (staged_module, device_module),
         ):
-            for field in device.DESCRIPTOR.fields:
-                if field.message_type is None or not device.HasField(field.name):
+            for field, _value in device.ListFields():
+                if field.message_type is None:
                     continue
                 _refresh_from_device(staged, device, field.name, deliver=True)
 

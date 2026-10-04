@@ -440,7 +440,7 @@ def test_analysis_camelcase_aliases_delegate() -> None:
     frame = pd.DataFrame({"average_mA": [1.0]})
     assert choosePowerColumn(frame, "average_mW", "average_mA") == "average_mA"
 
-    known_board_id = mesh_pb2.HardwareModel.DESCRIPTOR.values[0].number
+    known_board_id = mesh_pb2.HardwareModel.values()[0]
     dslog = pd.DataFrame(
         {
             "time": [1],
@@ -493,7 +493,7 @@ def test_get_board_info_requires_non_null_sw_version() -> None:
 @pytest.mark.unit
 def test_get_board_info_accepts_integral_float_board_id() -> None:
     """get_board_info should accept float board_id values that are exact integers."""
-    known_board_id = mesh_pb2.HardwareModel.DESCRIPTOR.values[0].number
+    known_board_id = mesh_pb2.HardwareModel.values()[0]
     frame = pd.DataFrame({"sw_version": ["2.5.0"], "board_id": [float(known_board_id)]})
     result = get_board_info(frame)
     assert result[0] == mesh_pb2.HardwareModel.Name(known_board_id)
@@ -502,7 +502,7 @@ def test_get_board_info_accepts_integral_float_board_id() -> None:
 @pytest.mark.unit
 def test_get_board_info_accepts_string_board_id() -> None:
     """get_board_info should accept string board_id values that are valid integers."""
-    known_board_id = mesh_pb2.HardwareModel.DESCRIPTOR.values[0].number
+    known_board_id = mesh_pb2.HardwareModel.values()[0]
     frame = pd.DataFrame({"sw_version": ["2.5.0"], "board_id": [str(known_board_id)]})
     result = get_board_info(frame)
     assert result[0] == mesh_pb2.HardwareModel.Name(known_board_id)

@@ -103,6 +103,7 @@ def test_standard_field_deprecation_is_preserved_without_custom_metadata() -> No
 def test_standard_enum_value_deprecation_is_preserved_without_custom_metadata() -> None:
     """Standard EnumValueOptions deprecation is retained for enum descriptions."""
     field = localonly_pb2.LocalConfig().device.DESCRIPTOR.fields_by_name["role"]
+    assert field.enum_type is not None
     value = field.enum_type.values_by_name["ROUTER_CLIENT"]
 
     metadata = _get_enum_value_metadata(value)
@@ -214,11 +215,9 @@ def test_enum_name_resolution_is_truly_case_insensitive() -> None:
     )
     enum_proto = file_proto.enum_type.add(name="MixedCaseEnum")
     enum_proto.value.add(name="Mixed_Name", number=0)
-    enum_descriptor = (
-        descriptor_pool.DescriptorPool()
-        .Add(file_proto)
-        .enum_types_by_name["MixedCaseEnum"]
-    )
+    pool = descriptor_pool.DescriptorPool()
+    pool.Add(file_proto)
+    enum_descriptor = pool.FindEnumTypeByName("schema_metadata_test.MixedCaseEnum")
 
     resolved = _resolve_enum_value_name(enum_descriptor, "mixed_name")
 

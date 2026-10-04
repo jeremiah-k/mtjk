@@ -1,7 +1,7 @@
 """Settings request/response and admin command-family runtime owners."""
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
@@ -28,23 +28,31 @@ class _NodeSettingsMessageBuilder:
         """Build request-config message from int or protobuf field descriptor."""
         message = admin_pb2.AdminMessage()
         if isinstance(config_type, int):
-            message.get_config_request = config_type  # type: ignore[assignment] # pyright: ignore[reportAttributeAccessIssue]
+            message.get_config_request = cast(
+                "admin_pb2.AdminMessage.ConfigType.ValueType", config_type
+            )
             return message
 
-        if config_type.containing_type.name == "LocalConfig":
+        containing_type = config_type.containing_type
+        if containing_type is None:
+            raise ValueError(
+                f"Config descriptor {config_type.name} has no containing message"
+            )
+
+        if containing_type.name == "LocalConfig":
             message.get_config_request = admin_pb2.AdminMessage.ConfigType.Value(
                 f"{config_type.name.upper()}_CONFIG"
             )
             return message
 
-        if config_type.containing_type.name in ("ModuleConfig", "LocalModuleConfig"):
-            message.get_module_config_request = (
-                config_type.index  # pyright: ignore[reportAttributeAccessIssue]
+        if containing_type.name in ("ModuleConfig", "LocalModuleConfig"):
+            message.get_module_config_request = cast(
+                "admin_pb2.AdminMessage.ModuleConfigType.ValueType", config_type.index
             )
             return message
 
         raise ValueError(
-            f"Unsupported config descriptor: {config_type.name} in {config_type.containing_type.name}"
+            f"Unsupported config descriptor: {config_type.name} in {containing_type.name}"
         )
 
     @staticmethod
