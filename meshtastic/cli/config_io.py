@@ -6,7 +6,7 @@ import json
 import os
 from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Any, NoReturn, Protocol
+from typing import Any, NoReturn, Protocol, cast
 
 import yaml
 from google.protobuf.descriptor import Descriptor, FieldDescriptor
@@ -507,6 +507,7 @@ def prefix_base64_bytes_fields(
                 continue
 
             message_type = field.message_type
+            assert message_type is not None
             if message_type.GetOptions().map_entry:
                 value_field = message_type.fields_by_name["value"]
                 if not isinstance(value, MutableMapping):
@@ -519,6 +520,8 @@ def prefix_base64_bytes_fields(
                             map_value, field_path=f"{field_path}[{map_key!r}]"
                         )
                 elif value_field.type == FieldDescriptor.TYPE_MESSAGE:
+                    value_message_type = value_field.message_type
+                    assert value_message_type is not None
                     for map_key, map_value in value.items():
                         if not isinstance(map_value, MutableMapping):
                             raise TypeError(
@@ -526,7 +529,7 @@ def prefix_base64_bytes_fields(
                                 f"{field_path}[{map_key!r}]"
                             )
                         _walk(
-                            value_field.message_type,
+                            value_message_type,
                             map_value,
                             path=f"{field_path}[{map_key!r}]",
                         )
@@ -546,7 +549,9 @@ def prefix_base64_bytes_fields(
                     raise TypeError(f"Expected mapping for message field {field_path}")
                 _walk(message_type, value, path=field_path)
 
-    _walk(message.DESCRIPTOR, values)
+    # Protobuf's public descriptor classes recognize the upb equivalents at
+    # runtime; their stubs describe the two implementations as distinct types.
+    _walk(cast(DescriptorLike, message.DESCRIPTOR), values)
 
 
 # COMPAT_STABLE_SHIM: implementation backing meshtastic.__main__._prefix_base64_key.

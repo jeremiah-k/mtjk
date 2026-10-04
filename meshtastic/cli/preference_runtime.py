@@ -722,10 +722,11 @@ def _assign_repeated_message_pref_value(
         assignment message. Each object is parsed strictly on a message copy,
         and an empty array clears the field.
     """
+    message_type = pref.message_type
     parsed = _parse_repeated_message_value(
         pref, raw_value, field_path=field_path, cli_print=cli_print
     )
-    if parsed is None:
+    if message_type is None or parsed is None:
         # Caller routed here in error; treat the raw payload as invalid.
         return (
             reject_pref_value(
@@ -753,7 +754,7 @@ def _assign_repeated_message_pref_value(
     candidate.CopyFrom(target)
     field_container = getattr(candidate, pref.name)
     del field_container[:]
-    submsg_class = GetMessageClass(pref.message_type)
+    submsg_class = GetMessageClass(message_type)
     for index, element in enumerate(elements):
         submsg = submsg_class()
         try:

@@ -269,16 +269,12 @@ def _resolve_field_path(
         The resolved field, or ``None`` when any segment is unknown or a
         non-final segment is not a nested message.
     """
-    current: FieldDescriptor | None = root.fields_by_name.get(section)
-    if current is None or current.message_type is None:
-        return None
-    for name in field_path[:-1]:
-        assert current is not None
-        nested = current.message_type.fields_by_name.get(name)
-        if nested is None or nested.message_type is None:
+    current = root.fields_by_name.get(section)
+    for name in field_path:
+        if current is None or current.message_type is None:
             return None
-        current = nested
-    return current.message_type.fields_by_name.get(field_path[-1])
+        current = current.message_type.fields_by_name.get(name)
+    return current
 
 
 def _normalize_metadata(
