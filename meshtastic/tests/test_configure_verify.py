@@ -16,6 +16,38 @@ from meshtastic.protobuf import apponly_pb2, channel_pb2, config_pb2, localonly_
 
 @pytest.mark.unit
 @pytest.mark.parametrize("use_preset", [False, True])
+@pytest.mark.parametrize(
+    ("field_name", "device_value"),
+    [("bandwidth", 250), ("spread_factor", 11), ("modem_preset", 1)],
+)
+def test_direct_lora_verification_compares_only_active_modem_fields(
+    use_preset: bool, field_name: str, device_value: int
+) -> None:
+    """YAML and URL verification both ignore dormant modem parameters."""
+    lora = config_pb2.Config.LoRaConfig(use_preset=use_preset)
+    setattr(lora, field_name, device_value)
+    before = lora.SerializeToString()
+
+    mismatches = _verify_requested_fields({field_name: 0}, lora, "lora")
+
+    dormant = (use_preset and field_name != "modem_preset") or (
+        not use_preset and field_name == "modem_preset"
+    )
+    assert mismatches == ([] if dormant else [f"lora.{field_name}"])
+    assert lora.SerializeToString() == before
+
+
+@pytest.mark.unit
+def test_direct_lora_verification_rejects_changed_mode_with_dormant_fields() -> None:
+    """Ignoring a dormant parameter cannot hide a preset/custom mode mismatch."""
+    lora = config_pb2.Config.LoRaConfig(use_preset=True, bandwidth=250)
+    assert _verify_requested_fields(
+        {"usePreset": False, "bandwidth": 125}, lora, "lora"
+    ) == ["lora.use_preset"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("use_preset", [False, True])
 @pytest.mark.parametrize("coding_rate", [0, 5, 6, 8])
 def test_channel_url_verification_accepts_preset_derived_values(
     use_preset: bool, coding_rate: int

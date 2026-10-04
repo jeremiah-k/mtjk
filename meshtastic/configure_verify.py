@@ -10,7 +10,7 @@ import math
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import meshtastic.util
 from meshtastic.mesh_interface import MeshInterface
@@ -27,6 +27,19 @@ from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2, config_pb2
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
 _LORA_DEFAULT_CODING_RATE = 5
+
+
+def _lora_dormant_fields(
+    proto_message: Any,
+) -> tuple[Literal["bandwidth", "spread_factor", "modem_preset"], ...]:
+    """Return modem fields that do not affect the selected LoRa mode."""
+    if not isinstance(proto_message, config_pb2.Config.LoRaConfig):
+        return ()
+    return (
+        ("bandwidth", "spread_factor")
+        if proto_message.use_preset
+        else ("modem_preset",)
+    )
 
 
 def _lora_default_coding_rate_equivalence(
@@ -257,6 +270,7 @@ def _verify_requested_fields(
                     scalar = scalar[0] if scalar else scalar
                 if (
                     scalar != actual
+                    and snake_key not in _lora_dormant_fields(proto_message)
                     and not _neighbor_info_effective_default_equivalence(
                         section_path, snake_key, scalar, actual
                     )
@@ -428,15 +442,13 @@ def _lora_config_match(
         # The dormant side can still be materialized or preserved across a
         # round-trip, so compare only fields that affect the effective radio.
         for lora in (requested, device):
+            for field_name in _lora_dormant_fields(lora):
+                lora.ClearField(field_name)
             if lora.use_preset:
-                lora.ClearField("bandwidth")
-                lora.ClearField("spread_factor")
                 # Firmware permits coding-rate overrides above the preset's
                 # rate. Only zero and the default minimum rate are equivalent.
                 if lora.coding_rate == 0:
                     lora.coding_rate = _LORA_DEFAULT_CODING_RATE
-            else:
-                lora.ClearField("modem_preset")
     if req_has_lora and requested.SerializeToString() != device.SerializeToString():
         if emit_warnings:
             logger.warning(
