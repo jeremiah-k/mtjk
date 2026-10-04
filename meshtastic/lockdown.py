@@ -87,7 +87,12 @@ def send_lockdown_auth(
     timeout: float = DEFAULT_LOCKDOWN_TIMEOUT_SECONDS,
     allow_reboot_without_status: bool = False,
 ) -> mesh_pb2.LockdownStatus | None:
-    """Send one local USB lockdown command and await its structured status."""
+    """Send one local USB lockdown command and await its result status.
+
+    Initial capability/locked notifications can follow configuration completion;
+    they are not authentication replies. Await the selected command's terminal
+    state, while retaining unknown states and storage-corruption refusals.
+    """
     serial_interface = _require_usb_serial(interface)
     if timeout <= 0:
         raise ValueError("timeout must be positive")
@@ -103,6 +108,8 @@ def send_lockdown_auth(
     ) -> None:
         nonlocal result
         if interface is not serial_interface:
+            return
+        if not _is_lockdown_command_result(auth, status):
             return
         copied = mesh_pb2.LockdownStatus()
         copied.CopyFrom(status)
@@ -129,3 +136,20 @@ def send_lockdown_auth(
         raise TimeoutError("no LockdownStatus received before timeout")
     finally:
         pub.unsubscribe(_on_status, LOCKDOWN_STATUS_TOPIC)
+
+
+def _is_lockdown_command_result(
+    auth: admin_pb2.LockdownAuth, status: mesh_pb2.LockdownStatus
+) -> bool:
+    """Separate startup notifications from the result of one lockdown command."""
+    if status.state not in mesh_pb2.LockdownStatus.State.values():
+        return True
+    if status.state == mesh_pb2.LockdownStatus.UNLOCK_FAILED:
+        return True
+    if auth.lock_now:
+        return status.state == mesh_pb2.LockdownStatus.LOCKED
+    if status.state == mesh_pb2.LockdownStatus.LOCKED:
+        return status.lock_reason == "storage_corrupt"
+    if auth.disable and status.state == mesh_pb2.LockdownStatus.DISABLED:
+        return True
+    return status.state == mesh_pb2.LockdownStatus.UNLOCKED

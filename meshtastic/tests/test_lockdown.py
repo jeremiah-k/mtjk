@@ -1,6 +1,7 @@
 """Tests for USB-only firmware lockdown client helpers."""
 
 import os
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -19,6 +20,88 @@ from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from meshtastic.serial_interface import SerialInterface
 from meshtastic.tcp_interface import TCPInterface
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("startup", "command", "terminal"),
+    [
+        (
+            mesh_pb2.LockdownStatus.STATE_UNSPECIFIED,
+            "unlock",
+            mesh_pb2.LockdownStatus.UNLOCKED,
+        ),
+        (
+            mesh_pb2.LockdownStatus.NEEDS_PROVISION,
+            "unlock",
+            mesh_pb2.LockdownStatus.UNLOCKED,
+        ),
+        (mesh_pb2.LockdownStatus.LOCKED, "unlock", mesh_pb2.LockdownStatus.UNLOCKED),
+        (mesh_pb2.LockdownStatus.DISABLED, "unlock", mesh_pb2.LockdownStatus.UNLOCKED),
+        (mesh_pb2.LockdownStatus.LOCKED, "disable", mesh_pb2.LockdownStatus.DISABLED),
+        (mesh_pb2.LockdownStatus.UNLOCKED, "lock-now", mesh_pb2.LockdownStatus.LOCKED),
+    ],
+)
+def test_send_lockdown_auth_ignores_startup_status_before_command_result(
+    startup: int, command: str, terminal: int
+) -> None:
+    """A queued capability notification cannot complete a fresh auth transaction."""
+    serial = MagicMock(spec=SerialInterface)
+    serial.myInfo = mesh_pb2.MyNodeInfo(my_node_num=123)
+    final_status = mesh_pb2.LockdownStatus(state=terminal)  # type: ignore[arg-type]
+    timer = threading.Timer(
+        0.02,
+        lambda: pub.sendMessage(
+            LOCKDOWN_STATUS_TOPIC, interface=serial, status=final_status
+        ),
+    )
+
+    def _send(*_args: object, **_kwargs: object) -> mesh_pb2.MeshPacket:
+        pub.sendMessage(
+            LOCKDOWN_STATUS_TOPIC,
+            interface=serial,
+            status=mesh_pb2.LockdownStatus(state=startup),  # type: ignore[arg-type]
+        )
+        timer.start()
+        return mesh_pb2.MeshPacket(id=7)
+
+    serial.sendData.side_effect = _send
+    auth = build_lockdown_auth(
+        b"secret", disable=command == "disable", lock_now=command == "lock-now"
+    )
+    try:
+        status = send_lockdown_auth(serial, auth, timeout=1.0)
+        assert status == final_status
+    finally:
+        timer.join(timeout=1.0)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [
+        (mesh_pb2.LockdownStatus.UNLOCK_FAILED, ""),
+        (mesh_pb2.LockdownStatus.LOCKED, "storage_corrupt"),
+        (999, ""),
+    ],
+)
+def test_send_lockdown_auth_retains_refusals_and_future_states(
+    state: int, reason: str
+) -> None:
+    """Filtering boot notifications must retain terminal failures and unknown enums."""
+    serial = MagicMock(spec=SerialInterface)
+    serial.myInfo = mesh_pb2.MyNodeInfo(my_node_num=123)
+    refusal = mesh_pb2.LockdownStatus(state=state, lock_reason=reason)  # type: ignore[arg-type]
+
+    def _send(*_args: object, **_kwargs: object) -> mesh_pb2.MeshPacket:
+        pub.sendMessage(LOCKDOWN_STATUS_TOPIC, interface=serial, status=refusal)
+        return mesh_pb2.MeshPacket(id=7)
+
+    serial.sendData.side_effect = _send
+    assert (
+        send_lockdown_auth(serial, build_lockdown_auth(b"secret"), timeout=0.5)
+        == refusal
+    )
 
 
 @pytest.mark.unit
