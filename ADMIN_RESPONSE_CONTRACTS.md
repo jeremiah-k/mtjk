@@ -305,6 +305,26 @@ At the same time, the compatibility boundary is preserved where practical:
 See the repository-level [COMPATIBILITY.md](COMPATIBILITY.md) for the broader
 compatibility policy.
 
+## Receipt-proof metadata
+
+Routing replies can include an eight-byte `Routing.ack_proof`. The decoded
+packet exposes it as base64 in `decoded.routing.ackProof` and as bytes in
+`decoded.routing.raw.ack_proof`. The firmware's `MeshPacket.ack_proof_status`
+is exposed as `ackProofStatus`, with the original numeric verdict retained
+on `raw.ack_proof_status`. An omitted/default verdict is `ACK_PROOF_ABSENT`;
+unknown verdicts remain numeric in the decoded dictionary.
+
+Proof verdicts are advisory under the firmware protocol. `ACK_PROOF_VALID`
+reports a verified recipient receipt; absent, invalid, and unavailable-key
+verdicts must not be described as verified delivery. They do not replace
+`Routing.error_reason`, change ACK/NAK wait outcomes, or satisfy a typed
+getter that still needs its data reply. Receipt proofs are separate from
+the packet's `xeddsa_signed` identity-signature flag.
+
+Locally generated implicit ACKs can carry `relayNode`, `rxRssi`, and `rxSnr`
+for the overheard relay. Their sender remains the local node, so they retain
+implicit-ACK classification rather than claiming recipient delivery.
+
 ## Primary tests
 
 The most focused regression coverage lives in:
