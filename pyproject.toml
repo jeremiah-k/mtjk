@@ -65,7 +65,7 @@ dev = [
   "pyinstaller==6.22.3",
   "mypy==2.4.0",
   "mypy-protobuf==5.1.0",
-  "types-protobuf>=6.32.1.20250221,<7.0.0.0",
+  "types-protobuf>=7.35.1.20260906,<7.36.0.0",
   "types-tabulate>=0.10.0.20260508,<0.11.0.0",
   "types-requests>=2.32.4.20260107,<3.0.0.0",
   "types-setuptools>=82.0.0.20260210,<83.0.0.0",
