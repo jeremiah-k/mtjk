@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 import meshtastic.configure_verify as verify
+from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import admin_pb2
 
@@ -87,3 +88,69 @@ def test_earlier_settings_reply_cannot_verify_fresh_readback(
         assert result.status is status
         assert len(sent) == 2
         assert sent[-1].id not in iface.responseHandlers
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("decode_failure", [False, True])
+def test_readback_refusal_fails_fast_without_poisoning_legacy_waits(
+    monkeypatch: pytest.MonkeyPatch, decode_failure: bool
+) -> None:
+    """Only correlated-source failures terminate readback and leave no wait debris."""
+    with MeshInterface(noProto=True) as iface:
+        node = iface.localNode
+        node.noProto = False
+        node.nodeNum = 1234
+        iface.nodes = {}
+        iface.nodesByNum = {}
+        sent: list[Any] = []
+        clock = [0.0]
+
+        def _send(packet: Any, *_args: Any, **_kwargs: Any) -> Any:
+            sent.append(packet)
+            return packet
+
+        monkeypatch.setattr(iface, "_send_packet", _send)
+        iface._request_wait_runtime.record_admin_nak_wait_error(
+            request_id=999, message="unrelated failure"
+        )
+
+        def _deliver(source: int) -> None:
+            decoded: dict[str, Any] = {"requestId": sent[-1].id}
+            if decode_failure:
+                decoded["admin"] = {DECODE_ERROR_KEY: "invalid wire payload"}
+            else:
+                decoded["routing"] = {"errorReason": "NOT_AUTHORIZED"}
+            iface._request_wait_runtime.correlate_inbound_response(
+                packet_dict={"from": source, "decoded": decoded},
+                skip_response_callback_for_decode_failure=decode_failure,
+                extract_request_id=iface._extract_request_id_from_packet,
+            )
+
+        def _sleep(seconds: float) -> None:
+            clock[0] += seconds
+            if clock[0] == seconds:
+                _deliver(5678)
+                assert sent[-1].id in iface.responseHandlers
+            else:
+                _deliver(node.nodeNum)
+
+        monkeypatch.setattr(
+            verify, "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=_sleep)
+        )
+        reason = (
+            "Failed to decode admin payload" if decode_failure else "NOT_AUTHORIZED"
+        )
+        with pytest.raises(MeshInterface.MeshInterfaceError, match=reason):
+            verify.verify_local_config_apply(
+                node,
+                config_fields={"lora": {"hopLimit": 5}},
+                module_config_fields=None,
+                timeout_sec=10,
+            )
+
+        assert clock[0] < 10
+        assert sent[-1].id not in iface.responseHandlers
+        assert not iface._acknowledgment.receivedNak
+        assert iface._response_wait_errors == {
+            ("receivedNak", 999): "unrelated failure"
+        }

@@ -10,10 +10,12 @@ import math
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import meshtastic.util
+from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.mesh_interface_runtime.request_wait import DECODE_FAILED_PREFIX
 from meshtastic.node_runtime.admin_wait import (
     WAIT_ATTR_NAK,
     _extract_request_id_from_sent_packet,
@@ -27,6 +29,19 @@ from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2, config_pb2
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
 _LORA_DEFAULT_CODING_RATE = 5
+
+
+def _lora_dormant_fields(
+    proto_message: Any,
+) -> tuple[Literal["bandwidth", "spread_factor", "modem_preset"], ...]:
+    """Return modem fields that do not affect the selected LoRa mode."""
+    if not isinstance(proto_message, config_pb2.Config.LoRaConfig):
+        return ()
+    return (
+        ("bandwidth", "spread_factor")
+        if proto_message.use_preset
+        else ("modem_preset",)
+    )
 
 
 def _lora_default_coding_rate_equivalence(
@@ -257,6 +272,7 @@ def _verify_requested_fields(
                     scalar = scalar[0] if scalar else scalar
                 if (
                     scalar != actual
+                    and snake_key not in _lora_dormant_fields(proto_message)
                     and not _neighbor_info_effective_default_equivalence(
                         section_path, snake_key, scalar, actual
                     )
@@ -428,15 +444,13 @@ def _lora_config_match(
         # The dormant side can still be materialized or preserved across a
         # round-trip, so compare only fields that affect the effective radio.
         for lora in (requested, device):
+            for field_name in _lora_dormant_fields(lora):
+                lora.ClearField(field_name)
             if lora.use_preset:
-                lora.ClearField("bandwidth")
-                lora.ClearField("spread_factor")
                 # Firmware permits coding-rate overrides above the preset's
                 # rate. Only zero and the default minimum rate are equivalent.
                 if lora.coding_rate == 0:
                     lora.coding_rate = _LORA_DEFAULT_CODING_RATE
-            else:
-                lora.ClearField("modem_preset")
     if req_has_lora and requested.SerializeToString() != device.SerializeToString():
         if emit_warnings:
             logger.warning(
@@ -598,6 +612,7 @@ def _wait_for_section_reload_under_deadline(
     *,
     deadline: float,
     response_received: threading.Event | None = None,
+    response_error: Callable[[], str | None] | None = None,
 ) -> bool:
     """Wait for one section to reappear, bounded by a shared monotonic deadline.
 
@@ -618,6 +633,8 @@ def _wait_for_section_reload_under_deadline(
         Operation-wide ``time.monotonic()`` deadline.
     response_received : threading.Event | None
         Optional completion signal set after a correlated payload is copied.
+    response_error : Callable[[], str | None] | None
+        Optional correlated refusal probe; a refusal raises an interface error.
 
     Returns
     -------
@@ -631,6 +648,9 @@ def _wait_for_section_reload_under_deadline(
     probe = _SectionReloadProbe(cast(Callable[[str], bool], has_field), section_snake)
 
     def _received() -> bool:
+        error_message = response_error() if response_error is not None else None
+        if error_message is not None:
+            raise MeshInterface.MeshInterfaceError(error_message)
         return (
             response_received is None or response_received.is_set()
         ) and probe.is_set()
@@ -1127,6 +1147,11 @@ def verify_local_config_apply(
     not ask the device" from "device did not answer"; mapping them to CLI
     errors is the caller's responsibility.
 
+    Typed routing refusals and admin decode failures raise immediately with
+    their reason. They never enter the legacy settings-response callback or
+    set its global NAK flag; literal request-keyed errors are retired in the
+    same operation-level cleanup as readback response handlers.
+
     Cache side effect: requested sections are cleared and reloaded from
     fresh device replies. Comparison uses operation-owned payload snapshots
     on the correlated send path, so an earlier settings request cannot supply
@@ -1213,6 +1238,10 @@ def verify_local_config_apply(
         for name, root in roots.items()
     }
     response_events: dict[tuple[str, str], threading.Event] = {}
+    response_errors: dict[tuple[str, str], str] = {}
+    runtime = getattr(
+        getattr(target_node, "iface", None), "_request_wait_runtime", None
+    )
     accepting_responses = threading.Event()
     accepting_responses.set()
 
@@ -1235,10 +1264,35 @@ def verify_local_config_apply(
         def _capture_response(packet: dict[str, Any]) -> None:
             if not accepting_responses.is_set():
                 return
-            cast(Callable[[dict[str, Any]], Any], on_response)(packet)
             decoded = packet.get("decoded")
             admin = decoded.get("admin") if isinstance(decoded, dict) else None
             raw = admin.get("raw") if isinstance(admin, dict) else None
+            routing = decoded.get("routing") if isinstance(decoded, dict) else None
+            failure_message: str | None = None
+            if isinstance(routing, dict):
+                if "errorReason" in routing and routing["errorReason"] != "NONE":
+                    failure_message = (
+                        f"Routing error on response: {routing['errorReason']}"
+                    )
+                else:
+                    return
+            elif isinstance(admin, dict) and DECODE_ERROR_KEY in admin and raw is None:
+                failure_message = (
+                    "Failed to decode admin payload: "
+                    f"{admin.get(DECODE_ERROR_KEY, f'{DECODE_FAILED_PREFIX}unknown error')}"
+                )
+            if failure_message is not None:
+                request_id = (
+                    decoded.get("requestId") if isinstance(decoded, dict) else None
+                )
+                if runtime is not None and isinstance(request_id, int):
+                    runtime.record_admin_nak_wait_error(
+                        request_id=request_id, message=failure_message
+                    )
+                response_errors[(root_name, field_desc.name)] = failure_message
+                received.set()
+                return
+            cast(Callable[[dict[str, Any]], Any], on_response)(packet)
             if (
                 not isinstance(raw, admin_pb2.AdminMessage)
                 or raw.WhichOneof("payload_variant") != response_variant
@@ -1265,12 +1319,10 @@ def verify_local_config_apply(
             section_snake,
             deadline=deadline,
             response_received=response_events.get((root_name, section_snake)),
+            response_error=lambda: response_errors.get((root_name, section_snake)),
         )
 
     sent_request_ids: list[int] = []
-    runtime = getattr(
-        getattr(target_node, "iface", None), "_request_wait_runtime", None
-    )
     try:
         not_repopulated = _reload_requested_sections(
             target_node,

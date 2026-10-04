@@ -214,6 +214,12 @@ and do not set the legacy `receivedNak` flag or the unscoped error. Untyped
 decode failures keep their historical scoped/unscoped wait-error resolution and
 legacy `receivedNak` behavior.
 
+Local configuration-apply verification uses the same typed-refusal policy.
+An allowed-source routing NAK or admin decode failure terminates the bounded
+readback with its reason, without invoking the legacy settings-response callback.
+The operation retires its literal request-keyed error and response handler on
+every exit. Wrong-source feedback leaves the readback pending.
+
 The helper waits on a bounded event for the named response field and returns:
 
 - a defensive protobuf copy when the response arrives;
