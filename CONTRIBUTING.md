@@ -106,7 +106,14 @@ Historical required BLE wrappers and warning policy are tracked in
 
 ## Local setup and validation
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
+uv manages the project's Python environment, installs dependencies, and runs
+commands inside that environment. No manual virtual-environment
+activation is needed when using `uv run` or the Make targets.
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and check
+the installation with `uv --version`. The minimum supported uv version is
+declared by `tool.uv.required-version` in `pyproject.toml`; upgrade uv if it
+reports that your version is too old. From the repository root, run
 `uv sync --locked` to create the local `.venv` with the core package and the
 default development group. Python 3.11–3.14 is supported; use `--python 3.13`
 to select an interpreter explicitly. For the same dependency selection as CI,
@@ -133,6 +140,22 @@ with pip without having uv installed.
 Standalone asset recovery for historical tags without a uv lockfile uses an
 isolated, pinned Poetry tool through uv. The build script selects the tagged
 lockfile; development and CI use uv directly.
+
+### Common uv commands
+
+| Command                          | Purpose                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| `uv sync --locked`               | Install the project's locked dependencies into `.venv`.        |
+| `uv run --locked mtjk --version` | Run this checkout's CLI in the project environment.            |
+| `uv run --locked pytest -m unit` | Run unit tests with the project's development dependencies.    |
+| `uv add NAME` / `uv remove NAME` | Change a project dependency and update the lockfile.           |
+| `uv lock --upgrade-package NAME` | Update one dependency within its declared version constraints. |
+| `uv tool install mtjk`           | Install a separate CLI environment for end-user use.           |
+
+`pyproject.toml` declares dependencies; `uv.lock` records the selected versions;
+`.venv` holds the installed project and dependencies. The `--locked` flag checks
+that the declarations and lockfile agree and fails if they do not. It does not
+prevent uv from creating or updating `.venv` to match the lockfile.
 
 ### Updating protobufs
 

@@ -38,10 +38,10 @@ classification has been recorded in the table below (with a revisit date).
 Rule: **registry releases by default.** If a Git source dependency is
 unavoidable:
 
-1. Pin an **immutable commit SHA** via `rev =` — never a moving reference
+1. Pin an **immutable commit SHA** via `rev =` in `[tool.uv.sources]` — never a moving reference
    (`HEAD`, a branch, or a URL `#fragment`). Fragments are not immutable
-   pins: tags can be repointed, and depending on the Poetry version the
-   fragment may not resolve as expected (the historical `riden#1.2.1`
+   pins: tags can be repointed, and fragment handling depends on the
+   installer (the historical Poetry `riden#1.2.1`
    declaration left a stale `reference = "HEAD"` lock entry while the tag
    pointed at a different commit than the one we shipped).
 2. Document next to the declaration why the Git source is required.
