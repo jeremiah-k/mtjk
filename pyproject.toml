@@ -118,5 +118,5 @@ jupyter = "uv run --locked --extra analysis --group analysis jupyter lab"
 profile = "black"
 
 [build-system]
-requires = ["uv_build==0.12.22"]
+requires = ["uv_build==0.12.23"]
 build-backend = "uv_build"
