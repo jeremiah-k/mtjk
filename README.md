@@ -106,8 +106,8 @@ implementation and integration notes live in [BLE.md](BLE.md).
 
 ### CLI installation with pipx
 
-`pipx` is recommended for command-line use so the package runs in an isolated
-environment.
+[pipx](https://pipx.pypa.io/stable/) is recommended for command-line use so the
+package runs in an isolated environment.
 
 If upstream `meshtastic` is already installed in that environment, remove it
 first. The two distributions intentionally share the `meshtastic` Python
@@ -143,6 +143,27 @@ pipx upgrade mtjk
 pipx uninstall mtjk
 ```
 
+### CLI installation with uv
+
+[uv's tool installer](https://docs.astral.sh/uv/guides/tools/) also installs
+the CLI in an isolated environment.
+
+```bash
+uv tool install mtjk
+mtjk --version
+```
+
+Upgrade with `uv tool upgrade mtjk`, or uninstall with `uv tool uninstall mtjk`.
+To install the unreleased `develop` branch, use:
+
+```bash
+uv tool install "git+https://github.com/jeremiah-k/mtjk.git@develop"
+```
+
+If `mtjk` is not found after installation, run `uv tool update-shell` and
+restart your shell. For development inside a cloned checkout, use the
+project environment described in [CONTRIBUTING.md](CONTRIBUTING.md#local-setup-and-validation).
+
 ## Using mtjk as a Python dependency
 
 The **distribution name** is `mtjk`, but the **import namespace** remains
@@ -159,6 +180,12 @@ or, for the unreleased `develop` branch:
 ```text
 mtjk @ git+https://github.com/jeremiah-k/mtjk.git@develop
 ```
+
+Install the dependency into your application's environment with its package
+manager: for example, `uv add mtjk` in a uv project, or
+`python -m pip install mtjk` inside an activated virtual environment.
+The isolated environments created by pipx and `uv tool install` are for CLI
+use and do not provide imports to a separate application.
 
 The CLI niceties (`segno` for `--qr`, `print-color`, `argcomplete`,
 `wcwidth`) are core dependencies — a plain `mtjk` install gets the full
