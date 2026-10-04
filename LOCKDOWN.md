@@ -103,7 +103,8 @@ The Python-side validation is:
 - `valid_until_epoch` must not be negative; and
 - `max_session_seconds` must not be negative.
 
-A passphrase is optional for operations such as `lock_now` that do not require one.
+A passphrase is optional for a library `lock_now` request sent on an already
+authorized USB connection. A fresh CLI connection must authenticate first.
 The CLI documents zero values for the time/session limits according to firmware policy
 rather than inventing additional client-side semantics.
 
@@ -167,7 +168,14 @@ It requires a passphrase but does not require the destructive-action confirmatio
 ### Lock now
 
 `--lockdown-lock-now` asks the device to revoke current lockdown sessions and reboot
-into the locked state. No passphrase is read for this action.
+into the locked state. It requires a passphrase and authenticates the same USB
+connection before sending the lock request. Authentication must return `UNLOCKED`;
+a refusal, timeout, or other state prevents the reboot request. A device that does
+not report an active lockdown state is rejected before authentication so this
+action cannot accidentally provision a device with lockdown disabled. The CLI
+waits up to `--lockdown-wait` for the initial status because firmware can queue
+it after USB configuration completion; status events from other interfaces
+cannot satisfy this wait.
 
 It requires the user to type `yes` for confirmation unless `--lockdown-yes` is
 supplied. The CLI permits the device to reboot before a structured status arrives and
@@ -225,6 +233,13 @@ the firmware supplies an unknown enum value, the CLI prints a numeric fallback r
 than crashing.
 
 A nonzero `backoff_seconds` value is displayed as retry guidance.
+
+Backoff enforcement belongs to the firmware. A reported delay does not promise
+that elapsed time alone permits another attempt: firmware can also require a
+reboot after an authentication failure. The CLI does not reboot or retry
+credentials automatically. Keep the passphrase and a recovery image available
+when testing lockdown, and disable lockdown before restoring firmware that
+cannot read its encrypted storage.
 
 `UNLOCK_FAILED` is treated as an authentication failure and results in a nonzero CLI
 exit.

@@ -26,6 +26,7 @@ import meshtastic.serial_interface
 import meshtastic.tcp_interface
 import meshtastic.util
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
+from meshtastic._topics import LOCKDOWN_STATUS_TOPIC
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
 from meshtastic.key_verification import STAGE_INITIATE as _KV_STAGE_INITIATE
 from meshtastic.key_verification import STAGE_NO_VERIFY as _KV_STAGE_NO_VERIFY
@@ -1028,6 +1029,20 @@ def _handle_lockdown_action(context: CliContext, hooks: DeviceActionHooks) -> No
     ):
         _confirm_lockdown_action(lockdown_action, hooks)
 
+    if lockdown_action == "lock-now":
+        initial_status = _wait_for_initial_lockdown_status(
+            context.interface, args.lockdown_wait
+        )
+        if initial_status is None or initial_status.state not in {
+            mesh_pb2.LockdownStatus.LOCKED,
+            mesh_pb2.LockdownStatus.UNLOCKED,
+        }:
+            _terminate_cli(
+                hooks.cli_exit,
+                "Lock now requires a provisioned device reporting lockdown status.",
+                1,
+            )
+
     try:
         passphrase = _read_lockdown_passphrase(args, lockdown_action, hooks)
         auth = hooks.build_lockdown_auth(
@@ -1035,13 +1050,29 @@ def _handle_lockdown_action(context: CliContext, hooks: DeviceActionHooks) -> No
             boots_remaining=args.lockdown_boots,
             valid_until_epoch=args.lockdown_valid_until,
             max_session_seconds=args.lockdown_max_session_seconds,
-            lock_now=lockdown_action == "lock-now",
+            lock_now=False,
             disable=lockdown_action == "disable",
         )
     except (OSError, ValueError) as exc:
         _terminate_cli(hooks.cli_exit, f"Invalid lockdown options: {exc}", 1)
 
     try:
+        if lockdown_action == "lock-now":
+            # Firmware requires prior authorization on this same connection.
+            authorized = hooks.send_lockdown_auth(
+                context.interface,
+                auth,
+                timeout=args.lockdown_wait,
+                allow_reboot_without_status=False,
+            )
+            if (
+                authorized is None
+                or authorized.state != mesh_pb2.LockdownStatus.UNLOCKED
+            ):
+                raise RuntimeError(
+                    "Lockdown authentication did not authorize this connection."
+                )
+            auth = hooks.build_lockdown_auth(lock_now=True)
         status = hooks.send_lockdown_auth(
             context.interface,
             auth,
@@ -1063,6 +1094,35 @@ def _handle_lockdown_action(context: CliContext, hooks: DeviceActionHooks) -> No
         hooks.cli_print(f"Retry backoff: {status.backoff_seconds}s")
     if status.state == mesh_pb2.LockdownStatus.UNLOCK_FAILED:
         _terminate_cli(hooks.cli_exit, "Lockdown authentication failed.", 1)
+
+
+def _wait_for_initial_lockdown_status(
+    interface: Any, timeout: float
+) -> mesh_pb2.LockdownStatus | None:
+    """Wait for capability status queued after USB configuration completion."""
+    if interface.lockdownStatus is not None:
+        return cast(mesh_pb2.LockdownStatus, interface.lockdownStatus)
+    event = threading.Event()
+    received: mesh_pb2.LockdownStatus | None = None
+
+    def _on_status(
+        *, interface: Any, status: mesh_pb2.LockdownStatus, **_kwargs: Any
+    ) -> None:
+        nonlocal received
+        if interface is target_interface:
+            received = mesh_pb2.LockdownStatus()
+            received.CopyFrom(status)
+            event.set()
+
+    target_interface = interface
+    pub.subscribe(_on_status, LOCKDOWN_STATUS_TOPIC)
+    try:
+        if interface.lockdownStatus is None:
+            event.wait(max(0.0, timeout))
+        cached = interface.lockdownStatus
+        return cast(mesh_pb2.LockdownStatus, cached) if cached is not None else received
+    finally:
+        pub.unsubscribe(_on_status, LOCKDOWN_STATUS_TOPIC)
 
 
 def _confirm_lockdown_action(lockdown_action: str, hooks: DeviceActionHooks) -> None:
@@ -1135,10 +1195,8 @@ def _read_lockdown_passphrase(
     Returns
     -------
     bytes
-        Validated passphrase bytes, or ``b""`` for ``lock-now``.
+        Validated passphrase bytes.
     """
-    if lockdown_action == "lock-now":
-        return b""
     if args.lockdown_passphrase_file:
         return hooks.read_lockdown_passphrase_file(args.lockdown_passphrase_file)
     if args.lockdown_passphrase is not None:

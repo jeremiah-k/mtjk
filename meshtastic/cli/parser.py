@@ -723,7 +723,7 @@ def addLocalActionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     lockdown_actions.add_argument(
         "--lockdown-lock-now",
         action="store_true",
-        help="Revoke current lockdown sessions and reboot into the locked state",
+        help="Authenticate, revoke lockdown sessions, and reboot into the locked state",
     )
     lockdown_actions.add_argument(
         "--lockdown-disable",
