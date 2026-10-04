@@ -3,16 +3,20 @@
 # pylint: disable=C0302,W0613,R0917
 
 import sys
+import threading
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from pubsub import pub
 
 import meshtastic.__main__ as main_module
 from meshtastic.__main__ import (
     initParser,
 )
+from meshtastic._topics import LOCKDOWN_STATUS_TOPIC
+from meshtastic.cli.device_actions import _wait_for_initial_lockdown_status
 from meshtastic.region_presets import RegionPresetInfo, decode_region_preset_map
 
 # from ..radioconfig_pb2 import UserPreferences
@@ -87,6 +91,8 @@ def _run_lockdown_cli(
     monkeypatch: pytest.MonkeyPatch,
     *cli_args: str,
     status: mesh_pb2.LockdownStatus | None = None,
+    authorization_state: int = mesh_pb2.LockdownStatus.UNLOCKED,
+    initial_state: int | None = mesh_pb2.LockdownStatus.LOCKED,
 ) -> tuple[MagicMock, MagicMock, MagicMock]:
     _init_lockdown_cli(monkeypatch, *cli_args)
     interface = MagicMock()
@@ -94,6 +100,15 @@ def _run_lockdown_cli(
     interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
     build = MagicMock(return_value=object())
     send = MagicMock(return_value=status)
+    if "--lockdown-lock-now" in cli_args:
+        interface.lockdownStatus = (
+            None if initial_state is None else mesh_pb2.LockdownStatus(state=initial_state)  # type: ignore[arg-type]
+        )
+        send.side_effect = [
+            mesh_pb2.LockdownStatus(state=authorization_state),  # type: ignore[arg-type]
+            status,
+        ]
+        monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: "secret")
     monkeypatch.setattr(main_module, "build_lockdown_auth", build)
     monkeypatch.setattr(main_module, "send_lockdown_auth", send)
     main_module.onConnected(interface)
@@ -446,13 +461,23 @@ def test_lockdown_cli_lock_now_allows_reboot_without_status(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _interface, build, send = _run_lockdown_cli(
+    read = MagicMock(return_value=b"file secret")
+    monkeypatch.setattr(main_module, "read_lockdown_passphrase_file", read)
+    interface, build, send = _run_lockdown_cli(
         monkeypatch,
         "--lockdown-lock-now",
         "--lockdown-yes",
+        "--lockdown-passphrase-file",
+        "/tmp/secret",
         status=None,
     )
+    read.assert_called_once_with("/tmp/secret")
     assert build.call_args.kwargs["lock_now"] is True
+    assert build.call_args_list[0].args == (b"file secret",)
+    assert build.call_args_list[0].kwargs["lock_now"] is False
+    assert send.call_count == 2
+    assert all(call.args[0] is interface for call in send.call_args_list)
+    assert send.call_args_list[0].kwargs["allow_reboot_without_status"] is False
     assert send.call_args.kwargs["allow_reboot_without_status"] is True
     assert "device may already be rebooting" in capsys.readouterr().out
 
@@ -491,8 +516,109 @@ def test_lockdown_cli_accepts_explicit_local_destination(
         MAIN_LOCAL_ADDR,
         status=status,
     )
-    send.assert_called_once()
+    assert send.call_count == 2
     interface.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize(
+    "auth_result",
+    [
+        mesh_pb2.LockdownStatus.UNLOCK_FAILED,
+        mesh_pb2.LockdownStatus.LOCKED,
+        mesh_pb2.LockdownStatus.DISABLED,
+        TimeoutError("authentication status timed out"),
+    ],
+)
+def test_lockdown_cli_lock_now_refuses_unauthorized_reboot(
+    monkeypatch: pytest.MonkeyPatch, auth_result: int | Exception
+) -> None:
+    """A fresh CLI connection must prove ownership before firmware can reboot."""
+    send = (
+        MagicMock(side_effect=auth_result)
+        if isinstance(auth_result, Exception)
+        else MagicMock(return_value=mesh_pb2.LockdownStatus(state=auth_result))  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: "secret")
+    _init_lockdown_cli(monkeypatch, "--lockdown-lock-now", "--lockdown-yes")
+    interface = MagicMock()
+    interface.devPath = ""
+    interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
+    interface.lockdownStatus = mesh_pb2.LockdownStatus(
+        state=mesh_pb2.LockdownStatus.LOCKED
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module.onConnected(interface)
+
+    assert exc_info.value.code == 1
+    send.assert_called_once()
+    assert not send.call_args.args[1].lock_now
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize("initial_state", [None, mesh_pb2.LockdownStatus.DISABLED])
+def test_lockdown_cli_lock_now_cannot_provision_disabled_device(
+    monkeypatch: pytest.MonkeyPatch, initial_state: int | None
+) -> None:
+    """Reject unsupported or disabled lockdown without sending a provision request."""
+    build = MagicMock()
+    send = MagicMock()
+    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
+    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    _init_lockdown_cli(
+        monkeypatch, "--lockdown-lock-now", "--lockdown-yes", "--lockdown-wait", "0.01"
+    )
+    interface = MagicMock()
+    interface.devPath = ""
+    interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
+    interface.lockdownStatus = None if initial_state is None else mesh_pb2.LockdownStatus(state=initial_state)  # type: ignore[arg-type]
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module.onConnected(interface)
+
+    assert exc_info.value.code == 1
+    build.assert_not_called()
+    send.assert_not_called()
+
+
+@pytest.mark.unit
+def test_lockdown_cli_waits_for_status_after_configuration_completion() -> None:
+    """The capability event can follow config_complete on a fresh USB connection."""
+    interface = SimpleNamespace(lockdownStatus=None)
+    status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.LOCKED)
+
+    def _deliver() -> None:
+        interface.lockdownStatus = status  # type: ignore[assignment]
+        pub.sendMessage(LOCKDOWN_STATUS_TOPIC, interface=interface, status=status)
+
+    timer = threading.Timer(0.01, _deliver)
+    timer.start()
+    try:
+        assert _wait_for_initial_lockdown_status(interface, 1.0) is status
+    finally:
+        timer.join(timeout=1.0)
+
+
+@pytest.mark.unit
+def test_lockdown_cli_status_wait_is_scoped_and_bounded() -> None:
+    """Another interface's status cannot authorize the CLI's local connection."""
+    interface = SimpleNamespace(lockdownStatus=None)
+    status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCKED)
+    timer = threading.Timer(
+        0.01,
+        lambda: pub.sendMessage(
+            LOCKDOWN_STATUS_TOPIC, interface=object(), status=status
+        ),
+    )
+    timer.start()
+    try:
+        assert _wait_for_initial_lockdown_status(interface, 0.05) is None
+    finally:
+        timer.join(timeout=1.0)
 
 
 @pytest.mark.unit

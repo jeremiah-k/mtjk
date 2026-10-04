@@ -103,7 +103,8 @@ The Python-side validation is:
 - `valid_until_epoch` must not be negative; and
 - `max_session_seconds` must not be negative.
 
-A passphrase is optional for operations such as `lock_now` that do not require one.
+A passphrase is optional for a library `lock_now` request sent on an already
+authorized USB connection. A fresh CLI connection must authenticate first.
 The CLI documents zero values for the time/session limits according to firmware policy
 rather than inventing additional client-side semantics.
 
@@ -116,12 +117,32 @@ rather than inventing additional client-side semantics.
 3. require `interface.myInfo` so the local node number is known;
 4. subscribe to the lockdown-status topic **before** sending;
 5. send the local `ADMIN_APP` request;
-6. wait for a status associated with the same interface;
+6. wait for a command-result status associated with the same interface;
 7. return a defensive protobuf copy of that status; and
 8. unsubscribe in a `finally` block regardless of success or failure.
 
 The subscription filters by interface identity. A status event produced by another
 interface cannot complete the transaction.
+
+Startup notifications such as `DISABLED`, `NEEDS_PROVISION`, or `LOCKED` can
+arrive after a command is sent. Authentication waits for `UNLOCKED` or
+`UNLOCK_FAILED`; lock-now waits for `LOCKED` or `UNLOCK_FAILED`; disable also
+accepts `DISABLED`. A `LOCKED` storage-corruption refusal and unknown future
+states are returned to the caller rather than silently discarded.
+
+Authentication authorizes the existing USB connection; it does not replace
+the configuration snapshot received while locked. After a cold unlock, the
+client must request a fresh configuration stream on the same connection
+before using cached settings or node-addressed getters. This also refreshes
+identity fields that firmware populated from its locked placeholders.
+Reopening USB creates a connection that must authenticate again.
+
+On firmware 2.8.1, a cold unlock can restore the saved profile without
+initializing the live encryption and signing keys. Local USB administration
+then works while encrypted remote administration times out. A reboot while
+an unlock token remains valid initializes those keys from the saved profile;
+the fresh USB connection still requires authentication. Immediate remote
+administration after cold unlock requires the firmware crypto-reload fix.
 
 If no status arrives before the timeout, the normal behavior is `TimeoutError`.
 `allow_reboot_without_status=True` changes timeout behavior to return `None`; the CLI
@@ -167,7 +188,14 @@ It requires a passphrase but does not require the destructive-action confirmatio
 ### Lock now
 
 `--lockdown-lock-now` asks the device to revoke current lockdown sessions and reboot
-into the locked state. No passphrase is read for this action.
+into the locked state. It requires a passphrase and authenticates the same USB
+connection before sending the lock request. Authentication must return `UNLOCKED`;
+a refusal, timeout, or other state prevents the reboot request. A device that does
+not report an active lockdown state is rejected before authentication so this
+action cannot accidentally provision a device with lockdown disabled. The CLI
+waits up to `--lockdown-wait` for the initial status because firmware can queue
+it after USB configuration completion; status events from other interfaces
+cannot satisfy this wait.
 
 It requires the user to type `yes` for confirmation unless `--lockdown-yes` is
 supplied. The CLI permits the device to reboot before a structured status arrives and
@@ -225,6 +253,13 @@ the firmware supplies an unknown enum value, the CLI prints a numeric fallback r
 than crashing.
 
 A nonzero `backoff_seconds` value is displayed as retry guidance.
+
+Backoff enforcement belongs to the firmware. A reported delay does not promise
+that elapsed time alone permits another attempt: firmware can also require a
+reboot after an authentication failure. The CLI does not reboot or retry
+credentials automatically. Keep the passphrase and a recovery image available
+when testing lockdown, and disable lockdown before restoring firmware that
+cannot read its encrypted storage.
 
 `UNLOCK_FAILED` is treated as an authentication failure and results in a nonzero CLI
 exit.
