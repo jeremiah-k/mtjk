@@ -734,7 +734,9 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
         Sends only the specified device or module configuration section from this Node's cached
         localConfig/moduleConfig to the target node. For remote nodes the send expects an
-        acknowledgment (ACK/NAK); for the local node the message is sent without waiting for an ACK/NAK.
+        acknowledgment (ACK/NAK); for the local node the message is sent without waiting for an
+        ACK/NAK, so a write the device rejects or drops is not reported — request the section
+        again to confirm what the device actually holds.
 
         Parameters
         ----------
@@ -744,15 +746,17 @@ class Node:  # pylint: disable=too-many-instance-attributes
             "security", "sessionkey"* , "device_ui"* , "mqtt", "serial",
             "external_notification", "store_forward", "range_test", "telemetry",
             "canned_message", "audio", "remote_hardware", "neighbor_info",
-            "detection_sensor", "ambient_lighting", "paxcounter",
-            "statusmessage", "traffic_management".
+            "detection_sensor", "ambient_lighting", "paxcounter", "tak",
+            "mesh_beacon", "statusmessage", "traffic_management".
             * Available only when present in the active protobuf schema.
 
         Raises
         ------
         MeshInterfaceError
-            If `config_name` is not one of the supported names, or if
-            localConfig/moduleConfig has not been loaded.
+            If `config_name` is not one of the supported names, if
+            localConfig/moduleConfig has not been loaded, or if any staged
+            value exceeds a firmware nanopb payload limit (the device drops
+            such frames silently, so they are refused client-side instead).
         """
         self._settings_runtime.write_config(config_name)
 
