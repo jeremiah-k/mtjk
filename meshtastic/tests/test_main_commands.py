@@ -1067,6 +1067,57 @@ def test_main_set_with_invalid(
 @pytest.mark.usefixtures("reset_mt_config")
 @patch("meshtastic.serial_interface.SerialInterface._clear_hupcl_on_fd")
 @patch("meshtastic.serial_interface.SerialInterface._set_hupcl_with_termios")
+@patch("builtins.open", new_callable=mock_open, read_data="data")
+@patch("serial.Serial")
+@patch("meshtastic.util.findPorts", return_value=["/dev/ttyUSBfake"])
+def test_main_set_with_module_prefix_hints_unprefixed_path(
+    _mocked_findports: Any,
+    _mocked_serial: Any,
+    _mocked_open: Any,
+    _mocked_hupcl: Any,
+    _mock_clear_hupcl: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --set with a 'module.'-prefixed path points at the unprefixed path."""
+    sys.argv = ["", "--set", "module.mesh_beacon.flags", "3"]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    with SerialInterface(noProto=True, connectNow=False) as serialInterface:
+        anode = Node(serialInterface, 1234567890, noProto=True)
+        serialInterface.localNode = anode
+
+        with patch(
+            "meshtastic.serial_interface.SerialInterface", return_value=serialInterface
+        ) as mo:
+            main()
+            out, err = capsys.readouterr()
+            assert re.search(
+                r"do not have an attribute module\.mesh_beacon\.flags",
+                out,
+                re.MULTILINE,
+            )
+            assert re.search(r"Did you mean 'mesh_beacon\.flags'", out, re.MULTILINE)
+            assert err == ""
+            mo.assert_called()
+
+
+@pytest.mark.unit
+def test_module_prefix_hint_covers_bare_and_unrelated_segments() -> None:
+    """The hint helper handles a bare 'module' segment and leaves others alone."""
+    assert (
+        main_module._module_prefix_strip_hint("module")
+        == main_module.MODULE_PREFIX_HINT
+    )
+    assert main_module._module_prefix_strip_hint("module.") == (
+        main_module.MODULE_PREFIX_HINT
+    )
+    assert main_module._module_prefix_strip_hint("device.role") is None
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@patch("meshtastic.serial_interface.SerialInterface._clear_hupcl_on_fd")
+@patch("meshtastic.serial_interface.SerialInterface._set_hupcl_with_termios")
 @patch(
     "builtins.open",
     new_callable=mock_open,
