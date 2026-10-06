@@ -157,6 +157,29 @@ lockfile; development and CI use uv directly.
 that the declarations and lockfile agree and fails if they do not. It does not
 prevent uv from creating or updating `.venv` to match the lockfile.
 
+### Protobuf tracking policy
+
+Renovate bumps the `protobufs` submodule automatically, and CI regenerates
+`meshtastic/protobuf/` on those PRs
+(`.github/workflows/renovate-protobuf-submodule-regen.yml`). Continue tracking
+protobufs master; generated bindings may intentionally be ahead of tagged
+firmware releases so the library and CLI can expose upcoming protocol features.
+Do not hold or roll back a protobuf update solely because its schema is newer
+than released firmware. Fields that older firmware does not populate are not,
+by themselves, evidence of a regression.
+
+Review updates for concrete regressions or unintended behavior on supported
+firmware, especially changes to existing fields and nanopb `.options`
+constraints. These constraints are injected by `bin/inject_nanopb_options.py`,
+and outbound validation reads them from the generated descriptors. A changed
+constraint can reject a previously valid write or allow a value an older
+device cannot decode. When compatibility tests or field reports demonstrate
+such a problem, document the affected behavior and firmware versions and
+apply a targeted fix; hold or adjust the protobuf update if needed to prevent
+that regression. Schema age alone is not a reason to change the pin.
+
+Renovate regen PRs stay regen-only; unrelated changes land separately.
+
 ### Updating protobufs
 
 To update the protobuf submodule and regenerate `meshtastic/protobuf/*_pb2.py`
