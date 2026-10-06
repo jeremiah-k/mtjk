@@ -11,6 +11,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
+from meshtastic.payload_limits import _validate_firmware_payload_limits
 from meshtastic.protobuf import mesh_pb2
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,10 @@ class _QueueSendRuntime:
         sleep_fn: Callable[[float], None],
     ) -> None:
         """Run outbound send/resend loop using queue ownership semantics."""
+        # Validate the final envelope as well as any typed inner payload. This
+        # catches nanopb limits on fields populated by the send pipeline itself
+        # (for example MeshPacket.channel/hop_limit) and direct ToRadio messages.
+        _validate_firmware_payload_limits(to_radio, context="ToRadio")
         if not to_radio.HasField("packet"):
             send_impl(to_radio)
             return
