@@ -3,6 +3,7 @@
 # pylint: disable=redefined-outer-name
 
 import logging
+import threading
 from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.protobuf.descriptor import FieldDescriptor
 
+from .._interface_errors import MeshInterfaceError
 from ..node_runtime.settings_runtime import (
     _NodeAdminCommandRuntime,
     _NodeOwnerProfileRuntime,
@@ -1481,3 +1483,455 @@ class TestNodeOwnerProfileRuntime:
         assert message.set_owner.short_name == "ABC"
         # long_name should be empty (not set)
         assert message.set_owner.long_name == ""
+
+
+class TestWriteConfigVerification:
+    """Read-back verification for writeConfig."""
+
+    @staticmethod
+    def _verified_node() -> Any:
+        """Create a local-node double with a controllable read-back response."""
+        node = MagicMock(
+            spec=[
+                "iface",
+                "localConfig",
+                "moduleConfig",
+                "_send_admin",
+                "_raise_interface_error",
+                "onResponseRequestSettings",
+                "onAckNak",
+                "ensureSessionKey",
+                "requestConfig",
+                "noProto",
+            ]
+        )
+        node.iface = MagicMock()
+        node.iface.localNode = node
+        node.localConfig = localonly_pb2.LocalConfig()
+        node.moduleConfig = localonly_pb2.LocalModuleConfig()
+        node._send_admin = MagicMock(return_value=MagicMock())
+        node._raise_interface_error = MagicMock(side_effect=_raise_test_error)
+        node.onResponseRequestSettings = _NodeSettingsResponseRuntime(
+            node
+        ).handle_settings_response
+        node.onAckNak = MagicMock()
+        node.ensureSessionKey = MagicMock()
+        node.requestConfig = MagicMock()
+        node.noProto = False
+        return node
+
+    @staticmethod
+    def _beacon_runtime(node: Any) -> _NodeSettingsRuntime:
+        """Create the settings runtime under test for one node double."""
+        return _NodeSettingsRuntime(
+            node,
+            message_builder=_NodeSettingsMessageBuilder(node),
+        )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("verify", [False, True])
+    @pytest.mark.parametrize("remote", [False, True])
+    def test_invalid_write_rejected_before_session_requests_or_cache_changes(
+        self, verify: bool, remote: bool
+    ) -> None:
+        """Preflight invalid config before session preparation can touch transport/state."""
+        node = self._verified_node()
+        if remote:
+            node.iface.localNode = MagicMock()
+        node.moduleConfig.mesh_beacon.broadcast_offer_channel.name = "N" * 12
+        before = node.moduleConfig.SerializeToString()
+        node.ensureSessionKey.side_effect = lambda: setattr(
+            node.moduleConfig.mqtt, "enabled", True
+        )
+
+        with pytest.raises(MeshInterfaceError, match="broadcast_offer_channel.name"):
+            self._beacon_runtime(node).write_config("mesh_beacon", verify=verify)
+
+        node.ensureSessionKey.assert_not_called()
+        node._send_admin.assert_not_called()
+        node.requestConfig.assert_not_called()
+        node.iface.waitForAckNak.assert_not_called()
+        assert node.moduleConfig.SerializeToString() == before
+
+    @staticmethod
+    def _device_reports(
+        node: Any,
+        flags_value: int | None,
+        *,
+        on_response: Any,
+        delay_seconds: float = 0.0,
+    ) -> threading.Timer | None:
+        """Schedule the device response a verification read-back would get.
+
+        The request-specific callback receives a real admin payload and applies
+        it through the ordinary settings response handler.
+        """
+
+        def _apply_and_deliver() -> None:
+            raw = admin_pb2.AdminMessage()
+            if flags_value is not None:
+                raw.get_module_config_response.mesh_beacon.flags = flags_value
+            on_response(
+                {
+                    "decoded": {
+                        "admin": {
+                            "raw": raw,
+                            "getModuleConfigResponse": {
+                                "meshBeacon": {"flags": flags_value}
+                            },
+                        }
+                    }
+                }
+            )
+
+        if delay_seconds > 0:
+            timer = threading.Timer(delay_seconds, _apply_and_deliver)
+            timer.daemon = True
+            timer.start()
+            return timer
+        _apply_and_deliver()
+        return None
+
+    @classmethod
+    def _verify_beacon(cls, node: Any, *, verify_timeout: float) -> None:
+        """Run one verified beacon write under patched wait budgets."""
+        runtime = cls._beacon_runtime(node)
+        with (
+            patch.object(runtime, "request_config", node.requestConfig),
+            patch(
+                (
+                    "meshtastic.node_runtime.settings_runtime.config_runtime."
+                    "CONFIG_VERIFY_TIMEOUT_SECONDS"
+                ),
+                verify_timeout,
+            ),
+            patch(
+                (
+                    "meshtastic.node_runtime.settings_runtime.config_runtime."
+                    "CONFIG_VERIFY_POLL_INTERVAL_SECONDS"
+                ),
+                0.01,
+            ),
+        ):
+            runtime.write_config("mesh_beacon", verify=True)
+
+    @pytest.mark.unit
+    def test_verify_requests_section_and_passes_when_device_reports_staged_values(
+        self,
+    ) -> None:
+        """The section is re-requested and staged values pass verification."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        node.requestConfig.side_effect = (
+            lambda _descriptor, **kwargs: self._device_reports(node, 7, **kwargs)
+        )
+        self._verify_beacon(node, verify_timeout=1.0)
+
+        node.requestConfig.assert_called_once()
+        requested_descriptor = node.requestConfig.call_args[0][0]
+        assert requested_descriptor.containing_type.name == "LocalModuleConfig"
+        assert requested_descriptor.name == "mesh_beacon"
+
+    @pytest.mark.unit
+    def test_verify_waits_for_a_delayed_matching_response(self) -> None:
+        """Verification passes only once a delayed response repopulates."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        timer: threading.Timer | None = None
+
+        def _deliver(_descriptor: Any, **kwargs: Any) -> None:
+            nonlocal timer
+            timer = self._device_reports(node, 7, delay_seconds=0.05, **kwargs)
+
+        node.requestConfig.side_effect = _deliver
+        try:
+            self._verify_beacon(node, verify_timeout=1.0)
+        finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()
+
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_fails_when_device_reports_different_values(self) -> None:
+        """A dropped write is detected because read-back reports other values."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        # The device never applied the write; its read-back reports defaults.
+        node.requestConfig.side_effect = (
+            lambda _descriptor, **kwargs: self._device_reports(node, 0, **kwargs)
+        )
+        self._verify_failing_beacon(node)
+
+        # The device-reported values stay in the cache after a mismatch.
+        assert node.moduleConfig.mesh_beacon.flags == 0
+
+    @pytest.mark.unit
+    def test_verify_fails_when_read_back_never_arrives(self) -> None:
+        """A read-back with no response fails and restores the staged values."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        node.requestConfig.side_effect = (
+            lambda _descriptor, **kwargs: self._device_reports(node, None, **kwargs)
+        )
+        self._verify_failing_beacon(node)
+
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_fails_for_all_default_staged_section_without_device_response(
+        self,
+    ) -> None:
+        """An unrelated response cannot satisfy an all-default staged section.
+
+        A cleared section and an all-default section both serialize empty, so
+        byte equality alone would accept verification before the device ever
+        answers; the correlated-response gate must reject this.
+        """
+        node = self._verified_node()
+        # Some other staged section satisfies the loaded-state guard while
+        # the verified mesh_beacon section itself stays all-default.
+        node.moduleConfig.mqtt.enabled = True
+        node.requestConfig.side_effect = (
+            lambda _descriptor, **kwargs: self._device_reports(node, None, **kwargs)
+        )
+        self._verify_failing_beacon(node)
+
+    @classmethod
+    def _verify_failing_beacon(cls, node: Any) -> None:
+        """Assert one verified beacon write fails under short wait budgets."""
+        with pytest.raises(_TestInterfaceError, match="verification"):
+            cls._verify_beacon(node, verify_timeout=0.2)
+
+    @pytest.mark.unit
+    def test_verify_restores_sent_values_when_request_config_raises(self) -> None:
+        """A failed read-back request cannot leave the staged cache cleared."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        node.requestConfig.side_effect = _TestInterfaceError("read-back failed")
+
+        with pytest.raises(_TestInterfaceError, match="read-back failed"):
+            self._verify_beacon(node, verify_timeout=1.0)
+
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_preserves_device_values_when_request_config_raises_after_response(
+        self,
+    ) -> None:
+        """A response received before request failure remains authoritative."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _report_then_fail(_descriptor: Any, **kwargs: Any) -> None:
+            self._device_reports(node, 4, **kwargs)
+            raise _TestInterfaceError("read-back failed")
+
+        node.requestConfig.side_effect = _report_then_fail
+        with pytest.raises(_TestInterfaceError, match="read-back failed"):
+            self._verify_beacon(node, verify_timeout=1.0)
+
+        assert node.moduleConfig.mesh_beacon.flags == 4
+
+    @pytest.mark.unit
+    def test_verify_restores_sent_values_when_request_fails_after_empty_response(
+        self,
+    ) -> None:
+        """A response without section data cannot block failure restoration."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _deliver_empty_then_fail(_descriptor: Any, **kwargs: Any) -> None:
+            self._device_reports(node, None, **kwargs)
+            raise _TestInterfaceError("read-back failed")
+
+        node.requestConfig.side_effect = _deliver_empty_then_fail
+        with pytest.raises(_TestInterfaceError, match="read-back failed"):
+            self._verify_beacon(node, verify_timeout=1.0)
+
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_fails_promptly_on_routing_nak(self) -> None:
+        """A correlated routing NAK fails verification with its cause."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _deliver_nak(_descriptor: Any, on_response: Any, **_kwargs: Any) -> None:
+            on_response({"decoded": {"routing": {"errorReason": "NO_RESPONSE"}}})
+
+        node.requestConfig.side_effect = _deliver_nak
+
+        with pytest.raises(_TestInterfaceError, match="routing error NO_RESPONSE"):
+            self._verify_beacon(node, verify_timeout=5.0)
+
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_compares_exact_section_snapshot_that_was_sent(self) -> None:
+        """A cache mutation after send cannot change the verification target."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _mutate_cache_after_send(_message: Any, **_kwargs: Any) -> Any:
+            node.moduleConfig.mesh_beacon.flags = 9
+            return MagicMock()
+
+        node._send_admin.side_effect = _mutate_cache_after_send
+        node.requestConfig.side_effect = (
+            lambda _descriptor, **kwargs: self._device_reports(node, 7, **kwargs)
+        )
+
+        self._verify_beacon(node, verify_timeout=1.0)
+
+        sent_message = node._send_admin.call_args.args[0]
+        assert sent_message.set_module_config.mesh_beacon.flags == 7
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_verify_skipped_under_noproto(self) -> None:
+        """NoProto sends nothing, so verification is skipped without error."""
+        node = self._verified_node()
+        node.noProto = True
+        node.moduleConfig.mesh_beacon.flags = 7
+        node.moduleConfig.mesh_beacon.broadcast_offer_channel.name = "N" * 12
+        runtime = self._beacon_runtime(node)
+
+        runtime.write_config("mesh_beacon", verify=True)
+
+        node.requestConfig.assert_not_called()
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("reported_flags,later_flags", [(4, 7), (7, 4)])
+    def test_verify_uses_correlated_payload_after_later_cache_update(
+        self, reported_flags: int, later_flags: int
+    ) -> None:
+        """Later cache updates cannot change the correlated response verdict."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _respond_then_overwrite(_descriptor: Any, **kwargs: Any) -> None:
+            self._device_reports(node, reported_flags, **kwargs)
+            node.moduleConfig.mesh_beacon.flags = later_flags
+
+        node.requestConfig.side_effect = _respond_then_overwrite
+        if reported_flags == 7:
+            self._verify_beacon(node, verify_timeout=1.0)
+        else:
+            with pytest.raises(_TestInterfaceError, match="different values"):
+                self._verify_beacon(node, verify_timeout=1.0)
+        assert node.moduleConfig.mesh_beacon.flags == later_flags
+
+    @pytest.mark.unit
+    def test_verify_interrupted_poll_restores_sent_values(self) -> None:
+        """Cancellation after requesting preserves intent when no reply arrived."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        with (
+            patch(
+                "meshtastic.node_runtime.settings_runtime.config_runtime.time.sleep",
+                side_effect=KeyboardInterrupt,
+            ),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            self._verify_beacon(node, verify_timeout=1.0)
+        assert node.moduleConfig.mesh_beacon.flags == 7
+
+    @pytest.mark.unit
+    def test_overlapping_verifications_keep_request_callbacks_independent(self) -> None:
+        """Two section reads complete independently without replacing Node methods."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+        node.moduleConfig.mqtt.enabled = True
+        staged = {
+            name: getattr(node.moduleConfig, name).SerializeToString()
+            for name in ("mesh_beacon", "mqtt")
+        }
+        runtime = self._beacon_runtime(node)
+        original_handler = node.onResponseRequestSettings
+        callbacks: dict[str, Any] = {}
+        requested = {name: threading.Event() for name in staged}
+        finished = {name: threading.Event() for name in staged}
+        errors: list[BaseException] = []
+
+        def _send(message: Any, **kwargs: Any) -> Any:
+            index = message.get_module_config_request
+            name = node.moduleConfig.DESCRIPTOR.fields[index].name
+            callbacks[name] = kwargs["onResponse"]
+            requested[name].set()
+            return MagicMock()
+
+        def _verify(name: str) -> None:
+            try:
+                runtime._verify_written_config(name, staged_bytes=staged[name])
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                finished[name].set()
+
+        node._send_admin.side_effect = _send
+        threads = [threading.Thread(target=_verify, args=(name,)) for name in staged]
+        with (
+            patch(
+                "meshtastic.node_runtime.settings_runtime.config_runtime.CONFIG_VERIFY_TIMEOUT_SECONDS",
+                2.0,
+            ),
+            patch(
+                "meshtastic.node_runtime.settings_runtime.config_runtime.CONFIG_VERIFY_POLL_INTERVAL_SECONDS",
+                0.01,
+            ),
+        ):
+            try:
+                for thread in threads:
+                    thread.start()
+                assert all(event.wait(1.0) for event in requested.values())
+                assert node.onResponseRequestSettings is original_handler
+                self._device_reports(node, 7, on_response=callbacks["mesh_beacon"])
+                assert finished["mesh_beacon"].wait(1.0)
+                assert not finished["mqtt"].is_set()
+                raw = admin_pb2.AdminMessage()
+                raw.get_module_config_response.mqtt.enabled = True
+                callbacks["mqtt"](
+                    {
+                        "decoded": {
+                            "admin": {
+                                "raw": raw,
+                                "getModuleConfigResponse": {"mqtt": {"enabled": True}},
+                            }
+                        }
+                    }
+                )
+                assert finished["mqtt"].wait(1.0)
+            finally:
+                for thread in threads:
+                    thread.join(timeout=3.0)
+        assert not errors
+        assert node.onResponseRequestSettings is original_handler
+
+    @pytest.mark.unit
+    def test_verify_rejects_other_section_despite_matching_cached_values(self) -> None:
+        """A correlated response for another section cannot certify stale cache."""
+        node = self._verified_node()
+        node.moduleConfig.mesh_beacon.flags = 7
+
+        def _wrong_section(_descriptor: Any, **kwargs: Any) -> None:
+            # Another outstanding read supplied matching cache state, while
+            # this request's own response contains only a different section.
+            node.moduleConfig.mesh_beacon.flags = 7
+            raw = admin_pb2.AdminMessage()
+            raw.get_module_config_response.mqtt.enabled = True
+            kwargs["on_response"](
+                {
+                    "decoded": {
+                        "admin": {
+                            "raw": raw,
+                            "getModuleConfigResponse": {"mqtt": {"enabled": True}},
+                        }
+                    }
+                }
+            )
+
+        node.requestConfig.side_effect = _wrong_section
+        self._verify_failing_beacon(node)
+        assert node.moduleConfig.mesh_beacon.flags == 7
