@@ -427,7 +427,7 @@ def test_show_nodes_handles_single_level_and_missing_nested_fields(
     assert "shortName" in table
     assert "N1" in table
     assert "!00000001" in table
-    assert "N/A" in table
+    assert "–" in table
 
 
 @pytest.mark.unit
@@ -461,7 +461,7 @@ def test_show_nodes_formats_powered_battery_and_future_since(
         _ = capsys.readouterr()
 
     assert "Powered" in table
-    assert "N/A" in table
+    assert "–" in table
 
 
 @pytest.mark.unit

@@ -367,7 +367,7 @@ class TestShowNodes:
             mock_render.return_value = "Empty Table"
             result = node_view.show_nodes()
 
-        assert result == "Empty Table"
+        assert result == "Nodes: 0\nEmpty Table"
 
     @pytest.mark.unit
     def test_show_nodes_with_data(
@@ -395,7 +395,7 @@ class TestShowNodes:
 
                     result = node_view.show_nodes()
 
-        assert result == "Rendered Table"
+        assert result == "Nodes: 1\nRendered Table"
 
 
 class TestGetNode:

@@ -112,7 +112,9 @@ def test_meshtasticd_info_has_core_sections(meshtastic_bin: str) -> None:
 
 def test_meshtasticd_nodes_lists_local_node(meshtastic_bin: str) -> None:
     """`--nodes` should include at least one Meshtastic node id."""
-    output = _run_host_cli_ok(HOST, "--nodes", meshtastic_bin=meshtastic_bin)
+    output = _run_host_cli_ok(
+        HOST, "--nodes", "--show-fields", "user.id", meshtastic_bin=meshtastic_bin
+    )
     assert output.startswith("Connected to radio")
     assert re.search(r"![0-9a-fA-F]{8}", output)
 

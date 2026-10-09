@@ -111,7 +111,7 @@ def test_showNodes_favorite_column_header(
 ) -> None:
     """Test that 'Fav' column header appears in showNodes output."""
     iface = favorite_nodes_iface
-    iface.showNodes()
+    iface.showNodes(showFields=["user.longName", "isFavorite"])
     out, err = capsys.readouterr()
     assert "Fav" in out
     assert err == ""
@@ -123,7 +123,7 @@ def test_showNodes_favorite_asterisk_display(
 ) -> None:
     """Test that favorite nodes show asterisk and non-favorites show empty."""
     iface = favorite_nodes_iface
-    iface.showNodes()
+    iface.showNodes(showFields=["user.longName", "isFavorite"])
     out, err = capsys.readouterr()
 
     # Check that the output contains the "Fav" column
@@ -177,14 +177,13 @@ def test_showNodes_with_custom_fields_including_favorite(
 
 
 @pytest.mark.unit
-def test_showNodes_default_fields_includes_favorite(
+def test_showNodes_favorite_column_via_explicit_fields(
     favorite_nodes_iface: MeshInterface,
 ) -> None:
-    """Test that isFavorite is included in default fields."""
+    """Test that isFavorite renders when requested through showFields."""
     iface = favorite_nodes_iface
 
-    # Call showNodes which uses default fields
-    result = iface.showNodes()
+    result = iface.showNodes(showFields=["user.longName", "isFavorite"])
 
     # The result should contain the formatted table as a string
     assert "Fav" in result

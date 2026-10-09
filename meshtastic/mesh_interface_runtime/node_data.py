@@ -41,22 +41,11 @@ def extract_node_field_value(node_dict: dict[str, Any], field_path: str) -> Any:
 DEFAULT_SHOW_FIELDS: list[str] = [
     "N",
     "user.longName",
-    "user.id",
-    "user.shortName",
     "user.hwModel",
-    "user.publicKey",
     "user.role",
-    "position.latitude",
-    "position.longitude",
-    "position.altitude",
     "deviceMetrics.batteryLevel",
-    "deviceMetrics.channelUtilization",
-    "deviceMetrics.airUtilTx",
     "snr",
     "hopsAway",
-    "channel",
-    "isFavorite",
-    "lastHeard",
     "since",
 ]
 

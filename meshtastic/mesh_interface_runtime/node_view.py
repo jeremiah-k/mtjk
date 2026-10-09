@@ -298,7 +298,7 @@ class NodeView:
             The rendered table string using tabulate.
         """
         return str(
-            tabulate(rows, headers="keys", missingval="N/A", tablefmt="fancy_grid")
+            tabulate(rows, headers="keys", missingval="–", tablefmt="fancy_grid")
         )
 
     def show_nodes(
@@ -319,9 +319,8 @@ class NodeView:
         Returns
         -------
         table : str
-            The rendered table string (also printed to stdout)
-            containing one row per node and columns mapped to human-readable
-            headings.
+            The rendered node-count line and table (also printed to stdout)
+            with columns mapped to human-readable headings.
         """
         # Determine fields to show
         if not showFields:
@@ -368,10 +367,14 @@ class NodeView:
         for i, row in enumerate(rows):
             row["N"] = i + 1
 
+        # Node-count header mirrors the MMRelay !nodes grammar
+        header = f"Nodes: {len(nodes_snapshot)}"
+
         # Render and output table
         table = self._render_node_table(rows)
-        print(table)
-        return table
+        output = header + "\n" + table
+        print(output)
+        return output
 
     def get_node(
         self,
