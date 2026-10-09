@@ -382,6 +382,30 @@ def test_list_fields_text_rendering_unchanged_without_json(
 
 
 @pytest.mark.unit
+def test_list_fields_text_routes_through_injected_sink(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The text listing should honor an injected print sink."""
+    sink_lines: list[str] = []
+
+    config_io.print_available_config_fields(
+        camel_case=False,
+        aliases={},
+        display_pref_name=lambda value: value,
+        type_label=preference_runtime.protobuf_field_type_label,
+        bitfield_enums=preference_runtime.BITFIELD_ENUMS,
+        cli_print=sink_lines.append,
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert sink_lines[0] == "Local config fields:"
+    assert "Module config fields:" in sink_lines
+    assert any(line.startswith("    lora.") for line in sink_lines)
+
+
+@pytest.mark.unit
 def test_list_fields_json_matches_describe_for_bitfield_fields(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

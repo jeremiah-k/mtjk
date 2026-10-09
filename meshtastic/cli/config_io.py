@@ -88,7 +88,9 @@ def _collect_local_configuration(
     )
 
 
-def print_config(config: Any, *, camel_case: bool) -> None:
+def print_config(
+    config: Any, *, camel_case: bool, cli_print: Callable[[str], None] = print
+) -> None:
     """Print top-level configuration sections and their writable fields.
 
     Parameters
@@ -97,6 +99,8 @@ def print_config(config: Any, *, camel_case: bool) -> None:
         Protobuf-like configuration message exposing a ``DESCRIPTOR``.
     camel_case : bool
         Whether field paths should be rendered in camelCase.
+    cli_print : Callable[[str], None]
+        Sink receiving each output line; defaults to ``print``.
     """
     descriptor = config.DESCRIPTOR
     for config_section in descriptor.fields:
@@ -105,7 +109,7 @@ def print_config(config: Any, *, camel_case: bool) -> None:
         section_field = descriptor.fields_by_name.get(config_section.name)
         if section_field is None or section_field.message_type is None:
             continue
-        print(f"{config_section.name}:")
+        cli_print(f"{config_section.name}:")
         names = []
         for field in section_field.message_type.fields:
             field_name = f"{config_section.name}.{field.name}"
@@ -113,7 +117,7 @@ def print_config(config: Any, *, camel_case: bool) -> None:
                 field_name = meshtastic.util.snake_to_camel(field_name)
             names.append(field_name)
         for field_name in sorted(names):
-            print(f"    {field_name}")
+            cli_print(f"    {field_name}")
 
 
 def print_available_config_fields(
@@ -126,6 +130,7 @@ def print_available_config_fields(
     local_config_factory: Callable[[], Any] = localonly_pb2.LocalConfig,
     module_config_factory: Callable[[], Any] = localonly_pb2.LocalModuleConfig,
     as_json: bool = False,
+    cli_print: Callable[[str], None] = print,
 ) -> None:
     """Print current local/module fields and compatibility aliases.
 
@@ -144,9 +149,11 @@ def print_available_config_fields(
     module_config_factory : Callable[[], Any]
         Factory for the module-configuration wrapper, with the same compatibility
         injection semantics as ``local_config_factory``.
+    cli_print : Callable[[str], None]
+        Sink receiving each output line; defaults to ``print``.
     """
     if as_json:
-        print(
+        cli_print(
             json.dumps(
                 {
                     "config_fields": list(
@@ -170,16 +177,16 @@ def print_available_config_fields(
         )
         return
 
-    print("Local config fields:")
-    print_config(local_config_factory(), camel_case=camel_case)
-    print("")
-    print("Module config fields:")
-    print_config(module_config_factory(), camel_case=camel_case)
+    cli_print("Local config fields:")
+    print_config(local_config_factory(), camel_case=camel_case, cli_print=cli_print)
+    cli_print("")
+    cli_print("Module config fields:")
+    print_config(module_config_factory(), camel_case=camel_case, cli_print=cli_print)
     if aliases:
-        print("")
-        print("Compatibility aliases:")
+        cli_print("")
+        cli_print("Compatibility aliases:")
         for alias_name, canonical_name in sorted(aliases.items()):
-            print(
+            cli_print(
                 f"    {display_pref_name(alias_name)} -> "
                 f"{display_pref_name(canonical_name)}"
             )

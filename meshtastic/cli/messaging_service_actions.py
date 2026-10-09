@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import platform
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
@@ -41,6 +42,19 @@ TELEMETRY_TYPE_ALIASES = {
 }
 
 
+class GetPrefHook(Protocol):
+    """Callable contract for reading and displaying one preference path."""
+
+    def __call__(
+        self,
+        node: Any,
+        comp_name: str,
+        *,
+        allow_secrets: bool = ...,
+        cli_print: Callable[[str], None] = ...,
+    ) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class MessagingServiceHooks:
     """Compatibility and optional-subsystem seams for service actions."""
@@ -50,7 +64,7 @@ class MessagingServiceHooks:
     get_channel_index: Callable[[], int | None]
     check_channel: Callable[[Any, int], bool]
     remote_hardware_client: Callable[[Any], Any]
-    get_pref: Callable[[Any, str], bool]
+    get_pref: GetPrefHook
     validate_cli_show_fields: Callable[[Any, list[str]], None]
     newer_version: Callable[[], str | None]
     install_upgrade_hint: str
@@ -61,6 +75,7 @@ class MessagingServiceHooks:
     get_meter: Callable[[], Any]
     platform_system: Callable[[], str] = platform.system
     sleep: Callable[[float], None] = time.sleep
+    preference_print: Callable[[str], None] | None = None
 
 
 def _selected_channel(hooks: MessagingServiceHooks) -> int:
@@ -314,6 +329,30 @@ def _handle_content_reads(context: CliContext) -> None:
         print(f"ringtone:{_escape_terminal_controls(ringtone)}")
 
 
+def _call_get_pref(
+    get_pref: GetPrefHook,
+    node: Any,
+    name: str,
+    cli_print: Callable[[str], None],
+) -> bool:
+    """Support the original two-positional-argument preference hook contract.
+
+    Select the calling convention from the hook signature, not by catching a
+    TypeError raised inside the hook (which would incorrectly execute it twice).
+    """
+    try:
+        signature = inspect.signature(get_pref)
+    except (TypeError, ValueError):
+        # An opaque callable is treated as the current sink-aware contract.
+        return get_pref(node, name, cli_print=cli_print)
+    try:
+        signature.bind(node, name, cli_print=cli_print)
+    except TypeError:
+        signature.bind(node, name)
+        return get_pref(node, name)
+    return get_pref(node, name, cli_print=cli_print)
+
+
 def _handle_information_actions(
     context: CliContext, hooks: MessagingServiceHooks
 ) -> None:
@@ -346,10 +385,13 @@ def _handle_information_actions(
         context.outcome.close_now = True
         node = interface.getNode(args.dest, False, **context.get_node_kwargs)
         found = False
+        # Preference data is a requested result, not a progress banner: keep
+        # it visible even when the standalone CLI is running with --quiet.
+        output = hooks.preference_print or hooks.cli_print
         for pref in args.get:
-            found = hooks.get_pref(node, pref[0]) or found
+            found = _call_get_pref(hooks.get_pref, node, pref[0], output) or found
         if found:
-            hooks.cli_print("Completed getting preferences")
+            output("Completed getting preferences")
 
     if args.nodes:
         context.outcome.close_now = True

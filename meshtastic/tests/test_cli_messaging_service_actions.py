@@ -351,6 +351,82 @@ def test_information_get_accumulates_success_across_preferences() -> None:
 
 
 @pytest.mark.unit
+def test_information_get_routes_preference_output_through_cli_print() -> None:
+    """--get preference reads should receive the dispatch print seam."""
+    interface = _interface_double()
+    node = MagicMock()
+    interface.getNode.return_value = node
+    context = _context(interface, get=[["lora.region"]])
+    get_pref = MagicMock(return_value=True)
+    cli_print = MagicMock()
+
+    _handle_information_actions(context, _hooks(get_pref=get_pref, cli_print=cli_print))
+
+    get_pref.assert_called_once_with(node, "lora.region", cli_print=cli_print)
+    cli_print.assert_any_call("Completed getting preferences")
+
+
+@pytest.mark.unit
+def test_information_get_keeps_results_visible_with_separate_quiet_sink() -> None:
+    """Quiet suppresses ordinary progress, not explicit --get results."""
+    interface = _interface_double()
+    interface.getNode.return_value = node = MagicMock()
+    context = _context(interface, get=[["lora.region"]])
+    ordinary_output = MagicMock()
+    preference_output = MagicMock()
+    get_pref = MagicMock(return_value=True)
+
+    _handle_information_actions(
+        context,
+        _hooks(
+            cli_print=ordinary_output,
+            preference_print=preference_output,
+            get_pref=get_pref,
+        ),
+    )
+
+    get_pref.assert_called_once_with(node, "lora.region", cli_print=preference_output)
+    preference_output.assert_called_once_with("Completed getting preferences")
+    ordinary_output.assert_not_called()
+
+
+@pytest.mark.unit
+def test_information_get_accepts_legacy_two_argument_hook() -> None:
+    """Old embedding callbacks still work without swallowing their errors."""
+    interface = _interface_double()
+    interface.getNode.return_value = node = MagicMock()
+    context = _context(interface, get=[["lora.region"]])
+    reads: list[tuple[Any, str]] = []
+    output: list[str] = []
+
+    def legacy_get_pref(remote_node: Any, pref_name: str) -> bool:
+        reads.append((remote_node, pref_name))
+        return True
+
+    _handle_information_actions(
+        context, _hooks(get_pref=legacy_get_pref, cli_print=output.append)
+    )
+    assert reads == [(node, "lora.region")]
+    assert output == ["Completed getting preferences"]
+
+
+@pytest.mark.unit
+def test_information_get_does_not_retry_a_failing_sink_aware_hook() -> None:
+    """A hook's own TypeError must not trigger a second legacy invocation."""
+    interface = _interface_double()
+    context = _context(interface, get=[["lora.region"]])
+    calls = []
+
+    def failing_hook(_node: Any, _name: str, *, cli_print: Any) -> bool:
+        calls.append(cli_print)
+        raise TypeError("failure inside the hook")
+
+    with pytest.raises(TypeError, match="failure inside the hook"):
+        _handle_information_actions(context, _hooks(get_pref=failing_hook))
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
 def test_content_reads_escape_terminal_control_sequences(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
