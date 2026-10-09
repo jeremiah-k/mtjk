@@ -94,7 +94,12 @@ lint:
           disable_upstream: true
           success_codes: [0]
           batch: true
-          cache_results: true
+          # No cache_results: pylint findings depend on every imported
+          # module, but trunk's cache key only covers the checked file.
+          # A finding captured mid-refactor (e.g. an IDE background check
+          # between two related edits) would replay as a false positive
+          # until the target file itself changed again. Re-running pylint
+          # is cheap next to reporting stale results.
           stdin: false
   enabled:
     - grype@0.117.0
