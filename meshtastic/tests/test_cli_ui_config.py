@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -117,6 +118,72 @@ def test_requestUiConfig_rejects_non_positive_timeout() -> None:
         node.requestUiConfig(response_timeout_seconds=0)
 
     assert captured == {}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("send_finished_at, expected_wait", [(11.5, 0.5), (13.0, 0.0)])
+def test_private_admin_response_deadline_includes_send_time(
+    monkeypatch: pytest.MonkeyPatch, send_finished_at: float, expected_wait: float
+) -> None:
+    """Sending cannot grant a typed getter another full response timeout."""
+    captured: dict[str, Any] = {}
+    iface = _interface()
+    node = _stub_node_for_request(captured, iface)
+    completed = threading.Event()
+    iface._request_wait_runtime = MagicMock()
+    monkeypatch.setattr(
+        "meshtastic.node.time", SimpleNamespace(monotonic=lambda: send_finished_at)
+    )
+
+    with (
+        patch("meshtastic.node.threading.Event", return_value=completed),
+        patch.object(completed, "wait", return_value=False) as wait,
+    ):
+        result = node._request_admin_response(
+            admin_pb2.AdminMessage(get_ui_config_request=True),
+            "get_ui_config_response",
+            device_ui_pb2.DeviceUIConfig,
+            response_timeout_seconds=12.0,
+            response_deadline=12.0,
+        )
+
+    assert result is None
+    wait.assert_called_once_with(timeout=expected_wait)
+    iface._request_wait_runtime.retire_wait_request.assert_called_once_with(
+        "receivedNak", request_id=1
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "response_received_at, accepted", [(11.0, True), (13.0, False)]
+)
+def test_private_admin_response_deadline_retains_only_timely_responses(
+    monkeypatch: pytest.MonkeyPatch, response_received_at: float, accepted: bool
+) -> None:
+    """A timely synchronous response survives exhausted post-send wait budget."""
+    expected = device_ui_pb2.DeviceUIConfig(version=3, screen_brightness=85)
+    clock = {"now": response_received_at}
+    node = _stub_node_for_request({}, _interface())
+    monkeypatch.setattr(
+        "meshtastic.node.time", SimpleNamespace(monotonic=lambda: clock["now"])
+    )
+
+    def send(*args: Any, **kwargs: Any) -> mesh_pb2.MeshPacket:
+        kwargs["onResponse"](_build_response_packet(config=expected))
+        clock["now"] = 14.0
+        return mesh_pb2.MeshPacket(id=1)
+
+    monkeypatch.setattr(node, "_send_admin", send)
+    result = node._request_admin_response(
+        admin_pb2.AdminMessage(get_ui_config_request=True),
+        "get_ui_config_response",
+        device_ui_pb2.DeviceUIConfig,
+        response_timeout_seconds=12.0,
+        response_deadline=12.0,
+    )
+
+    assert result == (expected if accepted else None)
 
 
 # ---------------------------------------------------------------------------

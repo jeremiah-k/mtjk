@@ -8,6 +8,7 @@ in the mesh, including methods for localConfig, moduleConfig, and channels manag
 import logging
 import sys
 import threading
+import time
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -605,13 +606,15 @@ class Node:  # pylint: disable=too-many-instance-attributes
         """
         self._channel_presentation_runtime._show_channels()  # noqa: SLF001
 
-    def showInfo(self) -> None:
+    def showInfo(self, *, cli_print: Callable[[str], None] = print) -> None:
         """Print the node's local and module configurations (as JSON when available) followed by its configured channels.
 
         If a configuration is not present, an empty placeholder is printed for that
         section. Channels are displayed using the node's channel listing format.
         """
-        self._channel_presentation_runtime._show_info()  # noqa: SLF001
+        self._channel_presentation_runtime._show_info(
+            cli_print=cli_print
+        )  # noqa: SLF001
 
     def setChannels(self, channels: Sequence[channel_pb2.Channel]) -> None:
         """Set the node's channel list and normalize channel entries.
@@ -1780,8 +1783,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
         response_type: type[_AdminResponseT],
         *,
         response_timeout_seconds: float,
+        response_deadline: float | None = None,
     ) -> _AdminResponseT | None:
-        """Send an admin request and return a copied named response field."""
+        """Send an admin request and return a copied named response field.
+
+        An optional monotonic deadline includes time spent sending and limits
+        the response wait to the caller's remaining operation budget.
+        """
         if response_timeout_seconds <= 0:
             raise ValueError("response timeout must be positive")
 
@@ -1791,6 +1799,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
         def _on_response(packet: dict[str, Any]) -> None:
             nonlocal result, failure_error
+            if response_deadline is not None and time.monotonic() > response_deadline:
+                return
             decoded = packet.get("decoded") if isinstance(packet, dict) else None
             routing = decoded.get("routing") if isinstance(decoded, dict) else None
             if isinstance(routing, dict):
@@ -1870,7 +1880,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
         request_id = getattr(request, "id", None)
         runtime = getattr(self.iface, "_request_wait_runtime", None)
         try:
-            if not completed.wait(timeout=response_timeout_seconds):
+            remaining_timeout = response_timeout_seconds
+            if response_deadline is not None:
+                remaining_timeout = max(
+                    0.0, min(remaining_timeout, response_deadline - time.monotonic())
+                )
+            if not completed.wait(timeout=remaining_timeout):
                 return None
             if failure_error is not None:
                 raise failure_error

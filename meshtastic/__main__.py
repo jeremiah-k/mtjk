@@ -319,6 +319,10 @@ def _cli_exit(message: str, return_value: int = 1) -> NoReturn:
     return_value : int
         Process exit code (0 for success, non-zero for error).
     """
+    output = cli_invocation._get_cli_output()  # noqa: SLF001
+    if output is not None and output is not _cli_print:
+        _cli_print(message, force=True)
+        raise SystemExit(return_value)
     meshtastic.util.our_exit(message, return_value)
 
 
@@ -372,6 +376,13 @@ def _cli_print(message: str, *, force: bool = False) -> None:
     args = _current_invocation_args()
     if not force and args and getattr(args, "quiet", False):
         return
+    output = cli_invocation._get_cli_output()  # noqa: SLF001
+    if output is not None and output is not _cli_print:
+        # A sink may itself wrap _cli_print. Suspend routing while calling it
+        # so the standalone binding cannot recurse into the same sink.
+        with cli_invocation._activate_cli_output(None):  # noqa: SLF001
+            output(message)
+        return
     print(message)
 
 
@@ -380,7 +391,7 @@ def _report_pref_validation(message: str) -> None:
     cli_preference_runtime.report_pref_validation(message, cli_print=_cli_print)
 
 
-def supportInfo() -> None:
+def supportInfo(*, cli_print: Callable[[str], None] = print) -> None:
     """Print troubleshooting guidance and environment details useful for reporting CLI or library issues.
 
     Specifically prints the issue tracker URL and the running environment: system,
@@ -388,32 +399,37 @@ def supportInfo() -> None:
     installed distribution version (and available newer PyPI version if any),
     executable path, and Python implementation/version. Advises adding the output
     of the preferred CLI ``--info`` command when filing an issue.
+
+    Parameters
+    ----------
+    cli_print : Callable[[str], None]
+        Sink receiving each output line; defaults to ``print``.
     """
-    print("")
-    print(f"If having issues with {PROJECT_DISPLAY_NAME} CLI / python library")
-    print("or wish to make feature requests, visit:")
-    print(PROJECT_ISSUE_URL)
-    print("When adding an issue, be sure to include the following info:")
-    print(f" System: {platform.system()}")
-    print(f"   Platform: {platform.platform()}")
-    print(f"   Release: {platform.uname().release}")
-    print(f"   Machine: {platform.uname().machine}")
-    print(f"   Encoding (stdin): {sys.stdin.encoding}")
-    print(f"   Encoding (stdout): {sys.stdout.encoding}")
+    cli_print("")
+    cli_print(f"If having issues with {PROJECT_DISPLAY_NAME} CLI / python library")
+    cli_print("or wish to make feature requests, visit:")
+    cli_print(PROJECT_ISSUE_URL)
+    cli_print("When adding an issue, be sure to include the following info:")
+    cli_print(f" System: {platform.system()}")
+    cli_print(f"   Platform: {platform.platform()}")
+    cli_print(f"   Release: {platform.uname().release}")
+    cli_print(f"   Machine: {platform.uname().machine}")
+    cli_print(f"   Encoding (stdin): {sys.stdin.encoding}")
+    cli_print(f"   Encoding (stdout): {sys.stdout.encoding}")
     the_version = get_active_version()
     pypi_version = meshtastic.util.check_if_newer_version()
     if pypi_version:
-        print(
+        cli_print(
             f" {PROJECT_DISPLAY_NAME}: v{the_version} (*** newer version v{pypi_version} available ***)"
         )
     else:
-        print(f" {PROJECT_DISPLAY_NAME}: v{the_version}")
-    print(f" Executable: {sys.argv[0]}")
-    print(
+        cli_print(f" {PROJECT_DISPLAY_NAME}: v{the_version}")
+    cli_print(f" Executable: {sys.argv[0]}")
+    cli_print(
         f" Python: {platform.python_version()} {platform.python_implementation()} {platform.python_compiler()}"
     )
-    print("")
-    print(f"Please add the output from the command: {PRIMARY_CLI_NAME} --info")
+    cli_print("")
+    cli_print(f"Please add the output from the command: {PRIMARY_CLI_NAME} --info")
 
 
 _ConfigureReconnectResult = cli_configure_actions.ConfigureReconnectResult
@@ -593,6 +609,22 @@ def support_info() -> None:
 
 def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
     """Handle an incoming mesh packet, optionally send a text reply, and close the interface when appropriate."""
+    _on_receive_with_sink(packet, interface)
+
+
+def _on_receive_with_sink(
+    packet: dict[str, Any],
+    interface: MeshInterface,
+    *,
+    cli_print: Callable[[str], None] = print,
+) -> None:
+    """Sink-aware implementation backing the historical onReceive pubsub callback.
+
+    The public ``onReceive`` signature must stay exactly ``(packet, interface)``
+    because pypubsub derives the ``meshtastic.receive`` topic specification from
+    listener signatures; sink injection therefore happens through this internal
+    entrypoint instead.
+    """
     args = _current_invocation_args()
     try:
         d = packet.get("decoded")
@@ -628,14 +660,14 @@ def onReceive(packet: dict[str, Any], interface: MeshInterface) -> None:
                 if targetChannel is None or rxChannel == targetChannel:
                     rxSnr = packet.get("rxSnr", "unknown")
                     hopLimit = packet.get("hopLimit", "unknown")
-                    print(f"message: {msg}")
+                    cli_print(f"message: {msg}")
                     reply = (
                         f"got msg '{msg}' with rxSnr: {rxSnr} and hopLimit: {hopLimit}"
                     )
-                    print(f"Received channel {rxChannel}. Sending reply: {reply}")
+                    cli_print(f"Received channel {rxChannel}. Sending reply: {reply}")
                     interface.sendText(reply, channelIndex=rxChannel)
                 else:
-                    print(
+                    cli_print(
                         f"Ignored message on channel {rxChannel} (waiting for channel {targetChannel})"
                     )
 
@@ -925,19 +957,21 @@ _resolve_pref = cli_preference_runtime.resolve_pref
 _protobuf_field_type_label = cli_preference_runtime.protobuf_field_type_label
 
 
-def _print_channel_field_choices(settings: Any, pref_name: str) -> None:
+def _print_channel_field_choices(
+    settings: Any, pref_name: str, *, cli_print: Callable[[str], None] = print
+) -> None:
     """Print available channel-setting fields after an unknown --ch-set name."""
-    print(f"{settings.__class__.__name__} does not have an attribute {pref_name}.")
-    print("Choices are...")
+    cli_print(f"{settings.__class__.__name__} does not have an attribute {pref_name}.")
+    cli_print("Choices are...")
     for field in settings.DESCRIPTOR.fields:
         if field.name != "module_settings":
-            print(field.name)
+            cli_print(field.name)
             continue
-        print(f"{field.name}:")
+        cli_print(f"{field.name}:")
         if field.message_type is None:
             continue
         for sub_field in sorted(field.message_type.fields, key=lambda item: item.name):
-            print(f"    {field.name}.{sub_field.name}")
+            cli_print(f"    {field.name}.{sub_field.name}")
 
 
 def _reject_pref_value(
@@ -1017,7 +1051,9 @@ def _module_prefix_strip_hint(pref_name: str) -> str | None:
     return MODULE_PREFIX_HINT
 
 
-def _print_set_field_choices(node: Any, pref_names: Sequence[str]) -> None:
+def _print_set_field_choices(
+    node: Any, pref_names: Sequence[str], *, cli_print: Callable[[str], None] = print
+) -> None:
     """Print historical field-not-found guidance for one or more --set names.
 
     Parameters
@@ -1026,19 +1062,21 @@ def _print_set_field_choices(node: Any, pref_names: Sequence[str]) -> None:
         Node whose local and module configuration schemas provide the choices.
     pref_names : Sequence[str]
         Unknown preference names to identify before printing choices.
+    cli_print : Callable[[str], None]
+        Sink receiving each output line; defaults to ``print``.
     """
     names = list(dict.fromkeys(pref_names))
     for pref_name in names:
-        print(
+        cli_print(
             f"{node.localConfig.__class__.__name__} and "
             f"{node.moduleConfig.__class__.__name__} do not have an attribute {pref_name}."
         )
         hint = _module_prefix_strip_hint(pref_name)
         if hint is not None:
-            print(hint)
-    print("Choices are...")
-    printConfig(node.localConfig)
-    printConfig(node.moduleConfig)
+            cli_print(hint)
+    cli_print("Choices are...")
+    printConfig(node.localConfig, cli_print=cli_print)
+    printConfig(node.moduleConfig, cli_print=cli_print)
 
 
 def _normalize_set_entries(
@@ -1163,6 +1201,8 @@ def _validate_set_entries_against_configs(
     node: Any,
     config_copies: Sequence[Any],
     set_entries: Sequence[tuple[str, Any]],
+    *,
+    cli_print: Callable[[str], None] = print,
 ) -> bool:
     """
     Validate --set entries against prepared configuration copies as one batch.
@@ -1223,7 +1263,7 @@ def _validate_set_entries_against_configs(
         _CONFIGURE_PREFLIGHT_MODE.reset(token)
 
     if unknown_fields:
-        _print_set_field_choices(node, unknown_fields)
+        _print_set_field_choices(node, unknown_fields, cli_print=cli_print)
 
     if fatal_errors:
         detail_lines = [f"  - {error}" for error in fatal_errors]
@@ -1262,7 +1302,10 @@ def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) ->
     """
     snapshot = _ConfigSnapshotCopies.from_node(node)
     return _validate_set_entries_against_configs(
-        node, (snapshot.local_config, snapshot.module_config), set_entries
+        node,
+        (snapshot.local_config, snapshot.module_config),
+        set_entries,
+        cli_print=lambda message: _cli_print(message, force=True),
     )
 
 
@@ -1721,7 +1764,12 @@ def _preview_set_command(
     _ensure_set_sections_loaded(node, batch_entries)
     snapshot = _ConfigSnapshotCopies.from_node(node)
     config_copies = (snapshot.local_config, snapshot.module_config)
-    if not _validate_set_entries_against_configs(node, config_copies, batch_entries):
+    if not _validate_set_entries_against_configs(
+        node,
+        config_copies,
+        batch_entries,
+        cli_print=lambda message: _cli_print(message, force=True),
+    ):
         _cli_exit(
             "ERROR: --set batch rejected during dry run; "
             "no changes were written to the device."
@@ -1855,7 +1903,9 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
         set_pref=setPref,
         fatal_preference_value_errors=_fatal_preference_value_errors,
         preference_value_error=_PreferenceValueError,
-        print_channel_field_choices=_print_channel_field_choices,
+        print_channel_field_choices=lambda settings, name: _print_channel_field_choices(
+            settings, name, cli_print=lambda message: _cli_print(message, force=True)
+        ),
         is_local_destination=_is_local_destination,
         modem_preset_shorthands=_MODEM_PRESET_SHORTHANDS,
         qr_render=(cli_qr.renderTerminalQr if cli_qr.segno is not None else None),

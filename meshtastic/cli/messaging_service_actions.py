@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import io
 import logging
 import platform
 import time
@@ -307,26 +308,27 @@ def _handle_messaging_actions(
                 hooks.sleep(GPIO_WATCH_INTERVAL_SECONDS)
 
 
-def _handle_content_reads(context: CliContext) -> None:
+def _handle_content_reads(context: CliContext, hooks: MessagingServiceHooks) -> None:
     """Read canned-message and ringtone content in their historical position."""
     args = context.args
     interface = context.interface
+    output = hooks.preference_print or hooks.cli_print
 
     if args.get_canned_message:
         context.outcome.close_now = True
-        print("")
+        output("")
         messages = interface.getNode(
             args.dest, **context.get_node_kwargs
         ).get_canned_message()
-        print(f"canned_plugin_message:{_escape_terminal_controls(messages)}")
+        output(f"canned_plugin_message:{_escape_terminal_controls(messages)}")
 
     if args.get_ringtone:
         context.outcome.close_now = True
-        print("")
+        output("")
         ringtone = interface.getNode(
             args.dest, **context.get_node_kwargs
         ).get_ringtone()
-        print(f"ringtone:{_escape_terminal_controls(ringtone)}")
+        output(f"ringtone:{_escape_terminal_controls(ringtone)}")
 
 
 def _call_get_pref(
@@ -361,16 +363,23 @@ def _handle_information_actions(
     interface = context.interface
 
     if args.info:
-        print("")
+        # Requested results stay visible even under --quiet and remain
+        # capturable by embedded dispatchers, matching the --get policy.
+        output = hooks.preference_print or hooks.cli_print
+        output("")
         if args.dest == BROADCAST_ADDR:
-            interface.showInfo()
-            print("")
-            interface.getNode(args.dest, **context.get_node_kwargs).showInfo()
+            summary = io.StringIO()
+            interface.showInfo(file=summary)
+            output(summary.getvalue().rstrip("\n"))
+            output("")
+            interface.getNode(args.dest, **context.get_node_kwargs).showInfo(
+                cli_print=output
+            )
             context.outcome.close_now = True
-            print("")
+            output("")
             pypi_version = hooks.newer_version()
             if pypi_version:
-                print(
+                output(
                     f"*** A newer version v{pypi_version} is available!"
                     f' Consider running "{hooks.install_upgrade_hint}" ***\n'
                 )

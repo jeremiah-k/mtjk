@@ -1,6 +1,7 @@
 """User-facing channel/config presentation runtime owner."""
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 from google.protobuf.message import Message
@@ -33,14 +34,17 @@ class _NodeChannelPresentationRuntime:
         *,
         channel_state: _NodeChannelState,
         export_runtime: _NodeChannelExportRuntime,
+        cli_print: Callable[[str], None] = print,
     ) -> None:
         self._node = node
         self._channel_state = channel_state
         self._export_runtime = export_runtime
+        self._cli_print = cli_print
 
-    def _show_channels(self) -> None:
+    def _show_channels(self, *, cli_print: Callable[[str], None] | None = None) -> None:
         """Print channels and URL exports preserving historical output behavior."""
-        print("Channels:")
+        cli_print = self._cli_print if cli_print is None else cli_print
+        cli_print("Channels:")
         channels_snapshot = self._channel_state.snapshot_channels()
         if channels_snapshot:
             logger.debug(
@@ -60,7 +64,7 @@ class _NodeChannelPresentationRuntime:
                     continue
                 role_name = _get_role_name(channel.role)
                 channel_string = messageToJson(channel.settings)
-                print(
+                cli_print(
                     f"  Index {channel.index}: {role_name} "
                     f"psk={pskToString(channel.settings.psk)} {channel_string}"
                 )
@@ -71,7 +75,7 @@ class _NodeChannelPresentationRuntime:
             )
         except Exception as exc:  # noqa: BLE001 - show_info should remain non-fatal
             logger.warning("Unable to export primary channel URL: %s", exc)
-            print("\nPrimary channel URL: unavailable")
+            cli_print("\nPrimary channel URL: unavailable")
             return
 
         admin_url = public_url
@@ -83,9 +87,9 @@ class _NodeChannelPresentationRuntime:
         except Exception as exc:  # noqa: BLE001 - show_info should remain non-fatal
             logger.warning("Unable to export complete channel URL: %s", exc)
 
-        print(f"\nPrimary channel URL: {public_url}")
+        cli_print(f"\nPrimary channel URL: {public_url}")
         if admin_url != public_url:
-            print(f"Complete URL (includes all channels): {admin_url}")
+            cli_print(f"Complete URL (includes all channels): {admin_url}")
 
     def _resolve_export_url(
         self,
@@ -119,8 +123,9 @@ class _NodeChannelPresentationRuntime:
             include_all=include_all,
         )
 
-    def _show_info(self) -> None:
+    def _show_info(self, *, cli_print: Callable[[str], None] | None = None) -> None:
         """Print local/module preferences and current channel presentation."""
+        cli_print = self._cli_print if cli_print is None else cli_print
         local_config_snapshot: Message | None = None
         module_config_snapshot: Message | None = None
         node_db_lock = getattr(self._node, "_node_db_lock", None)
@@ -140,12 +145,12 @@ class _NodeChannelPresentationRuntime:
         prefs = ""
         if local_config_snapshot:
             prefs = messageToJson(local_config_snapshot, multiline=True)
-        print(f"Preferences: {prefs}\n")
+        cli_print(f"Preferences: {prefs}\n")
         prefs = ""
         if module_config_snapshot:
             prefs = messageToJson(module_config_snapshot, multiline=True)
-        print(f"Module preferences: {prefs}\n")
-        self._show_channels()
+        cli_print(f"Module preferences: {prefs}\n")
+        self._show_channels(cli_print=cli_print)
 
     def _snapshot_configs(self) -> tuple[Message | None, Message | None]:
         """Return detached snapshots of local/module configs when present."""
