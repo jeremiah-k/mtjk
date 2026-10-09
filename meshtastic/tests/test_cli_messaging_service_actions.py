@@ -39,6 +39,10 @@ def _args(**overrides: Any) -> argparse.Namespace:
         "get": None,
         "nodes": False,
         "show_fields": None,
+        "role": None,
+        "hwmodel": None,
+        "sort": None,
+        "limit": None,
         "slog": None,
         "power_stress": False,
         "listen": False,
@@ -79,6 +83,7 @@ def _hooks(**overrides: Any) -> MessagingServiceHooks:
         "remote_hardware_client": MagicMock(),
         "get_pref": MagicMock(return_value=True),
         "validate_cli_show_fields": MagicMock(),
+        "validate_cli_sort_field": MagicMock(),
         "newer_version": MagicMock(return_value=None),
         "install_upgrade_hint": "pipx upgrade mtjk",
         "powermon_available": MagicMock(return_value=True),
@@ -234,7 +239,15 @@ def test_information_actions_validates_selected_node_fields() -> None:
     _handle_information_actions(context, hooks)
 
     validate.assert_called_once_with(interface, ["user.id"])
-    interface.showNodes.assert_called_once_with(True, ["user.id"])
+    interface.showNodes.assert_called_once_with(
+        True,
+        ["user.id"],
+        roleFilter=None,
+        hwModelFilter=None,
+        sortField=None,
+        sortDirection=None,
+        limit=0,
+    )
 
 
 @pytest.mark.unit
@@ -929,3 +942,99 @@ def test_power_stress_closes_retained_slog_only_once() -> None:
         assert context.outcome.failure_cleanup_callbacks == []
 
     log_set.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_information_actions_threads_node_query_flags() -> None:
+    """Local node listing should receive role, hwmodel, sort, and limit."""
+    interface = _interface_double()
+    context = _context(
+        interface,
+        dest="^all",
+        nodes=True,
+        role=["Client_Mute"],
+        hwmodel=["RAK4631"],
+        sort="snr:desc",
+        limit=5,
+    )
+    hooks = _hooks()
+
+    _handle_information_actions(context, hooks)
+
+    interface.showNodes.assert_called_once_with(
+        True,
+        None,
+        roleFilter=["client_mute"],
+        hwModelFilter=["rak4631"],
+        sortField="snr",
+        sortDirection="desc",
+        limit=5,
+    )
+
+
+@pytest.mark.unit
+def test_information_actions_sort_flag_is_validated() -> None:
+    """--sort should be resolved and validated before listing."""
+    interface = _interface_double()
+    context = _context(interface, dest="^all", nodes=True, sort="hwmodel:asc")
+    validate_sort = MagicMock()
+    hooks = _hooks(validate_cli_sort_field=validate_sort)
+
+    _handle_information_actions(context, hooks)
+
+    validate_sort.assert_called_once_with(interface, "hwmodel")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sort_value", "message"),
+    [
+        ("snr:sideways", "--sort direction must be 'asc' or 'desc', got 'sideways'"),
+        (":desc", "--sort requires a field name, got ':desc'"),
+        ("", "--sort requires a field name, got ''"),
+    ],
+)
+def test_information_actions_rejects_bad_sort_spec(
+    sort_value: str, message: str
+) -> None:
+    """Malformed --sort values stop processing without listing."""
+    interface = _interface_double()
+    context = _context(interface, dest="^all", nodes=True, sort=sort_value)
+    cli_print = MagicMock()
+    hooks = _hooks(cli_print=cli_print)
+
+    _handle_information_actions(context, hooks)
+
+    assert context.outcome.stop_processing is True
+    cli_print.assert_called_once_with(message)
+    interface.showNodes.assert_not_called()
+
+
+@pytest.mark.unit
+def test_information_actions_rejects_negative_limit() -> None:
+    """--limit below zero stops processing without listing."""
+    interface = _interface_double()
+    context = _context(interface, dest="^all", nodes=True, limit=-1)
+    cli_print = MagicMock()
+    hooks = _hooks(cli_print=cli_print)
+
+    _handle_information_actions(context, hooks)
+
+    assert context.outcome.stop_processing is True
+    cli_print.assert_called_once_with("--limit expects a non-negative integer")
+    interface.showNodes.assert_not_called()
+
+
+@pytest.mark.unit
+def test_node_query_flags_without_nodes_stop_processing() -> None:
+    """--role/--hwmodel/--sort/--limit alone should stop before connected actions."""
+    interface = _interface_double()
+    context = _context(interface, role=["client"], hwmodel=["rak"], sort="snr", limit=3)
+    cli_print = MagicMock()
+
+    _handle_information_actions(context, _hooks(cli_print=cli_print))
+
+    assert context.outcome.stop_processing is True
+    cli_print.assert_called_once_with(
+        "--role, --hwmodel, --sort, --limit can only be used with --nodes"
+    )

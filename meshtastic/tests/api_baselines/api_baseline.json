@@ -32,7 +32,7 @@
     "sendTraceRoute": "(self, dest:int | str, hopLimit:int, channelIndex:int=0)",
     "sendWaypoint": "(self, name:str, description:str, icon:int | str, expire:int, waypoint_id:int | None=None, latitude:float=0.0, longitude:float=0.0, destinationId:int | str=BROADCAST_ADDR, wantAck:bool=True, wantResponse:bool=False, channelIndex:int=0, hopLimit:int | None=None)",
     "showInfo": "(self, file:IO[str] | None=None)",
-    "showNodes": "(self, includeSelf:bool=True, showFields:list[str] | None=None)",
+    "showNodes": "(self, includeSelf:bool=True, showFields:list[str] | None=None, *, roleFilter:list[str] | None=None, hwModelFilter:list[str] | None=None, sortField:str | None=None, sortDirection:str | None=None, limit:int=0)",
     "waitForAckNak": "(self)",
     "waitForConfig": "(self)",
     "waitForPosition": "(self, request_id:int | None=None)",
@@ -106,7 +106,7 @@
     "set_canned_message": "(self, message:str)",
     "set_ringtone": "(self, ringtone:str)",
     "showChannels": "(self)",
-    "showInfo": "(self)",
+    "showInfo": "(self, *, cli_print:Callable[[str], None]=print)",
     "shutdown": "(self, secs:int=10)",
     "startOTA": "(self, mode:admin_pb2.OTAMode.ValueType | None=None, ota_file_hash:bytes | None=None, *, ota_mode:admin_pb2.OTAMode.ValueType | None=None, ota_hash:bytes | None=None, **kwargs)",
     "storeUiConfig": "(self, config:device_ui_pb2.DeviceUIConfig)",
@@ -114,7 +114,7 @@
     "turnOffEncryptionOnPrimaryChannel": "(self)",
     "waitForConfig": "(self, attribute:str='channels')",
     "writeChannel": "(self, channelIndex:int, adminIndex:int | None=None, **kwargs)",
-    "writeConfig": "(self, config_name:str)"
+    "writeConfig": "(self, config_name:str, *, verify:bool=False)"
   },
   "top_level_exports": [
     "BROADCAST_ADDR",

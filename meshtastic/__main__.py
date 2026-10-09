@@ -1877,6 +1877,33 @@ def _validate_cli_show_fields(interface: MeshInterface, show_fields: list[str]) 
         )
 
 
+def _validate_cli_sort_field(interface: MeshInterface, sort_field: str) -> None:
+    """Reject unavailable --sort fields with a concrete choice list."""
+    nodes_by_num = getattr(interface, "nodesByNum", None)
+    observed_nodes = (
+        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    )
+    available = [
+        *node_data.FIELD_ALIASES.keys(),
+        *node_data.get_known_field_paths(observed_nodes),
+    ]
+    resolved = node_data._resolve_field_alias(sort_field)
+    available_set = set(available)
+    if resolved not in available_set and sort_field not in available_set:
+        choices = textwrap.fill(
+            ", ".join(sorted(available_set)),
+            width=100,
+            initial_indent="  ",
+            subsequent_indent="  ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        _cli_exit(
+            f"Unknown --sort field '{sort_field}'.\nAvailable fields:\n{choices}",
+            1,
+        )
+
+
 def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
     """Build connected-action hooks from historical ``__main__`` seams."""
     device_hooks = cli_device_actions.DeviceActionHooks(
@@ -1930,6 +1957,7 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
         remote_hardware_client=remote_hardware.RemoteHardwareClient,
         get_pref=getPref,
         validate_cli_show_fields=_validate_cli_show_fields,
+        validate_cli_sort_field=_validate_cli_sort_field,
         newer_version=meshtastic.util.check_if_newer_version,
         install_upgrade_hint=INSTALL_UPGRADE_HINT,
         powermon_available=lambda: have_powermon,

@@ -103,3 +103,21 @@ def test_wrapped_entrypoint_output_does_not_recurse(capsys):
         cli_main._cli_print("once")
     cli_main._cli_print("after")
     assert capsys.readouterr() == ("once\nafter\n", "")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query_args", [["--sort", "snr"], ["--nodes", "--sort", "not_a_field"]]
+)
+def test_invalid_embedded_node_query_prevents_device_actions(
+    query_args: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    interface = MeshInterface(noProto=True)
+    with (
+        patch("meshtastic.cli.device_actions._handle_device_actions") as actions,
+        pytest.raises(SystemExit) as error,
+    ):
+        _dispatch(["--reboot", *query_args], interface)
+    assert error.value.code == 1
+    actions.assert_not_called()
+    assert capsys.readouterr() == ("", "")

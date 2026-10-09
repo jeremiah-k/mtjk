@@ -50,7 +50,7 @@ def isolated_dispatch_actions(monkeypatch: pytest.MonkeyPatch) -> None:
         (dispatch.messaging_service_actions, "_handle_long_running_services"),
     )
     for module, name in targets:
-        monkeypatch.setattr(module, name, lambda *_args: None)
+        monkeypatch.setattr(module, name, lambda *_args, **_kwargs: None)
 
 
 @pytest.mark.unit

@@ -812,6 +812,37 @@ def addLocalActionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
         default=None,
     )
 
+    group.add_argument(
+        "--role",
+        help="Filter --nodes by user role (comma-separated, case-insensitive substring)",
+        type=lambda s: s.split(","),
+        default=None,
+    )
+
+    group.add_argument(
+        "--hwmodel",
+        help="Filter --nodes by hardware model (comma-separated, case-insensitive substring)",
+        type=lambda s: s.split(","),
+        default=None,
+    )
+
+    group.add_argument(
+        "--sort",
+        help=(
+            "Sort --nodes by a field path or alias, optionally 'field:asc' or "
+            "'field:desc' (numeric fields default high-to-low, text A-to-Z)"
+        ),
+        action="store",
+        default=None,
+    )
+
+    group.add_argument(
+        "--limit",
+        help="Show at most N nodes in --nodes (default: all)",
+        type=int,
+        default=None,
+    )
+
     return parser
 
 

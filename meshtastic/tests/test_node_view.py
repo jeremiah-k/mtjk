@@ -743,3 +743,18 @@ class TestGetOrCreateByNum:
 
         with pytest.raises(MeshInterface.MeshInterfaceError, match="not initialized"):
             node_view._get_or_create_by_num(12345)
+
+
+@pytest.mark.unit
+def test_count_excludes_local_node_when_include_self_is_false(
+    node_view: NodeView, mock_interface: MagicMock
+) -> None:
+    mock_interface.nodesByNum = {
+        12345: {"num": 12345, "user": {"longName": "Local"}},
+        67890: {"num": 67890, "user": {"longName": "Remote"}},
+    }
+    output = node_view.show_nodes(includeSelf=False)
+    assert output.startswith("Nodes: 1\n")
+    assert "Local" not in output
+    assert "Remote" in output
+    assert "more not shown" not in output

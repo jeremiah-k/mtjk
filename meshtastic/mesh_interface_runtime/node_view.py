@@ -302,7 +302,15 @@ class NodeView:
         )
 
     def show_nodes(
-        self, includeSelf: bool = True, showFields: list[str] | None = None
+        self,
+        includeSelf: bool = True,
+        showFields: list[str] | None = None,
+        *,
+        roleFilter: list[str] | None = None,
+        hwModelFilter: list[str] | None = None,
+        sortField: str | None = None,
+        sortDirection: str | None = None,
+        limit: int = 0,
     ) -> str:
         """Produce a formatted table summarizing known mesh nodes.
 
@@ -315,12 +323,28 @@ class NodeView:
             include (dotted paths for nested fields). If omitted or empty,
             a sensible default set of fields is used; the row-number column
             "N" is always included.
+        roleFilter : list[str] | None
+            Case-insensitive substrings; a node is listed when ``user.role``
+            contains any of them (comma values mean any-of).
+        hwModelFilter : list[str] | None
+            Case-insensitive substrings matched against ``user.hwModel`` the
+            same way. Role and hwmodel filters combine with AND.
+        sortField : str | None
+            Dotted field path or friendly alias to sort by; None keeps the
+            historical lastHeard-descending order.
+        sortDirection : str | None
+            "asc" or "desc"; None picks the natural default for the field
+            (numeric fields high-to-low, text fields A-to-Z). Missing values
+            always sort last.
+        limit : int
+            Show at most this many nodes; 0 lists every node. (Default value = 0)
 
         Returns
         -------
         table : str
-            The rendered node-count line and table (also printed to stdout)
-            with columns mapped to human-readable headings.
+            The rendered node-count line, table, and truncation footer
+            (also printed to stdout) with columns mapped to human-readable
+            headings.
         """
         # Determine fields to show
         if not showFields:
@@ -353,26 +377,52 @@ class NodeView:
             )
 
         # Filter nodes
+        total = sum(
+            includeSelf or node.get("num") != local_node_num for node in nodes_snapshot
+        )
         filtered_nodes = node_data.filter_nodes(
-            nodes_snapshot, includeSelf, local_node_num
+            nodes_snapshot,
+            includeSelf,
+            local_node_num,
+            role_patterns=roleFilter,
+            hwmodel_patterns=hwModelFilter,
+        )
+        has_field_filters = bool(roleFilter) or bool(hwModelFilter)
+
+        # Sort nodes (lastHeard-descending unless a field is requested)
+        sorted_nodes = node_data.sort_nodes(
+            filtered_nodes, field=sortField, direction=sortDirection
         )
 
-        # Sort nodes by lastHeard
-        sorted_nodes = node_data.sort_nodes(filtered_nodes)
+        # Apply the listing cap
+        shown_nodes = sorted_nodes if limit <= 0 else sorted_nodes[:limit]
 
         # Build table data with field extraction and formatting
-        rows = self._build_table_data(sorted_nodes, fields)
+        rows = self._build_table_data(shown_nodes, fields)
 
         # Add row numbers
         for i, row in enumerate(rows):
             row["N"] = i + 1
 
         # Node-count header mirrors the MMRelay !nodes grammar
-        header = f"Nodes: {len(nodes_snapshot)}"
+        if has_field_filters:
+            if len(shown_nodes) < len(sorted_nodes):
+                header = f"Nodes: {len(shown_nodes)} of {len(sorted_nodes)} matching"
+            else:
+                header = f"Nodes: {len(sorted_nodes)} matching"
+            if len(sorted_nodes) < total:
+                header += f" (of {total} known)"
+        elif len(shown_nodes) < total:
+            header = f"Nodes: {len(shown_nodes)} of {total}"
+        else:
+            header = f"Nodes: {total}"
 
         # Render and output table
         table = self._render_node_table(rows)
         output = header + "\n" + table
+        hidden = len(sorted_nodes) - len(shown_nodes)
+        if hidden > 0:
+            output += f"\n… and {hidden} more not shown"
         print(output)
         return output
 

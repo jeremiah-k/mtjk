@@ -878,7 +878,11 @@ def test_main_nodes(capsys: pytest.CaptureFixture[str]) -> None:
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def _mock_show_nodes(includeSelf: bool, showFields: Any) -> None:
+    def _mock_show_nodes(
+        includeSelf: bool,
+        showFields: Any,
+        **_query_flags: Any,
+    ) -> None:
         """Print a test marker indicating a mocked node listing and its options.
 
         Parameters
@@ -887,6 +891,8 @@ def test_main_nodes(capsys: pytest.CaptureFixture[str]) -> None:
             Whether the local node would be included in the listing.
         showFields : Any
             Representation of which node fields would be shown; forwarded verbatim into the printed marker.
+        _query_flags : Any
+            Role/hwmodel/sort/limit modifiers; accepted and ignored by the double.
         """
         print(f"inside mocked showNodes: {includeSelf} {showFields}")
 
@@ -898,3 +904,48 @@ def test_main_nodes(capsys: pytest.CaptureFixture[str]) -> None:
         assert re.search(r"inside mocked showNodes", out, re.MULTILINE)
         assert err == ""
         mo.assert_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_nodes_sort_alias_passes_validation_and_threads_to_show_nodes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--sort with a valid alias validates cleanly and reaches showNodes."""
+    sys.argv = ["", "--nodes", "--sort", "snr"]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+
+    with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
+        main()
+    _ = capsys.readouterr()
+
+    kwargs = iface.showNodes.call_args.kwargs
+    assert kwargs["sortField"] == "snr"
+    assert kwargs["sortDirection"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_nodes_unknown_sort_field_exits_with_choice_list(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--sort naming an unknown field fails validation with the choice list."""
+    sys.argv = ["", "--nodes", "--sort", "bogus"]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+
+    with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
+        with pytest.raises(SystemExit) as pytest_wrapped_e:
+            main()
+    out, err = capsys.readouterr()
+
+    assert pytest_wrapped_e.value.code == 1
+    assert "Unknown --sort field 'bogus'" in out + err
+    assert "Available fields:" in out + err
