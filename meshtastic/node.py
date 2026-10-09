@@ -8,6 +8,7 @@ in the mesh, including methods for localConfig, moduleConfig, and channels manag
 import logging
 import sys
 import threading
+import time
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1782,8 +1783,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
         response_type: type[_AdminResponseT],
         *,
         response_timeout_seconds: float,
+        response_deadline: float | None = None,
     ) -> _AdminResponseT | None:
-        """Send an admin request and return a copied named response field."""
+        """Send an admin request and return a copied named response field.
+
+        An optional monotonic deadline includes time spent sending and limits
+        the response wait to the caller's remaining operation budget.
+        """
         if response_timeout_seconds <= 0:
             raise ValueError("response timeout must be positive")
 
@@ -1793,6 +1799,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
         def _on_response(packet: dict[str, Any]) -> None:
             nonlocal result, failure_error
+            if response_deadline is not None and time.monotonic() > response_deadline:
+                return
             decoded = packet.get("decoded") if isinstance(packet, dict) else None
             routing = decoded.get("routing") if isinstance(decoded, dict) else None
             if isinstance(routing, dict):
@@ -1872,7 +1880,12 @@ class Node:  # pylint: disable=too-many-instance-attributes
         request_id = getattr(request, "id", None)
         runtime = getattr(self.iface, "_request_wait_runtime", None)
         try:
-            if not completed.wait(timeout=response_timeout_seconds):
+            remaining_timeout = response_timeout_seconds
+            if response_deadline is not None:
+                remaining_timeout = max(
+                    0.0, min(remaining_timeout, response_deadline - time.monotonic())
+                )
+            if not completed.wait(timeout=remaining_timeout):
                 return None
             if failure_error is not None:
                 raise failure_error
