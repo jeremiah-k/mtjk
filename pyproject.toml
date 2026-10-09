@@ -43,7 +43,7 @@ analysis = [
   "plotly>=7.0.0,<8.0.0",
   "pandas>=2.2.2,<3.0.0",
   "pandas-stubs>=2.3.3.260113,<3.0.0.0",
-  "pyarrow>=25.0.0,<26.0.0",
+  "pyarrow>=26.0.0,<26.1.0",
 ]
 
 [project.scripts]
@@ -77,7 +77,7 @@ powermon = [
   "riden",
   "ppk2-api>=0.9.2,<0.10.0",
   "parse>=1.20.2,<2.0.0",
-  "pyarrow>=25.0.0,<26.0.0",
+  "pyarrow>=26.0.0,<26.1.0",
   "platformdirs>=4.2.2,<5.0.0",
 ]
 analysis = [
