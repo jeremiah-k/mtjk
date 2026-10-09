@@ -776,7 +776,7 @@ def getPref(
         repeated: bool,
         secret_name: str,
     ) -> None:
-        """Print a configuration preference and its value to stdout and the debug log.
+        """Send a preference value to the supplied output sink and debug log.
 
         When `repeated` is True, `pref_value` is treated as an iterable and
             each element is converted to a string; otherwise the single value is
@@ -1874,6 +1874,7 @@ def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
     service_hooks = cli_messaging_service_actions.MessagingServiceHooks(
         cli_exit=_cli_exit,
         cli_print=_cli_print,
+        preference_print=lambda message: _cli_print(message, force=True),
         get_channel_index=_current_channel_index,
         check_channel=checkChannel,
         remote_hardware_client=remote_hardware.RemoteHardwareClient,

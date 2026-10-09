@@ -1576,3 +1576,18 @@ def test_main_rejects_altitude_outside_position_int32(
 
     assert "signed 32-bit position field" in capsys.readouterr().err
     mocked_node.setFixedPosition.assert_not_called()
+
+
+@pytest.mark.unit
+def test_connected_hooks_keep_preference_values_visible_in_quiet_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standalone --get uses forced output; ordinary CLI banners still respect --quiet."""
+    print_hook = MagicMock()
+    monkeypatch.setattr(main_module, "_cli_print", print_hook)
+
+    hooks = main_module._build_connected_dispatch_hooks()
+    assert hooks.services.preference_print is not None
+    hooks.services.preference_print("lora.region: US")
+
+    print_hook.assert_called_once_with("lora.region: US", force=True)
