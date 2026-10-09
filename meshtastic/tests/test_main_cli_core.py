@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import IO, Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -551,12 +551,13 @@ def test_main_info(
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def _mock_show_info() -> None:
+    def _mock_show_info(file: IO[str] | None = None) -> str:
         """Print a recognizable marker to stdout used by tests to simulate an interface's showInfo().
 
         This test helper prints the string "inside mocked showInfo" so tests can detect that the mocked showInfo was invoked.
         """
-        print("inside mocked showInfo")
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = _mock_show_info
     with caplog.at_level(logging.DEBUG):
@@ -622,12 +623,13 @@ def test_main_info_with_tcp_interface(capsys: pytest.CaptureFixture[str]) -> Non
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def _mock_show_info() -> None:
+    def _mock_show_info(file: IO[str] | None = None) -> str:
         """Print a recognizable marker to stdout used by tests to simulate an interface's showInfo().
 
         This test helper prints the string "inside mocked showInfo" so tests can detect that the mocked showInfo was invoked.
         """
-        print("inside mocked showInfo")
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = _mock_show_info
     with patch("meshtastic.tcp_interface.TCPInterface", return_value=iface) as mo:
@@ -650,12 +652,13 @@ def test_main_no_proto(capsys: pytest.CaptureFixture[str]) -> None:
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def _mock_show_info() -> None:
+    def _mock_show_info(file: IO[str] | None = None) -> str:
         """Print a recognizable marker to stdout used by tests to simulate an interface's showInfo().
 
         This test helper prints the string "inside mocked showInfo" so tests can detect that the mocked showInfo was invoked.
         """
-        print("inside mocked showInfo")
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = _mock_show_info
 
@@ -692,12 +695,13 @@ def test_main_info_with_seriallog_stdout(capsys: pytest.CaptureFixture[str]) -> 
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def _mock_show_info() -> None:
+    def _mock_show_info(file: IO[str] | None = None) -> str:
         """Print a recognizable marker to stdout used by tests to simulate an interface's showInfo().
 
         This test helper prints the string "inside mocked showInfo" so tests can detect that the mocked showInfo was invoked.
         """
-        print("inside mocked showInfo")
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = _mock_show_info
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface) as mo:
@@ -744,7 +748,7 @@ def test_main_info_with_seriallog_output_txt(
         )
         return iface
 
-    def _mock_show_info() -> None:
+    def _mock_show_info(file: IO[str] | None = None) -> str:
         """Print a recognizable marker to stdout used by tests to simulate an interface's showInfo().
 
         This test helper prints the string "inside mocked showInfo" so tests can detect that the mocked showInfo was invoked.
@@ -753,7 +757,8 @@ def test_main_info_with_seriallog_output_txt(
         if stream is not None:
             stream.write("inside mocked showInfo\n")
             stream.flush()
-        print("inside mocked showInfo")
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = _mock_show_info
     with patch(

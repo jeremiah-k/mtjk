@@ -433,7 +433,7 @@ def test_preview_set_fails_closed_if_target_disappears_after_preflight(
     args = _set_args([["power.ls_secs", "300"]])
     monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
     monkeypatch.setattr(
-        main_module, "_validate_set_entries_against_configs", lambda *_a: True
+        main_module, "_validate_set_entries_against_configs", lambda *_a, **_kw: True
     )
     monkeypatch.setattr(main_module, "_resolve_set_target", lambda *_a: None)
 
@@ -454,7 +454,7 @@ def test_preview_set_fails_closed_if_leaf_disappears_after_preflight(
     args = _set_args([["power.ls_secs", "300"]])
     monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
     monkeypatch.setattr(
-        main_module, "_validate_set_entries_against_configs", lambda *_a: True
+        main_module, "_validate_set_entries_against_configs", lambda *_a, **_kw: True
     )
     monkeypatch.setattr(main_module, "_resolve_set_leaf", lambda *_a: None)
 

@@ -11,7 +11,7 @@ This module provides focused tests for uncovered paths in the CLI:
 
 import sys
 import time as _time
-from typing import Any, cast
+from typing import IO, Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -622,8 +622,9 @@ def test_main_wait_to_disconnect(
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
 
-    def mock_showInfo() -> None:
-        print("inside mocked showInfo")
+    def mock_showInfo(file: IO[str] | None = None) -> str:
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = mock_showInfo
 

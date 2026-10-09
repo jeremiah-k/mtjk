@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import IO, Any, cast
 from unittest.mock import MagicMock, call, mock_open, patch
 
 import pytest
@@ -1733,8 +1733,9 @@ def test_quiet_suppresses_connect_banner(
     iface.__exit__ = MagicMock(return_value=None)
     iface._stable_path = None
 
-    def mock_showInfo() -> None:
-        print("inside mocked showInfo")
+    def mock_showInfo(file: IO[str] | None = None) -> str:
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = mock_showInfo
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
@@ -1786,8 +1787,9 @@ def test_stable_path_banner_omitted_when_already_by_id(
     iface.devPath = "/dev/serial/by-id/usb-foo-device"
     iface._stable_path = "/dev/serial/by-id/usb-foo-device"
 
-    def mock_showInfo() -> None:
-        print("inside mocked showInfo")
+    def mock_showInfo(file: IO[str] | None = None) -> str:
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = mock_showInfo
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
@@ -1818,8 +1820,9 @@ def test_stable_path_banner_shown_when_different(
     iface.devPath = "/dev/ttyUSB0"
     iface._stable_path = "/dev/serial/by-id/usb-foo-device"
 
-    def mock_showInfo() -> None:
-        print("inside mocked showInfo")
+    def mock_showInfo(file: IO[str] | None = None) -> str:
+        print("inside mocked showInfo", file=file)
+        return "inside mocked showInfo"
 
     iface.showInfo.side_effect = mock_showInfo
 

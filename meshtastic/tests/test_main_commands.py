@@ -2,6 +2,7 @@
 
 # pylint: disable=C0302,W0613,R0917
 
+import argparse
 import base64
 import logging
 import re
@@ -26,7 +27,7 @@ from ..node import Node
 
 # from ..radioconfig_pb2 import UserPreferences
 # import meshtastic.config_pb2
-from ..protobuf import localonly_pb2
+from ..protobuf import channel_pb2, localonly_pb2
 from ..protobuf.channel_pb2 import Channel  # pylint: disable=E0611
 from ..serial_interface import SerialInterface
 from ..util import Timeout
@@ -1227,6 +1228,99 @@ def test_get_pref_unknown_pref_routes_choices_through_injected_sink(
     assert "Choices are..." in sink_lines
     assert "lora:" in sink_lines
     assert any("lora.region" in line for line in sink_lines)
+
+
+@pytest.mark.unit
+def test_support_info_routes_through_injected_sink(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """supportInfo() should deliver its troubleshooting report to an injected sink."""
+    sink_lines: list[str] = []
+
+    main_module.supportInfo(cli_print=sink_lines.append)
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert "CLI / python library" in "".join(sink_lines)
+    assert any("Platform:" in line for line in sink_lines)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_print_set_field_choices_routes_through_injected_sink(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unknown --set diagnostics and choice listings must reach the injected sink."""
+    sink_lines: list[str] = []
+
+    main_module._print_set_field_choices(
+        pref_node, ["lora.bogus"], cli_print=sink_lines.append
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert any("do not have an attribute lora.bogus" in line for line in sink_lines)
+    assert "Choices are..." in sink_lines
+    assert "lora:" in sink_lines
+
+
+@pytest.mark.unit
+def test_print_channel_field_choices_routes_through_injected_sink(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unknown --ch-set diagnostics and choice listings must reach the injected sink."""
+    sink_lines: list[str] = []
+
+    main_module._print_channel_field_choices(
+        channel_pb2.ChannelSettings(), "bogus", cli_print=sink_lines.append
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert any("does not have an attribute bogus" in line for line in sink_lines)
+    assert "Choices are..." in sink_lines
+    assert "psk" in "".join(sink_lines)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_on_receive_reply_routes_through_injected_sink(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--reply echo output must reach the injected sink."""
+    mt_config.args = argparse.Namespace(reply=True, sendtext=None, ch_index=None)
+    interface = MagicMock()
+    interface.myInfo = SimpleNamespace(my_node_num=123)
+    sink_lines: list[str] = []
+
+    main_module._on_receive_with_sink(
+        {
+            "decoded": {"text": "hello there", "portnum": "TEXT_MESSAGE_APP"},
+            "to": 123,
+            "from": 456,
+            "channel": 0,
+            "rxSnr": 12.5,
+            "hopLimit": 3,
+        },
+        interface,
+        cli_print=sink_lines.append,
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert "message: hello there" in sink_lines
+    assert (
+        "Received channel 0. Sending reply: got msg 'hello there' "
+        "with rxSnr: 12.5 and hopLimit: 3" in sink_lines
+    )
+    interface.sendText.assert_called_once_with(
+        "got msg 'hello there' with rxSnr: 12.5 and hopLimit: 3", channelIndex=0
+    )
 
 
 @pytest.mark.unit

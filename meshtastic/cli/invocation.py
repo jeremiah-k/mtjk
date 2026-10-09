@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextvars
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import IO
@@ -52,3 +52,23 @@ def activate_invocation(invocation: CliInvocation) -> Iterator[CliInvocation]:
 def get_current_invocation() -> CliInvocation | None:
     """Return the active CLI invocation, if execution is invocation-scoped."""
     return _CURRENT_INVOCATION.get()
+
+
+_CURRENT_OUTPUT: contextvars.ContextVar[Callable[[str], None] | None] = (
+    contextvars.ContextVar("cli_output", default=None)
+)
+
+
+@contextmanager
+def _activate_cli_output(output: Callable[[str], None] | None) -> Iterator[None]:
+    """Route entrypoint reporters to one dispatcher's sink in this context."""
+    token = _CURRENT_OUTPUT.set(output)
+    try:
+        yield
+    finally:
+        _CURRENT_OUTPUT.reset(token)
+
+
+def _get_cli_output() -> Callable[[str], None] | None:
+    """Return the active dispatch sink without modifying process output."""
+    return _CURRENT_OUTPUT.get()

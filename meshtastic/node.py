@@ -605,13 +605,15 @@ class Node:  # pylint: disable=too-many-instance-attributes
         """
         self._channel_presentation_runtime._show_channels()  # noqa: SLF001
 
-    def showInfo(self) -> None:
+    def showInfo(self, *, cli_print: Callable[[str], None] = print) -> None:
         """Print the node's local and module configurations (as JSON when available) followed by its configured channels.
 
         If a configuration is not present, an empty placeholder is printed for that
         section. Channels are displayed using the node's channel listing format.
         """
-        self._channel_presentation_runtime._show_info()  # noqa: SLF001
+        self._channel_presentation_runtime._show_info(
+            cli_print=cli_print
+        )  # noqa: SLF001
 
     def setChannels(self, channels: Sequence[channel_pb2.Channel]) -> None:
         """Set the node's channel list and normalize channel entries.

@@ -70,6 +70,35 @@ def presentation_runtime(mock_node: MagicMock) -> _NodeChannelPresentationRuntim
 
 
 @pytest.mark.unit
+def test_show_info_routes_output_through_injected_sink(
+    mock_node: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Channel/preferences presentation must honor an injected print sink."""
+    export_runtime = create_autospec(_NodeChannelExportRuntime, instance=True)
+    export_runtime.get_url.return_value = "https://meshtastic.org/e/#test"
+    sink: list[str] = []
+
+    runtime = _NodeChannelPresentationRuntime(
+        mock_node,
+        channel_state=mock_node._test_channel_state,
+        export_runtime=export_runtime,
+        cli_print=sink.append,
+    )
+
+    runtime._show_info()
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    joined = "".join(sink)
+    assert "Preferences: " in joined
+    assert "Module preferences: " in joined
+    assert "Channels:" in joined
+    assert "Primary channel URL: https://meshtastic.org/e/#test" in joined
+
+
+@pytest.mark.unit
 def test_show_channels_with_no_channels(
     presentation_runtime: _NodeChannelPresentationRuntime,
     mock_node: MagicMock,

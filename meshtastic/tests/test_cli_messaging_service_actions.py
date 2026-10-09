@@ -387,6 +387,75 @@ def test_information_get_keeps_results_visible_with_separate_quiet_sink() -> Non
 
     get_pref.assert_called_once_with(node, "lora.region", cli_print=preference_output)
     preference_output.assert_called_once_with("Completed getting preferences")
+
+
+@pytest.mark.unit
+def test_content_reads_route_values_through_preference_print(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--get-canned-message/--get-ringtone values must reach the injected sink."""
+    interface = _interface_double()
+    node = MagicMock()
+    node.get_canned_message.return_value = "hello"
+    node.get_ringtone.return_value = "tone"
+    interface.getNode.return_value = node
+    context = _context(interface, get_canned_message=True, get_ringtone=True)
+    sink: list[str] = []
+
+    _handle_content_reads(
+        context, _hooks(preference_print=MagicMock(side_effect=sink.append))
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    joined = "".join(sink)
+    assert "canned_plugin_message:hello" in joined
+    assert "ringtone:tone" in joined
+
+
+@pytest.mark.unit
+def test_content_reads_fall_back_to_cli_print_without_preference_print() -> None:
+    """Without preference_print the values must still go through the print seam."""
+    interface = _interface_double()
+    node = MagicMock()
+    node.get_canned_message.return_value = "hello"
+    interface.getNode.return_value = node
+    context = _context(interface, get_canned_message=True)
+    cli_print = MagicMock()
+
+    _handle_content_reads(context, _hooks(cli_print=cli_print))
+
+    cli_print.assert_any_call("canned_plugin_message:hello")
+
+
+@pytest.mark.unit
+def test_information_info_routes_output_through_preference_print(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--info separators and upgrade banner must reach the injected sink."""
+    interface = _interface_double()
+    interface.getNode.return_value = MagicMock()
+    context = _context(interface, info=True, dest="^all")
+    sink: list[str] = []
+    ordinary_output = MagicMock()
+
+    _handle_information_actions(
+        context,
+        _hooks(
+            cli_print=ordinary_output,
+            preference_print=MagicMock(side_effect=sink.append),
+            newer_version=MagicMock(return_value="9.9.9"),
+        ),
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    joined = "".join(sink)
+    assert "*** A newer version v9.9.9 is available!" in joined
+    assert any(line == "" for line in sink)
+    interface.showInfo.assert_called_once()
     ordinary_output.assert_not_called()
 
 
@@ -438,7 +507,7 @@ def test_content_reads_escape_terminal_control_sequences(
     interface.getNode.return_value = node
     context = _context(interface, get_canned_message=True, get_ringtone=True)
 
-    _handle_content_reads(context)
+    _handle_content_reads(context, _hooks(cli_print=print))
 
     output = capsys.readouterr().out
     assert "\x1b" not in output
@@ -635,22 +704,27 @@ def test_gpio_watch_sends_watch_before_propagating_interrupt() -> None:
 
 
 @pytest.mark.unit
-def test_information_actions_info_paths_and_upgrade_notice(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_information_actions_info_paths_and_upgrade_notice() -> None:
     """Local info should include node detail and a discovered upgrade notice."""
     interface = _interface_double()
     interface.getNode.return_value = MagicMock()
     context = _context(interface, dest="^all", info=True)
+    output = MagicMock()
 
     _handle_information_actions(
         context,
-        _hooks(newer_version=MagicMock(return_value="9.9.9")),
+        _hooks(
+            cli_print=output,
+            newer_version=MagicMock(return_value="9.9.9"),
+        ),
     )
 
-    interface.showInfo.assert_called_once_with()
-    interface.getNode.return_value.showInfo.assert_called_once_with()
-    assert "newer version v9.9.9" in capsys.readouterr().out
+    interface.showInfo.assert_called_once()
+    assert "file" in interface.showInfo.call_args.kwargs
+    interface.getNode.return_value.showInfo.assert_called_once_with(cli_print=output)
+    assert any(
+        "newer version v9.9.9" in str(call.args[0]) for call in output.call_args_list
+    )
 
 
 @pytest.mark.unit

@@ -16,6 +16,7 @@ from meshtastic.cli import (
     messaging_service_actions,
 )
 from meshtastic.cli.context import CliContext
+from meshtastic.cli.invocation import _activate_cli_output
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,12 @@ def _disarm_failure_cleanups(context: CliContext) -> None:
 
 def _dispatch_connected(context: CliContext, hooks: DispatchHooks) -> None:
     """Execute all connected CLI action groups in their historical order."""
+    with _activate_cli_output(hooks.cli_print):
+        _run_connected_actions(context, hooks)
+
+
+def _run_connected_actions(context: CliContext, hooks: DispatchHooks) -> None:
+    """Run actions while the entrypoint reporters share the dispatch sink."""
     outcome = context.outcome
     action_error: BaseException | None = None
     try:
@@ -149,7 +156,7 @@ def _dispatch_connected(context: CliContext, hooks: DispatchHooks) -> None:
             channel_contact_actions._handle_channel_mutations(
                 context, hooks.channel_contact
             )
-            messaging_service_actions._handle_content_reads(context)
+            messaging_service_actions._handle_content_reads(context, hooks.services)
             channel_contact_actions._handle_region_preset_display(
                 context, hooks.channel_contact
             )
