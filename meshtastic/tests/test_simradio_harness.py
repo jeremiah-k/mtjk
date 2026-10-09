@@ -63,6 +63,34 @@ def test_simradio_topology_is_defensively_copied_and_validated() -> None:
 
 
 @pytest.mark.unit
+def test_send_trace_route_budgets_relay_delay_and_restores_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The raised traceroute budget applies only for the duration of the request."""
+    mesh = SimMesh(1)
+    timeout = SimpleNamespace(expireTimeout=10.0)
+    iface = MagicMock()
+    iface._timeout = timeout
+    monkeypatch.setattr(mesh, "get_iface", lambda _index: iface)
+    observed: list[float] = []
+
+    def _record_expire_timeout(**kwargs: float) -> None:
+        assert kwargs == {"dest": 7, "hopLimit": 3}
+        observed.append(timeout.expireTimeout)
+
+    iface.sendTraceRoute.side_effect = _record_expire_timeout
+    mesh.send_trace_route(0, dest=7, hopLimit=3)
+
+    assert observed == [simradio_harness.TRACEROUTE_EXPIRE_TIMEOUT_SECONDS]
+    assert timeout.expireTimeout == 10.0
+
+    iface.sendTraceRoute.side_effect = RuntimeError("firmware refused")
+    with pytest.raises(RuntimeError, match="firmware refused"):
+        mesh.send_trace_route(0, dest=7, hopLimit=3)
+    assert timeout.expireTimeout == 10.0
+
+
+@pytest.mark.unit
 def test_single_node_simulators_receive_fresh_sequential_ports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -47,6 +47,9 @@ BOOT_TIMEOUT_SECONDS = 30.0
 PROCESS_EXIT_TIMEOUT_SECONDS = 5.0
 PORT_RELEASE_SETTLE_SECONDS = 0.25
 TEXT_MESSAGE_MIN_INTERVAL_SECONDS = 2.25
+# expireTimeout installed around SimMesh.send_trace_route calls; see there for
+# why the default 10s interface budget is too small for relayed requests.
+TRACEROUTE_EXPIRE_TIMEOUT_SECONDS = 20.0
 REBOOT_POLL_INTERVAL_SECONDS = 0.1
 PORT_LISTENER_PROBE_TIMEOUT_SECONDS = 0.1
 MAX_LOG_TAIL_BYTES = 16_384
@@ -749,6 +752,27 @@ class SimMesh:
             result = iface.sendText(text, **kwargs)
             self._last_text_send_at[sender_index] = time.monotonic()
         return result
+
+    def send_trace_route(self, sender_index: int, dest: int, hopLimit: int) -> None:
+        """Send a traceroute with a deadline budgeted for firmware relay delay.
+
+        Client-role firmware holds a received packet up to
+        ``(2 * CWmax + uniform(0, 2^CWsize)) * slotTime`` before rebroadcasting,
+        and this harness's fixed rx_snr=10 selects the largest contention window
+        (CWmax=8).  At the current ~44.5ms LongFast slot time, one relay leg can
+        legally delay a packet ~12s, and an A<->C traceroute crosses two relay
+        legs (~28s worst case).  The default per-connection budget (10s
+        expireTimeout, doubled by this mesh's waitFactor of 2 to a 20s deadline)
+        can expire before the response returns, so raise the budget for the
+        duration of this request only.
+        """
+        iface = self.get_iface(sender_index)
+        previous_expire_timeout = iface._timeout.expireTimeout
+        iface._timeout.expireTimeout = TRACEROUTE_EXPIRE_TIMEOUT_SECONDS
+        try:
+            iface.sendTraceRoute(dest=dest, hopLimit=hopLimit)
+        finally:
+            iface._timeout.expireTimeout = previous_expire_timeout
 
     def trigger_node_info_exchange(self) -> None:
         """Request broadcast NodeInfo responses to accelerate DB convergence."""
