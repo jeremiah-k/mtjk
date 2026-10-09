@@ -59,7 +59,12 @@ packet bridge remains connected without client contention. Because that fixture
 is module-scoped, text sends go through `SimMesh.send_text()`. Firmware 2.8
 enforces a two-second `TEXT_MESSAGE_APP` PhoneAPI limit, so the helper applies a
 small per-sender scheduling margin. This prevents test order and propagation
-speed from deciding whether the next message is accepted.
+speed from deciding whether the next message is accepted. Traceroute requests go
+through `SimMesh.send_trace_route()`, which raises the client's per-request
+timeout for the duration of the call: firmware holds relayed packets for a
+random SNR-weighted contention window before rebroadcasting, and the simulated
+maximum SNR selects the largest window, so two relay legs can legitimately take
+longer than the default 20-second traceroute deadline.
 
 LoRa region changes are live-applied by current firmware and do not schedule a
 Portduino reboot. The setup helper therefore uses the CLI's explicit

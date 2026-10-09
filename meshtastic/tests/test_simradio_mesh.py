@@ -119,7 +119,7 @@ def test_simradio_mesh_traceroute_reports_forward_and_return_relay(
         subscribe_traceroutes(firmware_mesh.get_iface(0)) as collector_a,
         subscribe_traceroutes(firmware_mesh.get_iface(2)) as collector_c,
     ):
-        firmware_mesh.get_iface(0).sendTraceRoute(dest=destination_c, hopLimit=3)
+        firmware_mesh.send_trace_route(0, dest=destination_c, hopLimit=3)
         response = collector_a.wait_for_packet(
             lambda packet: (
                 _decoded_port(packet) == "TRACEROUTE_APP"
