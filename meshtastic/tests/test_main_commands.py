@@ -6,6 +6,7 @@ import base64
 import logging
 import re
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -28,6 +29,7 @@ from ..node import Node
 from ..protobuf import localonly_pb2
 from ..protobuf.channel_pb2 import Channel  # pylint: disable=E0611
 from ..serial_interface import SerialInterface
+from ..util import Timeout
 from ._main_legacy_support import (
     _build_configure_interface,
     _mock_send_text,
@@ -992,6 +994,239 @@ def test_get_pref_allow_secrets_shows_security_section_keys(
     assert base64.b64encode(private_key).decode("utf-8") not in caplog.text
     assert base64.b64encode(public_key).decode("utf-8") not in caplog.text
     assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_routes_field_reads_through_injected_sink(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """getPref() should deliver field reads to an injected sink, not stdout."""
+    pref_node.localConfig.lora.region = 8
+    sink_lines: list[str] = []
+
+    assert (
+        main_module.getPref(pref_node, "lora.region", cli_print=sink_lines.append)
+        is True
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert "lora.region: 8" in sink_lines
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize(
+    ("path", "root_name", "section", "field", "value", "expected"),
+    [
+        ("lora.region", "localConfig", "lora", "region", 8, "lora.region: 8"),
+        (
+            "telemetry.device_update_interval",
+            "moduleConfig",
+            "telemetry",
+            "device_update_interval",
+            60,
+            "telemetry.device_update_interval: 60",
+        ),
+        ("lora", "localConfig", "lora", "region", 8, "lora.region: 8"),
+        (
+            "security.private_key",
+            "localConfig",
+            "security",
+            "private_key",
+            bytes(range(32)),
+            "security.private_key: <redacted>",
+        ),
+    ],
+)
+def test_get_pref_displays_newly_requested_section(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+    path: str,
+    root_name: str,
+    section: str,
+    field: str,
+    value: Any,
+    expected: str,
+) -> None:
+    """First reads of remote sections must capture the received value."""
+    root = getattr(pref_node, root_name)
+
+    def receive_config(_descriptor: Any) -> None:
+        setattr(getattr(root, section), field, value)
+
+    pref_node.requestConfig.side_effect = receive_config
+    lines: list[str] = []
+
+    assert main_module.getPref(pref_node, path, cli_print=lines.append)
+
+    pref_node.requestConfig.assert_called_once_with(
+        root.DESCRIPTOR.fields_by_name[section]
+    )
+    assert lines == [expected]
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_does_not_treat_another_section_as_requested_state(
+    pref_node: SimpleNamespace,
+) -> None:
+    """A loaded sibling section cannot vouch for a default-looking value."""
+    pref_node.localConfig.device.role = 1
+    pref_node.requestConfig.side_effect = lambda _: setattr(
+        pref_node.localConfig.lora, "region", 8
+    )
+    lines: list[str] = []
+
+    assert main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
+
+    pref_node.requestConfig.assert_called_once()
+    assert lines == ["lora.region: 8"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_accepts_present_default_section_without_request(
+    pref_node: SimpleNamespace,
+) -> None:
+    """An explicitly loaded all-default section carries authoritative defaults."""
+    pref_node.localConfig.lora.SetInParent()
+    lines: list[str] = []
+
+    assert main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
+
+    pref_node.requestConfig.assert_not_called()
+    assert lines == ["lora.region: 0"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_waits_for_async_module_response(
+    pref_node: SimpleNamespace,
+) -> None:
+    """The asynchronous compatibility request path gets a bounded presence wait."""
+    pref_node._timeout = Timeout(maxSecs=1)
+    response = threading.Timer(
+        0.02,
+        lambda: setattr(pref_node.moduleConfig.telemetry, "device_update_interval", 60),
+    )
+    pref_node.requestConfig.side_effect = lambda _: response.start()
+    lines: list[str] = []
+
+    try:
+        assert main_module.getPref(
+            pref_node, "telemetry.device_update_interval", cli_print=lines.append
+        )
+    finally:
+        response.cancel()
+        response.join()
+
+    assert lines == ["telemetry.device_update_interval: 60"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_fails_when_request_returns_without_section(
+    pref_node: SimpleNamespace,
+) -> None:
+    """No response must produce an interface error instead of manufactured defaults."""
+    pref_node._timeout = Timeout(maxSecs=0)
+    lines: list[str] = []
+
+    with pytest.raises(main_module.MeshInterface.MeshInterfaceError, match="lora"):
+        main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
+
+    assert lines == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_preserves_request_failure(
+    pref_node: SimpleNamespace,
+) -> None:
+    """Correlated routing refusals retain their typed error and emit no value."""
+    pref_node.requestConfig.side_effect = main_module.MeshInterface.MeshInterfaceError(
+        "Routing error on response: NOT_AUTHORIZED"
+    )
+    lines: list[str] = []
+
+    with pytest.raises(
+        main_module.MeshInterface.MeshInterfaceError, match="NOT_AUTHORIZED"
+    ):
+        main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
+
+    assert lines == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_noproto_requests_without_waiting_or_displaying_defaults(
+    pref_node: SimpleNamespace,
+) -> None:
+    """NoProto retains its skipped-request behavior without burning a timeout."""
+    pref_node.noProto = True
+    pref_node._timeout = MagicMock()
+    lines: list[str] = []
+
+    assert main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
+
+    pref_node.requestConfig.assert_called_once()
+    pref_node._timeout.waitForSet.assert_not_called()
+    assert lines == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_redacts_secret_values_delivered_to_injected_sink(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Redaction must apply to secret values delivered through an injected sink."""
+    private_key = bytes(range(32))
+    pref_node.localConfig.security.private_key = private_key
+    sink_lines: list[str] = []
+
+    assert (
+        main_module.getPref(
+            pref_node, "security.private_key", cli_print=sink_lines.append
+        )
+        is True
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert "security.private_key: <redacted>" in sink_lines
+    assert base64.b64encode(private_key).decode("utf-8") not in "".join(sink_lines)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_unknown_pref_routes_choices_through_injected_sink(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unknown-preference diagnostics and choice listings must reach the sink."""
+    sink_lines: list[str] = []
+
+    assert (
+        main_module.getPref(
+            pref_node, "bogus.no_such_field", cli_print=sink_lines.append
+        )
+        is False
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ""
+    assert any("do not have an attribute no_such_field" in line for line in sink_lines)
+    assert "Choices are..." in sink_lines
+    assert "lora:" in sink_lines
+    assert any("lora.region" in line for line in sink_lines)
 
 
 @pytest.mark.unit

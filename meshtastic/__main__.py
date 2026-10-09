@@ -738,7 +738,13 @@ _is_secret_pref = cli_preference_runtime.is_secret_pref
 _redact_pref_value = cli_preference_runtime.redact_pref_value
 
 
-def getPref(node: Any, comp_name: str, *, allow_secrets: bool = False) -> bool:
+def getPref(
+    node: Any,
+    comp_name: str,
+    *,
+    allow_secrets: bool = False,
+    cli_print: Callable[[str], None] = print,
+) -> bool:
     """Retrieve and display a node configuration preference or populated section fields.
 
     Parameters
@@ -749,11 +755,16 @@ def getPref(node: Any, comp_name: str, *, allow_secrets: bool = False) -> bool:
         Preference path or configuration section name to retrieve.
     allow_secrets : bool
         Whether sensitive preference values may be displayed without redaction.
+    cli_print : Callable[[str], None]
+        Sink receiving each output line. Defaults to ``print`` so standalone CLI
+        behavior is unchanged; dispatch passes its ``cli_print`` hook so embedded
+        consumers can capture preference output.
 
     Returns
     -------
     bool
-        ``True`` if the preference exists and values were displayed or requested,
+        ``True`` if the preference exists and values were displayed (or its
+        request was skipped under ``noProto``),
         ``False`` if it was not found.
     """
 
@@ -805,7 +816,7 @@ def getPref(node: Any, comp_name: str, *, allow_secrets: bool = False) -> bool:
                 else _redact_pref_value(secret_name, raw_display)
             )
             log_value = _redact_pref_value(secret_name, raw_display)
-        print(f"{str(config_type.name)}.{uni_name}: {str(display_value)}")
+        cli_print(f"{str(config_type.name)}.{uni_name}: {str(display_value)}")
         logger.debug("%s.%s: %s", config_type.name, uni_name, log_value)
 
     comp_name = _normalize_pref_name(comp_name)
@@ -837,19 +848,31 @@ def getPref(node: Any, comp_name: str, *, allow_secrets: bool = False) -> bool:
                 break
 
     if not found:
-        print(
+        cli_print(
             f"{localConfig.__class__.__name__} and {moduleConfig.__class__.__name__} do not have an attribute {uni_name}."
         )
-        print("Choices are...")
-        printConfig(localConfig)
-        printConfig(moduleConfig)
+        cli_print("Choices are...")
+        printConfig(localConfig, cli_print=cli_print)
+        printConfig(moduleConfig, cli_print=cli_print)
         return False
 
     # Check if we need to request the config
     if config_type is None:
         return False
 
-    if len(config.ListFields()) != 0 and (pref is not None or wholeField):
+    if not config.HasField(config_type.name):
+        node.requestConfig(config_type)
+        if getattr(node, "noProto", False):
+            return True
+        if not config.HasField(config_type.name):
+            cli_config_readiness.wait_for_config_sections(node, [(config, config_type)])
+        if not config.HasField(config_type.name):
+            raise MeshInterface.MeshInterfaceError(
+                f"Timed out waiting for the {config_type.name} configuration"
+                " section from the device; no preference values were received."
+            )
+
+    if pref is not None or wholeField:
         # read the value
         config_values = getattr(config, config_type.name)
         if not wholeField:
@@ -874,10 +897,6 @@ def getPref(node: Any, comp_name: str, *, allow_secrets: bool = False) -> bool:
                     repeated=repeated,
                     secret_name=f"{config_type.name}.{field[0].name}",
                 )
-    else:
-        # Always show whole field for remote node
-        node.requestConfig(config_type)
-
     return True
 
 
@@ -1899,12 +1918,16 @@ def onConnected(interface: MeshInterface) -> None:
         _cli_exit(f"Aborting due to: {ex}", 1)
 
 
-def printConfig(config: Any) -> None:
+def printConfig(config: Any, *, cli_print: Callable[[str], None] = print) -> None:
     """COMPAT_STABLE_SHIM: print config fields through the CLI config I/O runtime."""
-    cli_config_io.print_config(config, camel_case=_current_camel_case())
+    cli_config_io.print_config(
+        config, camel_case=_current_camel_case(), cli_print=cli_print
+    )
 
 
-def printAvailableConfigFields(as_json: bool = False) -> None:
+def printAvailableConfigFields(
+    as_json: bool = False, *, cli_print: Callable[[str], None] = print
+) -> None:
     """COMPAT_STABLE_SHIM: print config fields and aliases through the runtime."""
     cli_config_io.print_available_config_fields(
         camel_case=_current_camel_case(),
@@ -1915,6 +1938,7 @@ def printAvailableConfigFields(as_json: bool = False) -> None:
         local_config_factory=localonly_pb2.LocalConfig,
         module_config_factory=localonly_pb2.LocalModuleConfig,
         as_json=as_json,
+        cli_print=cli_print,
     )
 
 

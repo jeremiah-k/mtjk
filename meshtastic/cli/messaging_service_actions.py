@@ -7,7 +7,7 @@ import platform
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
@@ -41,6 +41,19 @@ TELEMETRY_TYPE_ALIASES = {
 }
 
 
+class GetPrefHook(Protocol):
+    """Callable contract for reading and displaying one preference path."""
+
+    def __call__(
+        self,
+        node: Any,
+        comp_name: str,
+        *,
+        allow_secrets: bool = ...,
+        cli_print: Callable[[str], None] = ...,
+    ) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class MessagingServiceHooks:
     """Compatibility and optional-subsystem seams for service actions."""
@@ -50,7 +63,7 @@ class MessagingServiceHooks:
     get_channel_index: Callable[[], int | None]
     check_channel: Callable[[Any, int], bool]
     remote_hardware_client: Callable[[Any], Any]
-    get_pref: Callable[[Any, str], bool]
+    get_pref: GetPrefHook
     validate_cli_show_fields: Callable[[Any, list[str]], None]
     newer_version: Callable[[], str | None]
     install_upgrade_hint: str
@@ -347,7 +360,7 @@ def _handle_information_actions(
         node = interface.getNode(args.dest, False, **context.get_node_kwargs)
         found = False
         for pref in args.get:
-            found = hooks.get_pref(node, pref[0]) or found
+            found = hooks.get_pref(node, pref[0], cli_print=hooks.cli_print) or found
         if found:
             hooks.cli_print("Completed getting preferences")
 

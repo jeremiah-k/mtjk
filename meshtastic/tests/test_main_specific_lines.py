@@ -275,11 +275,13 @@ def test_get_pref_remote_node_config_request() -> None:
     mock_config = MagicMock()
     mock_config.DESCRIPTOR = mock_descriptor
     mock_config.ListFields.return_value = []  # Empty config - triggers remote request
+    mock_config.HasField.return_value = False
 
     # Create node
     node = MagicMock()
     node.localConfig = mock_config
     node.requestConfig = MagicMock()
+    node.noProto = True
 
     # Try to get a field that doesn't exist locally
     getPref(node, "wifi")

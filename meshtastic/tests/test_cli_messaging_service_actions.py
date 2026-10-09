@@ -351,6 +351,22 @@ def test_information_get_accumulates_success_across_preferences() -> None:
 
 
 @pytest.mark.unit
+def test_information_get_routes_preference_output_through_cli_print() -> None:
+    """--get preference reads should receive the dispatch print seam."""
+    interface = _interface_double()
+    node = MagicMock()
+    interface.getNode.return_value = node
+    context = _context(interface, get=[["lora.region"]])
+    get_pref = MagicMock(return_value=True)
+    cli_print = MagicMock()
+
+    _handle_information_actions(context, _hooks(get_pref=get_pref, cli_print=cli_print))
+
+    get_pref.assert_called_once_with(node, "lora.region", cli_print=cli_print)
+    cli_print.assert_any_call("Completed getting preferences")
+
+
+@pytest.mark.unit
 def test_content_reads_escape_terminal_control_sequences(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

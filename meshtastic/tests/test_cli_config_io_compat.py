@@ -83,7 +83,7 @@ def test_print_config_facade_uses_current_camel_case_setting(
 
     main_module.printConfig(config)
 
-    runtime_print.assert_called_once_with(config, camel_case=True)
+    runtime_print.assert_called_once_with(config, camel_case=True, cli_print=print)
 
 
 @pytest.mark.unit
