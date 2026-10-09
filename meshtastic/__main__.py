@@ -980,6 +980,24 @@ def _handle_ota_update(
     )
 
 
+MODULE_PREFIX_SEGMENT = "module"
+MODULE_PREFIX_HINT = (
+    "Preference paths are written without a 'module.' prefix; module sections"
+    " resolve directly (for example, 'mesh_beacon.flags')."
+)
+
+
+def _module_prefix_strip_hint(pref_name: str) -> str | None:
+    """Return a hint when an unknown preference path carries a 'module.' prefix."""
+    first_segment = pref_name.split(".", maxsplit=1)[0].strip().lower()
+    if first_segment != MODULE_PREFIX_SEGMENT:
+        return None
+    stripped = pref_name.split(".", maxsplit=1)[1] if "." in pref_name else ""
+    if stripped:
+        return f"{MODULE_PREFIX_HINT} Did you mean '{stripped}'?"
+    return MODULE_PREFIX_HINT
+
+
 def _print_set_field_choices(node: Any, pref_names: Sequence[str]) -> None:
     """Print historical field-not-found guidance for one or more --set names.
 
@@ -996,6 +1014,9 @@ def _print_set_field_choices(node: Any, pref_names: Sequence[str]) -> None:
             f"{node.localConfig.__class__.__name__} and "
             f"{node.moduleConfig.__class__.__name__} do not have an attribute {pref_name}."
         )
+        hint = _module_prefix_strip_hint(pref_name)
+        if hint is not None:
+            print(hint)
     print("Choices are...")
     printConfig(node.localConfig)
     printConfig(node.moduleConfig)

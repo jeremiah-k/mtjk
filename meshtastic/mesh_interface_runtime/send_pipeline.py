@@ -8,6 +8,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 
+from google.protobuf.message import Message
+
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
 from meshtastic.mesh_interface_runtime.flows import (
     DEFAULT_TELEMETRY_TYPE,
@@ -34,6 +36,7 @@ from meshtastic.mesh_interface_runtime.request_wait import (
     WAIT_ATTR_WAYPOINT,
     _RequestWaitRuntime,
 )
+from meshtastic.payload_limits import _validate_firmware_payload_limits
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from meshtastic.traceroute import TraceRouteResult
 from meshtastic.util import Acknowledgment, Timeout, stripnl
@@ -271,6 +274,7 @@ class SendPipeline:
         prox = mesh_pb2.MqttClientProxyMessage()
         prox.topic = topic
         prox.data = data
+        _validate_firmware_payload_limits(prox, context="MQTT client-proxy message")
         toRadio = mesh_pb2.ToRadio()
         toRadio.mqttClientProxyMessage.CopyFrom(prox)
         self._send_to_radio(toRadio)
@@ -343,6 +347,11 @@ class SendPipeline:
         payload: bytes | bytearray | memoryview
         if callable(serializer):
             logger.debug("Serializing protobuf as data: %s", stripnl(data))
+            if isinstance(data, Message):
+                # Device firmware drops whole ToRadio frames whose nested
+                # messages overflow a nanopb buffer, with no feedback on
+                # either side; surface the violation client-side instead.
+                _validate_firmware_payload_limits(data, context="Outbound payload")
             payload = cast(bytes, serializer())
         else:
             payload = cast(bytes | bytearray | memoryview, data)

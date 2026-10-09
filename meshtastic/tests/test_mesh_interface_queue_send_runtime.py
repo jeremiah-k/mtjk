@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from meshtastic._interface_errors import MeshInterfaceError
 from meshtastic.mesh_interface_runtime import queue_send as queue_send_module
 from meshtastic.mesh_interface_runtime.queue_send import _QueueSendRuntime
 from meshtastic.protobuf import mesh_pb2
@@ -565,3 +566,74 @@ def test_queue_wait_resumes_when_firmware_reports_space() -> None:
     )
 
     assert sent == [906]
+
+
+@pytest.mark.unit
+def test_send_to_radio_rejects_final_envelope_integer_overflow() -> None:
+    """Final ToRadio validation catches pipeline-populated narrowed fields."""
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 9001
+    packet.packet.channel = 256
+    send_impl = MagicMock()
+
+    with pytest.raises(MeshInterfaceError, match=r"8-bit unsigned range 0\.\.255"):
+        runtime._send_to_radio(
+            packet, send_impl=send_impl, sleep_fn=lambda _delay: None
+        )
+
+    send_impl.assert_not_called()
+    assert not harness.queue
+
+
+@pytest.mark.unit
+def test_send_to_radio_rejects_oversize_public_key_before_send() -> None:
+    """Final ToRadio validation enforces nested byte-field limits."""
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 9003
+    packet.packet.public_key = b"x" * 33
+    send_impl = MagicMock()
+
+    with pytest.raises(MeshInterfaceError, match="packet.public_key"):
+        runtime._send_to_radio(
+            packet, send_impl=send_impl, sleep_fn=lambda _delay: None
+        )
+
+    send_impl.assert_not_called()
+    assert not harness.queue
+
+
+@pytest.mark.unit
+def test_send_to_radio_accepts_final_envelope_integer_boundary() -> None:
+    """Final ToRadio validation accepts the firmware integer boundary."""
+    harness = _QueueHarness()
+    runtime = _QueueSendRuntime(
+        lock=harness.lock,
+        get_queue=lambda: harness.queue,
+        get_queue_status=lambda: harness.queue_status,
+        set_queue_status=harness.set_queue_status,
+        queue_wait_delay_seconds=0.0,
+    )
+    packet = mesh_pb2.ToRadio()
+    packet.packet.id = 9002
+    packet.packet.channel = 255
+    send_impl = MagicMock()
+
+    runtime._send_to_radio(packet, send_impl=send_impl, sleep_fn=lambda _delay: None)
+
+    send_impl.assert_called_once_with(packet)

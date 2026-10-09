@@ -729,12 +729,14 @@ class Node:  # pylint: disable=too-many-instance-attributes
         """
         raise _MeshInterfaceError(message)
 
-    def writeConfig(self, config_name: str) -> None:
+    def writeConfig(self, config_name: str, *, verify: bool = False) -> None:
         """Write a single named subsection of the node's edited configuration to the device.
 
         Sends only the specified device or module configuration section from this Node's cached
         localConfig/moduleConfig to the target node. For remote nodes the send expects an
-        acknowledgment (ACK/NAK); for the local node the message is sent without waiting for an ACK/NAK.
+        acknowledgment (ACK/NAK); for the local node the message is sent without waiting for an
+        ACK/NAK, so a write the device rejects or drops is not reported — pass ``verify=True``
+        (or request the section again) to confirm what the device actually holds.
 
         Parameters
         ----------
@@ -744,17 +746,27 @@ class Node:  # pylint: disable=too-many-instance-attributes
             "security", "sessionkey"* , "device_ui"* , "mqtt", "serial",
             "external_notification", "store_forward", "range_test", "telemetry",
             "canned_message", "audio", "remote_hardware", "neighbor_info",
-            "detection_sensor", "ambient_lighting", "paxcounter",
-            "statusmessage", "traffic_management".
+            "detection_sensor", "ambient_lighting", "paxcounter", "tak",
+            "mesh_beacon", "statusmessage", "traffic_management".
             * Available only when present in the active protobuf schema.
+        verify : bool
+            After sending, re-request the section from the device and return
+            only once it reports exactly the staged values (up to a bounded
+            wait), raising `MeshInterfaceError` otherwise. Local-node writes
+            are otherwise fire-and-forget. Ignored under noProto.
+            (Default value = False)
 
         Raises
         ------
         MeshInterfaceError
-            If `config_name` is not one of the supported names, or if
-            localConfig/moduleConfig has not been loaded.
+            If `config_name` is not one of the supported names, if
+            localConfig/moduleConfig has not been loaded, if any staged
+            value exceeds a firmware nanopb payload limit (the device drops
+            such frames silently, so they are refused client-side instead),
+            or — with ``verify=True`` — if the device does not report the
+            staged values on read-back.
         """
-        self._settings_runtime.write_config(config_name)
+        self._settings_runtime.write_config(config_name, verify=verify)
 
     def _write_channel_snapshot(
         self,
