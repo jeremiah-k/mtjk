@@ -295,7 +295,6 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
         "other_nak",
         "other_id",
         "other_nak_legacy",
-        "local_decode_routing",
         "local_numeric_ack",
     ],
 )

@@ -71,6 +71,7 @@ def test_local_contract_accepts_zero_or_local_source() -> None:
         (0x9999, {"routing": {"errorReason": "NONE"}}, False),
         (0x9999, {"routing": {"errorReason": 0}}, False),
         (0x9999, {"routing": {"errorReason": "decode failed"}}, False),
+        (0x9999, {"routing": {"decode_error": "bad routing bytes"}}, False),
         (
             0x9999,
             {"routing": {"errorReason": "PKI_FAILED", "error": "bad bytes"}},
