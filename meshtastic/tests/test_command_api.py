@@ -10,6 +10,8 @@ from unittest.mock import Mock
 import pytest
 
 from meshtastic import mt_config
+from meshtastic._command_scope import _CommandScope
+from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.commands import executeCommand, getCommandCapabilities
 from meshtastic.errors import RequestRejectedError, RequestTimeoutError
 from meshtastic.mesh_interface import MeshInterface
@@ -571,3 +573,178 @@ def test_output_callback_system_exit_propagates_and_releases_lock(client):
     assert stopped.value.code == 7
     client.close.assert_not_called()
     assert executeCommand(client, ["--nodes"]).succeeded
+
+
+def test_max_output_bytes_must_be_positive(client):
+    for bad in (0, True):
+        with pytest.raises(ValueError, match="maxOutputBytes must be a positive"):
+            executeCommand(client, ["--nodes"], maxOutputBytes=bad)
+
+
+def test_output_budget_exhaustion_stops_retaining_text(client):
+    result = executeCommand(client, ["--nodes"], maxOutputBytes=1)
+
+    assert result.succeeded
+    assert result.truncated
+    assert len(result.output) <= 1
+
+
+def test_argparse_error_write_failure_returns_sink_error(client):
+    def failing_sink(chunk):
+        raise RuntimeError("sink down")
+
+    result = executeCommand(client, ["--definitely-not-an-option"], output=failing_sink)
+
+    assert result.exitCode == 1
+    assert isinstance(result.error, RuntimeError)
+    assert str(result.error) == "sink down"
+    assert "--definitely-not-an-option" in result.output
+
+
+def test_get_with_unknown_section_returns_argument_error(client):
+    result = executeCommand(client, ["--get", "bogus.section"])
+
+    assert result.exitCode == 2
+    assert isinstance(result.error, ValueError)
+    assert "Unknown" in result.output
+
+
+def test_get_reads_fresh_module_section(client, monkeypatch):
+    client.localNode.moduleConfig.mqtt.enabled = False
+
+    def send(envelope):
+        raw = admin_pb2.AdminMessage()
+        raw.get_module_config_response.mqtt.enabled = True
+        deliver(
+            client,
+            {
+                "from": envelope.packet.to,
+                "decoded": {"requestId": envelope.packet.id, "admin": {"raw": raw}},
+            },
+        )
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(client, ["--get", "mqtt.enabled"])
+
+    assert result.succeeded, result.error
+    assert "mqtt.enabled: True" in result.output
+    assert client.localNode.moduleConfig.mqtt.enabled is False
+
+
+def test_get_reads_fresh_deep_preference_path(client, monkeypatch):
+    def send(envelope):
+        raw = admin_pb2.AdminMessage()
+        raw.get_module_config_response.mqtt.map_report_settings.should_report_location = (
+            True
+        )
+        deliver(
+            client,
+            {
+                "from": envelope.packet.to,
+                "decoded": {"requestId": envelope.packet.id, "admin": {"raw": raw}},
+            },
+        )
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(
+        client, ["--get", "mqtt.mapReportSettings.shouldReportLocation"]
+    )
+
+    assert result.succeeded, result.error
+    assert "should_report_location: True" in result.output
+
+
+def test_text_ack_ignores_data_feedback_packets(client, monkeypatch):
+    def send(envelope):
+        packet = envelope.packet
+        deliver(
+            client,
+            {
+                "from": 2,
+                "decoded": {
+                    "requestId": packet.id,
+                    "portnum": "TEXT_MESSAGE_APP",
+                    "payload": b"spoof",
+                },
+            },
+        )
+        deliver(
+            client,
+            {
+                "from": 2,
+                "decoded": {"requestId": packet.id, "routing": {"errorReason": "NONE"}},
+            },
+        )
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(
+        client, ["--dest", "!00000002", "--sendtext", "hello", "--ack"]
+    )
+
+    assert result.succeeded, result.error
+    assert client.responseHandlers == {}
+
+
+def test_command_scope_ack_decode_error_records_nak():
+    interface = Mock()
+    scope = _CommandScope(interface, print)
+
+    scope._on_ack(
+        {"decoded": {"requestId": 7, "admin": {DECODE_ERROR_KEY: "bad payload"}}}
+    )
+
+    interface._set_wait_error.assert_called_once_with(
+        "receivedNak",
+        "Failed to decode admin payload: bad payload",
+        request_id=7,
+    )
+    interface._mark_wait_acknowledged.assert_not_called()
+
+
+def test_command_scope_routing_nak_records_error_before_ack_mark():
+    interface = Mock()
+    scope = _CommandScope(interface, print)
+
+    scope._on_ack(
+        {"decoded": {"requestId": 8, "routing": {"errorReason": "NOT_AUTHORIZED"}}}
+    )
+
+    interface._set_wait_error.assert_called_once_with(
+        "receivedNak",
+        "Routing error on response: NOT_AUTHORIZED",
+        request_id=8,
+    )
+    interface._mark_wait_acknowledged.assert_called_once_with(
+        "receivedNak", request_id=8
+    )
+
+
+def test_command_scope_ack_wait_timeout_raises():
+    interface = Mock()
+    interface._has_active_wait_request.return_value = True
+    interface._wait_for_request_ack.return_value = False
+    scope = _CommandScope(interface, print)
+    scope._track(9, "receivedNak")
+
+    with pytest.raises(
+        TimeoutError, match="Timed out waiting for command acknowledgment"
+    ):
+        scope._wait_for_acks()
+
+
+def test_command_scope_track_after_cleanup_raises():
+    scope = _CommandScope(Mock(), print)
+    scope._cleanup()
+
+    with pytest.raises(RuntimeError, match="Command has completed"):
+        scope._track(10, "receivedNak")
+
+
+def test_command_scope_callback_after_cleanup_is_noop():
+    callback = Mock()
+    scope = _CommandScope(Mock(), print)
+    invoke = scope._bind_callback(callback)
+    scope._cleanup()
+
+    assert invoke({"decoded": {}}) is None
+    callback.assert_not_called()
