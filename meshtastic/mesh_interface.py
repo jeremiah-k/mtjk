@@ -11,7 +11,7 @@ import threading
 import time
 import traceback
 from types import MappingProxyType, TracebackType
-from typing import IO, Any, Callable, ClassVar, Mapping, TypeAlias, cast
+from typing import IO, Any, Callable, ClassVar, Mapping, Sequence, TypeAlias, cast
 
 try:
     import print_color  # type: ignore[import-untyped]
@@ -65,6 +65,7 @@ from meshtastic.mesh_interface_runtime.send_pipeline import (
 from meshtastic.mesh_interface_runtime.send_pipeline import (
     extract_request_id_from_sent_packet as _pipeline_extract_request_id_from_sent_packet,
 )
+from meshtastic.nodes import NodeQueryResult
 from meshtastic.protobuf import (
     channel_pb2,
     config_pb2,
@@ -652,6 +653,65 @@ class MeshInterface:  # pylint: disable=R0902
         Delegates to self.node_view.showInfo().
         """
         return self._node_view.show_info(file)
+
+    def queryNodes(
+        self,
+        *,
+        includeSelf: bool = True,
+        roleFilter: Sequence[str] | None = None,
+        hwModelFilter: Sequence[str] | None = None,
+        sortField: str | None = None,
+        sortDirection: str | None = None,
+        limit: int = 0,
+    ) -> NodeQueryResult:
+        """Return detached cached node records without printing or radio I/O.
+
+        Filters are case-insensitive substrings: alternatives within one filter
+        combine with OR and the two filters combine with AND. Sorting accepts
+        the same aliases and dotted paths as showNodes; numeric values default
+        descending and text ascending, with missing values last. The default
+        sort is newest lastHeard first. A zero limit returns every match.
+
+        Raises
+        ------
+        ValueError
+            If the limit, filters, sort field, or direction are invalid.
+
+        Returns
+        -------
+        NodeQueryResult
+            Copied records with counts and capture time. No receive-thread
+            updates or caller edits can change the other side's records.
+        """
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("limit must be a non-negative integer")
+        if not isinstance(includeSelf, bool):
+            raise ValueError("includeSelf must be a boolean")
+        if sortDirection not in (None, "asc", "desc"):
+            raise ValueError("sortDirection must be 'asc' or 'desc'")
+        if sortField is not None and (
+            not isinstance(sortField, str) or not sortField.strip()
+        ):
+            raise ValueError("sortField must be a non-empty field path or alias")
+        for name, patterns in (
+            ("roleFilter", roleFilter),
+            ("hwModelFilter", hwModelFilter),
+        ):
+            if patterns is not None and (
+                not isinstance(patterns, Sequence)
+                or isinstance(patterns, str)
+                or not all(isinstance(pattern, str) for pattern in patterns)
+            ):
+                raise ValueError(f"{name} must be a sequence of strings")
+        return self._node_view._query_nodes(
+            include_self=includeSelf,
+            role_filter=list(roleFilter) if roleFilter is not None else None,
+            hw_model_filter=list(hwModelFilter) if hwModelFilter is not None else None,
+            sort_field=sortField,
+            sort_direction=sortDirection,
+            limit=limit,
+            validate_sort=True,
+        )
 
     def showNodes(
         self,

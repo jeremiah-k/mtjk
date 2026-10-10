@@ -21,6 +21,7 @@
     "onResponseTelemetry": "(self, p:dict[str, Any])",
     "onResponseTraceRoute": "(self, p:dict[str, Any])",
     "onResponseWaypoint": "(self, p:dict[str, Any])",
+    "queryNodes": "(self, *, includeSelf:bool=True, roleFilter:Sequence[str] | None=None, hwModelFilter:Sequence[str] | None=None, sortField:str | None=None, sortDirection:str | None=None, limit:int=0)",
     "requestTraceRoute": "(self, dest:int | str, hopLimit:int, channelIndex:int=0)",
     "sendAlert": "(self, text:str, destinationId:int | str=BROADCAST_ADDR, onResponse:Callable[[dict[str, Any]], Any] | None=None, channelIndex:int=0, hopLimit:int | None=None)",
     "sendData": "(self, data:'PayloadData', destinationId:int | str=BROADCAST_ADDR, portNum:portnums_pb2.PortNum.ValueType=portnums_pb2.PortNum.PRIVATE_APP, wantAck:bool=False, wantResponse:bool=False, onResponse:Callable[[dict[str, Any]], Any] | None=None, onResponseAckPermitted:bool=False, channelIndex:int=0, hopLimit:int | None=None, pkiEncrypted:bool=False, publicKey:bytes | None=None, priority:mesh_pb2.MeshPacket.Priority.ValueType=mesh_pb2.MeshPacket.Priority.RELIABLE, replyId:int | None=None)",

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import inspect
 import io
+import json
 import logging
 import platform
 import time
@@ -13,6 +15,7 @@ from typing import Any, Protocol
 
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
+from meshtastic.cli.parser import parse_cli_args
 from meshtastic.cli.session_resources import SessionCleanup
 from meshtastic.protobuf import portnums_pb2
 
@@ -394,6 +397,45 @@ def _clean_filter_patterns(values: list[str] | None) -> list[str] | None:
     return [value for value in cleaned if value] or None
 
 
+def _node_json_error(args: Any) -> str | None:
+    """Keep a node JSON invocation limited to one result-producing action."""
+    if not (getattr(args, "nodes", False) and getattr(args, "json", False)):
+        return None
+    # Compare with parser-owned defaults so additions fail closed until their
+    # role in a JSON-only invocation is deliberately selected here.
+    defaults = parse_cli_args(
+        argparse.ArgumentParser(add_help=False), version="", argv=[]
+    )
+    allowed = {
+        "nodes",
+        "json",
+        "role",
+        "hwmodel",
+        "sort",
+        "limit",
+        "dest",
+        "port",
+        "host",
+        "ble",
+        "ble_auto_reconnect",
+        "timeout",
+        "channel_fetch_attempts",
+        "quiet",
+        "ch_index",
+        "no_time",
+    }
+    conflicts = sorted(
+        "--" + name.replace("_", "-")
+        for name, value in vars(args).items()
+        if not name.startswith("_")
+        and name not in allowed
+        and value != getattr(defaults, name, None)
+    )
+    if conflicts:
+        return "--nodes --json cannot be combined with: " + ", ".join(conflicts)
+    return None
+
+
 def _node_query_error(args: Any) -> str | None:
     """Validate query syntax before a transport or mutating action can run."""
     if getattr(args, "dry_run", False):
@@ -426,7 +468,7 @@ def _node_query_error(args: Any) -> str | None:
 
 def _validate_nodes_query(context: CliContext, hooks: MessagingServiceHooks) -> None:
     """Reject invalid embedded queries before connected device actions."""
-    if error := _node_query_error(context.args):
+    if error := _node_query_error(context.args) or _node_json_error(context.args):
         _terminate_cli(hooks.cli_exit, error, 1)
     if getattr(context.args, "dry_run", False) or not getattr(
         context.args, "nodes", False
@@ -452,7 +494,7 @@ def _handle_information_actions(
     """Handle info, preference reads, node listing, and show-field validation."""
     args = context.args
     interface = context.interface
-    if error := _node_query_error(args):
+    if error := _node_query_error(args) or _node_json_error(args):
         context.outcome.close_now = True
         hooks.cli_print(error)
         context.outcome.stop_processing = True
@@ -512,14 +554,22 @@ def _handle_information_actions(
             sort_field, sort_direction = _parse_sort_spec(args.sort)
             if not nodes_query_validated:
                 hooks.validate_cli_sort_field(interface, sort_field)
+        query_kwargs: dict[str, Any] = {
+            "roleFilter": _clean_filter_patterns(args.role),
+            "hwModelFilter": _clean_filter_patterns(args.hwmodel),
+            "sortField": sort_field or None,
+            "sortDirection": sort_direction,
+            "limit": args.limit if args.limit is not None else 0,
+        }
+        if getattr(args, "json", False):
+            output = hooks.preference_print or hooks.cli_print
+            result = interface.queryNodes(**query_kwargs)
+            output(json.dumps(result.toDict(), indent=2, allow_nan=False))
+            return
         interface.showNodes(
             True,
             args.show_fields,
-            roleFilter=_clean_filter_patterns(args.role),
-            hwModelFilter=_clean_filter_patterns(args.hwmodel),
-            sortField=sort_field or None,
-            sortDirection=sort_direction,
-            limit=args.limit if args.limit is not None else 0,
+            **query_kwargs,
         )
 
     if args.show_fields and not args.nodes:

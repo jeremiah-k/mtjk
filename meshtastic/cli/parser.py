@@ -395,9 +395,9 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     group.add_argument(
         "--json",
         help=(
-            "Emit machine-readable JSON for --list-fields and --describe-field"
-            " instead of the text rendering. Field names are canonical"
-            " snake_case."
+            "Emit machine-readable JSON for --list-fields, --describe-field, or"
+            " --nodes instead of text. Config fields use canonical snake_case;"
+            " node records retain their camelCase keys."
         ),
         action="store_true",
     )

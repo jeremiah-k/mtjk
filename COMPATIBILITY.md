@@ -622,3 +622,17 @@ When adding/changing compatibility behavior:
 6. Run full project checks as documented in `CONTRIBUTING.md`.
 7. If a compatibility symbol is listed in both BLE status and module-mapping
    tables, update both entries in the same change to keep inventories aligned.
+
+## Structured node queries
+
+`MeshInterface.queryNodes()` and `meshtastic.nodes.NodeQueryResult` are public
+stable interfaces for detached cached observations. They perform no radio I/O.
+`showNodes()` retains its text output and calling convention and shares the
+snapshot, filtering, and sorting implementation with structured queries.
+
+`NodeQueryResult.toDict()` and `--nodes --json` share JSON schema version 1.
+Additive node fields may appear as firmware and cached observations evolve;
+consumers should tolerate unknown fields and missing optional observations.
+The schema envelope and byte encoding are maintained compatibility contracts.
+The internal node database remains mutable for historical callers; a query
+result does not expose shared mutable cache records.
