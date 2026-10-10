@@ -36,6 +36,20 @@ retains the original exception, including typed request errors where available.
 Errors raised by CLI termination are returned without exiting the process.
 KeyboardInterrupt and other control flow exceptions propagate after cleanup.
 
+Remote reads return RequestRejectedError immediately when the destination or
+the connected node's router rejects the matching request ID. Its reason names
+the routing error, such as PKI_FAILED, rather than reporting a response timeout.
+The client retains PKI encryption and does not automatically retry on a legacy
+admin channel. See [fresh configuration reads](configuration-reads.md) for the
+authorization requirements. This behavior uses the version 1 command contract.
+
+Command-owned callbacks also retain admitted routing rejections when a legacy
+action reports only a generic error or an empty result. Those invocations
+return status 1 with RequestRejectedError and its routing reason; typed getters
+retain their more specific request context. Historical shared ACK/NAK flags
+are not used to report these command failures. Rejections arriving after the
+command deadline do not replace a timeout.
+
 Output capture uses invocation-local reporters and reader-thread callback
 contexts. It does not replace stdout or stderr, change logging configuration,
 or populate legacy CLI globals. Requested node, preference, telemetry, position,

@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -15,7 +16,7 @@ from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.commands import executeCommand, getCommandCapabilities
 from meshtastic.errors import RequestRejectedError, RequestTimeoutError
 from meshtastic.mesh_interface import MeshInterface
-from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2
+from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2, portnums_pb2
 
 pytestmark = pytest.mark.unit
 
@@ -198,6 +199,174 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
     assert client.responseHandlers == {1234: sentinel}
     assert client._response_wait_errors == {}
     client.close.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("source", "reason", "rejected"),
+    [
+        (1, "PKI_FAILED", True),
+        (2, "NOT_AUTHORIZED", True),
+        (3, "PKI_FAILED", False),
+        (0, "PKI_FAILED", False),
+        (1, 0, False),
+        (1, "NONE", False),
+        (1, "malformed routing payload", False),
+    ],
+)
+def test_command_scope_records_only_valid_routing_rejections(
+    client: MeshInterface, source: int, reason: str | int, rejected: bool
+) -> None:
+    """A request ID alone is insufficient to admit a command-owned NAK."""
+    scope = _CommandScope(client, lambda _message: None)
+    request = mesh_pb2.MeshPacket(to=2, id=0xAABB)
+    scope._track(request.id, None, packet=request)
+    scope._record_routing_rejection(
+        {
+            "from": source,
+            "decoded": {"requestId": request.id, "routing": {"errorReason": reason}},
+        }
+    )
+    if rejected:
+        with pytest.raises(RequestRejectedError):
+            scope._raise_if_rejected()
+    else:
+        scope._raise_if_rejected()
+    scope._cleanup()
+
+
+@pytest.mark.parametrize(
+    ("action", "operation"),
+    [
+        (["--get", "lora.hopLimit"], "get_config_request"),
+        (["--get", "mqtt.enabled"], "get_module_config_request"),
+        (["--get-ui-config"], "get_ui_config_request"),
+        (["--request-connection-status"], "get_device_connection_status_request"),
+        (["--reboot"], "command"),
+        (["--get-canned-message"], "command"),
+        (["--get-ringtone"], "command"),
+    ],
+)
+def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    action: list[str],
+    operation: str,
+) -> None:
+    packets: list[mesh_pb2.MeshPacket] = []
+    sentinel = Mock()
+    client.responseHandlers[1234] = sentinel
+    client._acknowledgment.receivedNak = False
+
+    def send(envelope: mesh_pb2.ToRadio) -> None:
+        request = envelope.packet
+        packets.append(request)
+        nak = mesh_pb2.MeshPacket(to=1)
+        setattr(nak, "from", 1)
+        nak.decoded.portnum = portnums_pb2.PortNum.ROUTING_APP
+        nak.decoded.request_id = request.id
+        nak.decoded.payload = mesh_pb2.Routing(
+            error_reason=mesh_pb2.Routing.Error.PKI_FAILED
+        ).SerializeToString()
+        client._handle_packet_from_radio(nak)
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    started = time.monotonic()
+    result = executeCommand(client, ["--dest", "!00000002", *action], timeout=0.5)
+    assert isinstance(result.error, RequestRejectedError), result
+    assert result.exitCode == 1
+    assert result.error.reason == "PKI_FAILED"
+    assert result.error.nodeNum == 2
+    assert result.error.requestId == packets[0].id
+    assert result.error.operation == operation
+    assert all(packet.pki_encrypted for packet in packets)
+    assert time.monotonic() - started < 0.25
+    assert client.responseHandlers == {1234: sentinel}
+    assert client._response_wait_errors == {}
+    assert client._acknowledgment.receivedNak is False
+    cast(Mock, client.close).assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "feedback",
+    [
+        "local_ack",
+        "local_data",
+        "local_decode_error",
+        "other_nak",
+        "other_id",
+        "other_nak_legacy",
+        "local_numeric_ack",
+    ],
+)
+def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, feedback: str
+) -> None:
+    def send(envelope: mesh_pb2.ToRadio) -> None:
+        request = envelope.packet
+        packet = mesh_pb2.MeshPacket(to=1)
+        setattr(
+            packet, "from", 3 if feedback in {"other_nak", "other_nak_legacy"} else 1
+        )
+        packet.decoded.request_id = (
+            request.id ^ 1 if feedback == "other_id" else request.id
+        )
+        if feedback in {"local_data", "local_decode_error"}:
+            packet.decoded.portnum = portnums_pb2.PortNum.ADMIN_APP
+            raw = admin_pb2.AdminMessage()
+            raw.get_config_response.lora.hop_limit = 7
+            packet.decoded.payload = (
+                b"\xff" if feedback == "local_decode_error" else raw.SerializeToString()
+            )
+        else:
+            packet.decoded.portnum = portnums_pb2.PortNum.ROUTING_APP
+            packet.decoded.payload = mesh_pb2.Routing(
+                error_reason=(
+                    mesh_pb2.Routing.Error.NONE
+                    if feedback in {"local_ack", "local_numeric_ack"}
+                    else mesh_pb2.Routing.Error.PKI_FAILED
+                )
+            ).SerializeToString()
+        client._handle_packet_from_radio(packet)
+        assert request.id in client.responseHandlers
+        setattr(packet, "from", 2)
+        packet.decoded.portnum = portnums_pb2.PortNum.ADMIN_APP
+        packet.decoded.request_id = request.id
+        raw = admin_pb2.AdminMessage()
+        raw.get_config_response.lora.hop_limit = 3
+        packet.decoded.payload = raw.SerializeToString()
+        client._handle_packet_from_radio(packet)
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(
+        client, ["--dest", "!00000002", "--get", "lora.hopLimit"], timeout=0.5
+    )
+    assert result.succeeded, result.error
+    assert "lora.hop_limit: 3" in result.output
+    assert client.responseHandlers == {}
+    assert client._response_wait_errors == {}
+
+
+def test_remote_get_does_not_replace_timeout_with_a_late_routing_nak(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def send(envelope: mesh_pb2.ToRadio) -> None:
+        time.sleep(0.03)
+        packet = mesh_pb2.MeshPacket(to=1)
+        setattr(packet, "from", 1)
+        packet.decoded.portnum = portnums_pb2.PortNum.ROUTING_APP
+        packet.decoded.request_id = envelope.packet.id
+        packet.decoded.payload = mesh_pb2.Routing(
+            error_reason=mesh_pb2.Routing.Error.PKI_FAILED
+        ).SerializeToString()
+        client._handle_packet_from_radio(packet)
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(
+        client, ["--dest", "!00000002", "--get", "lora.region"], timeout=0.01
+    )
+    assert isinstance(result.error, RequestTimeoutError), result
+    assert client.responseHandlers == {}
+    assert client._response_wait_errors == {}
 
 
 @pytest.mark.parametrize("destination", [None, "^local", "!00000002"])

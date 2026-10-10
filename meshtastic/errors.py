@@ -22,7 +22,8 @@ class RequestError(MeshInterfaceError):
     requestId : int | None
         Allocated packet ID, or None when transmission did not start.
     operation : str
-        Administrative request variant, such as get_config_request.
+        Administrative request variant, such as get_config_request, or
+        ``command`` for an embedded CLI action without a typed request variant.
     """
 
     def __init__(
