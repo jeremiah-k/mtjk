@@ -421,6 +421,66 @@ def test_reader_thread_telemetry_summary_is_captured(client, monkeypatch, capsys
             worker.join(timeout=1)
 
 
+def test_reader_thread_output_callback_failure_reports_error_and_cleans_up(
+    client, monkeypatch, capsys
+):
+    """Reader callback failures are returned without leaking a response handler."""
+    from meshtastic.protobuf import telemetry_pb2
+
+    completed = threading.Event()
+    failure_threads = []
+    workers = []
+
+    def fail_output(chunk):
+        if "Battery level:" in chunk:
+            failure_threads.append(threading.current_thread())
+            raise RuntimeError("reader output sink failed")
+
+    def send(envelope):
+        payload = telemetry_pb2.Telemetry()
+        payload.device_metrics.battery_level = 73
+        packet = {
+            "from": 2,
+            "decoded": {
+                "requestId": envelope.packet.id,
+                "portnum": "TELEMETRY_APP",
+                "payload": payload.SerializeToString(),
+            },
+        }
+
+        def receive():
+            try:
+                deliver(client, packet)
+            finally:
+                completed.set()
+
+        worker = threading.Thread(target=receive)
+        workers.append(worker)
+        worker.start()
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    try:
+        result = executeCommand(
+            client,
+            ["--dest", "!00000002", "--request-telemetry", "device"],
+            output=fail_output,
+            timeout=0.3,
+        )
+    finally:
+        for worker in workers:
+            worker.join(timeout=1)
+            assert not worker.is_alive()
+    assert result.exitCode == 1
+    assert isinstance(result.error, RuntimeError)
+    assert str(result.error) == "reader output sink failed"
+    assert completed.is_set()
+    assert len(failure_threads) == 1
+    assert failure_threads[0] is not threading.current_thread()
+    assert client.responseHandlers == {}
+    assert executeCommand(client, ["--nodes"], timeout=0.2).succeeded
+    assert capsys.readouterr() == ("", "")
+
+
 def test_ui_query_inherits_operation_deadline(client, monkeypatch):
     monkeypatch.setattr(client, "_send_to_radio_impl", lambda envelope: None)
     start = time.monotonic()
