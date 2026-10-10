@@ -570,6 +570,19 @@ Preferred fields for current values are `average_mA`, `max_mA`, and `min_mA`.
 | `meshtastic.remote_hardware`                  | `onGPIOreceive()`    | `onGPIOReceive()` |
 | `meshtastic.supported_device.SupportedDevice` | `usb_ids` property   | `usbIds` property |
 
+## Fresh configuration reads
+
+Node.readConfig, Node.readModuleConfig, and Node.readPreference are public
+synchronous reads. They return detached values, preserve caches, and use a
+finite positive operation timeout. Historical requestConfig calls retain their cache-populating behavior. Existing
+typed getters retain None on response timeout.
+
+The public meshtastic.errors request exceptions derive from
+MeshInterface.MeshInterfaceError. Rejections retain the routing reason;
+timeouts are also TimeoutError instances. Request context is available as
+nodeNum, requestId (None before a sent packet is available), and operation.
+Response handler retirement is scoped to the failed or completed request.
+
 ## Non-Public and Boundary Rules
 
 - Symbols under `meshtastic/interfaces/ble/*` are internal by default unless
