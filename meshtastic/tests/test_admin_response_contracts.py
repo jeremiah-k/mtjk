@@ -148,7 +148,8 @@ def test_mismatched_response_does_not_consume_handler() -> None:
 
 
 @pytest.mark.unit
-def test_routing_ack_remains_eligible_before_typed_payload() -> None:
+@pytest.mark.parametrize("reason", ["NONE", 0])
+def test_routing_ack_remains_eligible_before_typed_payload(reason: str | int) -> None:
     iface = MeshInterface(noProto=True)
     callback = MagicMock()
     iface._request_wait_runtime.add_response_handler(
@@ -161,7 +162,7 @@ def test_routing_ack_remains_eligible_before_typed_payload() -> None:
         "from": 1,
         "decoded": {
             "requestId": 88,
-            "routing": {"errorReason": "NONE"},
+            "routing": {"errorReason": reason},
         },
     }
     iface._request_wait_runtime.correlate_inbound_response(

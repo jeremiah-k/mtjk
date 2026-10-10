@@ -667,7 +667,7 @@ class _RequestWaitRuntime:
         routing = decoded.get("routing") if isinstance(decoded, dict) else None
         if routing is None:
             response_class = RESPONSE_CLASS_DATA
-        elif "errorReason" not in routing or routing["errorReason"] == "NONE":
+        elif "errorReason" not in routing or routing["errorReason"] in ("NONE", 0, None):
             response_class = RESPONSE_CLASS_ROUTING_ACK
         else:
             response_class = RESPONSE_CLASS_ROUTING_NAK
