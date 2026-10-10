@@ -11,7 +11,7 @@ pipx install mtjk
 mtjk --version
 ```
 
-The historical `meshtastic` console command remains available for compatibility; new examples use `mtjk`. For development against the unreleased branch, replace the installed package in that **isolated** environment with `pipx install 'git+https://github.com/jeremiah-k/mtjk.git@develop'`. A branch reference moves; production deployments should pin a released version or immutable commit.
+The historical `meshtastic` console command remains available for compatibility; new examples use `mtjk`. For development against the unreleased branch, replace the installed package in that **isolated** environment with `pipx install --force 'git+https://github.com/jeremiah-k/mtjk.git@develop'`; `--force` is required while a release is already installed. To move to a newer branch tip later, run `pipx reinstall mtjk`, which recreates that environment from the same source so leftovers from earlier builds cannot accumulate. A branch reference moves; production deployments should pin a released version or immutable commit.
 
 ## Python projects
 
