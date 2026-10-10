@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import threading
+import time
 from typing import IO, Any, TypeAlias
 
 try:
@@ -18,6 +19,7 @@ from tabulate import tabulate
 
 import meshtastic.node
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
+from meshtastic.nodes import NodeQueryResult
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.util import (
     convert_mac_addr,
@@ -301,6 +303,42 @@ class NodeView:
             tabulate(rows, headers="keys", missingval="–", tablefmt="fancy_grid")
         )
 
+    def _query_nodes(
+        self,
+        *,
+        include_self: bool,
+        role_filter: list[str] | None,
+        hw_model_filter: list[str] | None,
+        sort_field: str | None,
+        sort_direction: str | None,
+        limit: int,
+        validate_sort: bool = False,
+    ) -> NodeQueryResult:
+        """Copy shared state once, then filter and sort outside the database lock."""
+        with self._node_db_lock:
+            nodes = copy.deepcopy(list((self.nodes_by_num or {}).values()))
+            local_node_num = self.local_node.nodeNum
+            captured_at = time.time()
+        if validate_sort and sort_field is not None:
+            path = node_data._resolve_field_alias(sort_field)
+            if path not in node_data.get_known_field_paths(nodes):
+                raise ValueError(f"Unknown node sort field: {sort_field}")
+        total = sum(include_self or node.get("num") != local_node_num for node in nodes)
+        filtered = node_data.filter_nodes(
+            nodes,
+            include_self,
+            local_node_num,
+            role_patterns=role_filter,
+            hwmodel_patterns=hw_model_filter,
+        )
+        ordered = node_data.sort_nodes(
+            filtered,
+            field=sort_field or "lastHeard",
+            direction=sort_direction,
+        )
+        selected = ordered if limit <= 0 else ordered[:limit]
+        return NodeQueryResult(tuple(selected), total, len(filtered), captured_at)
+
     def show_nodes(
         self,
         includeSelf: bool = True,
@@ -352,50 +390,17 @@ class NodeView:
         else:
             fields = ["N", *showFields] if "N" not in showFields else list(showFields)
 
-        # Get node data under lock
-        with self._node_db_lock:
-            nodes_snapshot = (
-                list(self.nodes_by_num.values()) if self.nodes_by_num else []
-            )
-            local_node_num = self.local_node.nodeNum
-
-        if nodes_snapshot:
-            node_count = len(nodes_snapshot)
-
-            # Log only count and trimmed nodeNum list for privacy/safety
-            def _get_num(n: Any) -> int | None:
-                return getattr(n, "nodeNum", None) or (
-                    n.get("num") if isinstance(n, dict) else None
-                )
-
-            sample_nums = [_get_num(n) for n in nodes_snapshot[:3]]
-            logger.debug(
-                "Node database: %d nodes, sample nodeNums: %s%s",
-                node_count,
-                sample_nums,
-                "..." if node_count > 3 else "",
-            )
-
-        # Filter nodes
-        total = sum(
-            includeSelf or node.get("num") != local_node_num for node in nodes_snapshot
+        result = self._query_nodes(
+            include_self=includeSelf,
+            role_filter=roleFilter,
+            hw_model_filter=hwModelFilter,
+            sort_field=sortField,
+            sort_direction=sortDirection,
+            limit=limit,
         )
-        filtered_nodes = node_data.filter_nodes(
-            nodes_snapshot,
-            includeSelf,
-            local_node_num,
-            role_patterns=roleFilter,
-            hwmodel_patterns=hwModelFilter,
-        )
+        shown_nodes = list(result.nodes)
+        total = result.total
         has_field_filters = bool(roleFilter) or bool(hwModelFilter)
-
-        # Sort nodes (lastHeard-descending unless a field is requested)
-        sorted_nodes = node_data.sort_nodes(
-            filtered_nodes, field=sortField, direction=sortDirection
-        )
-
-        # Apply the listing cap
-        shown_nodes = sorted_nodes if limit <= 0 else sorted_nodes[:limit]
 
         # Build table data with field extraction and formatting
         rows = self._build_table_data(shown_nodes, fields)
@@ -406,11 +411,11 @@ class NodeView:
 
         # Node-count header mirrors the MMRelay !nodes grammar
         if has_field_filters:
-            if len(shown_nodes) < len(sorted_nodes):
-                header = f"Nodes: {len(shown_nodes)} of {len(sorted_nodes)} matching"
+            if len(shown_nodes) < result.matched:
+                header = f"Nodes: {len(shown_nodes)} of {result.matched} matching"
             else:
-                header = f"Nodes: {len(sorted_nodes)} matching"
-            if len(sorted_nodes) < total:
+                header = f"Nodes: {result.matched} matching"
+            if result.matched < total:
                 header += f" (of {total} known)"
         elif len(shown_nodes) < total:
             header = f"Nodes: {len(shown_nodes)} of {total}"
@@ -420,7 +425,7 @@ class NodeView:
         # Render and output table
         table = self._render_node_table(rows)
         output = header + "\n" + table
-        hidden = len(sorted_nodes) - len(shown_nodes)
+        hidden = result.matched - len(shown_nodes)
         if hidden > 0:
             output += f"\n… and {hidden} more not shown"
         print(output)

@@ -35,7 +35,9 @@ class DispatchHooks:
 
 def _print_connection(context: CliContext, hooks: DispatchHooks) -> None:
     """Print the historical connection banner unless config export is active."""
-    if context.args.export_config:
+    if context.args.export_config or (
+        getattr(context.args, "json", False) and getattr(context.args, "nodes", False)
+    ):
         return
 
     dev_path = getattr(context.interface, "devPath", "")

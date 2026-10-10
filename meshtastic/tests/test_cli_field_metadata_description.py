@@ -335,7 +335,7 @@ def test_cli_json_requires_schema_introspection_action(
     tcp_interface.assert_not_called()
     out, err = capsys.readouterr()
     assert out == ""
-    assert "--json requires --list-fields or --describe-field" in err
+    assert "--json requires --list-fields, --describe-field, or --nodes" in err
 
 
 @pytest.mark.unit

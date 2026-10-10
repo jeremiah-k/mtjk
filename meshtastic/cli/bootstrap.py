@@ -23,7 +23,7 @@ import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliExit
 from meshtastic.cli.context import _terminate_cli as _terminate_cli_with_exit
-from meshtastic.cli.messaging_service_actions import _node_query_error
+from meshtastic.cli.messaging_service_actions import _node_json_error, _node_query_error
 from meshtastic.cli.session_resources import CliSessionResources
 from meshtastic.mesh_interface import MeshInterface
 
@@ -256,7 +256,7 @@ def _validate_and_normalize_args(
     """Validate pre-connect arguments and apply historical default mutations."""
     if cli_config_preview.preview_requested(args):
         _validate_dry_run_invocation(args, parser)
-    if error := _node_query_error(args):
+    if error := _node_query_error(args) or _node_json_error(args):
         parser.error(error)
     if args.quiet and (args.debug or args.listen or args.debuglib):
         parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
@@ -265,9 +265,11 @@ def _validate_and_normalize_args(
     if args.configure and len(args.configure) != 1:
         parser.error("--configure may be specified only once per invocation")
     if getattr(args, "json", False) and not (
-        args.list_fields or getattr(args, "describe_field", None) is not None
+        args.list_fields
+        or getattr(args, "describe_field", None) is not None
+        or args.nodes
     ):
-        parser.error("--json requires --list-fields or --describe-field")
+        parser.error("--json requires --list-fields, --describe-field, or --nodes")
 
     for value, label in (
         (args.set_owner, "Long Name"),
