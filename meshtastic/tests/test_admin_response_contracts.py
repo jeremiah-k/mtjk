@@ -63,6 +63,46 @@ def test_local_contract_accepts_zero_or_local_source() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "decoded", "allowed"),
+    [
+        (0x1234, {"routing": {"errorReason": "NOT_AUTHORIZED"}}, True),
+        (0x9999, {"routing": {"errorReason": "PKI_FAILED"}}, True),
+        (0x9999, {"routing": {"errorReason": "NONE"}}, False),
+        (0x9999, {"routing": {}}, False),
+        (0x9999, {"admin": {"decode_error": "invalid payload"}}, False),
+        (0x9999, {}, False),
+        (0x5678, {"routing": {"errorReason": "PKI_FAILED"}}, False),
+        (0, {"routing": {"errorReason": "PKI_FAILED"}}, False),
+    ],
+)
+def test_remote_contract_distinguishes_origin_rejection_from_peer_feedback(
+    source: int, decoded: dict[str, object], allowed: bool
+) -> None:
+    request = admin_pb2.AdminMessage(get_device_metadata_request=True)
+    contract = contract_for_admin_request(
+        request, destination=0x1234, local_node_num=0x9999
+    )
+    assert contract is not None
+    packet = {"from": source, "decoded": decoded}
+    assert contract._matches_feedback(packet) is allowed
+    assert contract.matches_source(packet) is (source == 0x1234)
+
+
+@pytest.mark.unit
+def test_remote_contract_without_local_identity_rejects_other_sources() -> None:
+    contract = contract_for_admin_request(
+        admin_pb2.AdminMessage(get_device_metadata_request=True),
+        destination=0x1234,
+        local_node_num=None,
+    )
+    assert contract is not None
+    assert not contract._matches_feedback(
+        {"from": 0, "decoded": {"routing": {"errorReason": "PKI_FAILED"}}}
+    )
+
+
+@pytest.mark.unit
 def test_mismatched_response_does_not_consume_handler() -> None:
     iface = MeshInterface(noProto=True)
     request_id = 77

@@ -491,7 +491,9 @@ class SendPipeline:
                 )
         try:
             if command_scope is not None:
-                command_scope._track(meshPacket.id, response_wait_attr)
+                command_scope._track(
+                    meshPacket.id, response_wait_attr, packet=meshPacket
+                )
             if response_wait_attr is not None and not wait_request_registered:
                 self._clear_wait_error(response_wait_attr, request_id=meshPacket.id)
             return self._port.send_packet(

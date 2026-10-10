@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
@@ -11,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 
 from meshtastic._core_constants import DECODE_ERROR_KEY
-from meshtastic._deadline import _remaining_timeout
+from meshtastic._deadline import _current_deadline, _remaining_timeout
+from meshtastic.errors import RequestRejectedError
+from meshtastic.protobuf import mesh_pb2
 
 if TYPE_CHECKING:
     from meshtastic.mesh_interface import MeshInterface
@@ -29,11 +32,20 @@ class _CommandScope:
     def __init__(self, interface: MeshInterface, output: Callable[[str], None]) -> None:
         self._interface = interface
         self._output = output
+        self._deadline = _current_deadline()
         self._requests: dict[int, str | None] = {}
+        self._sent_packets: dict[int, mesh_pb2.MeshPacket] = {}
+        self._rejection: RequestRejectedError | None = None
         self._closed = False
         self._lock = threading.Lock()
 
-    def _track(self, request_id: int, wait_attribute: str | None) -> None:
+    def _track(
+        self,
+        request_id: int,
+        wait_attribute: str | None,
+        *,
+        packet: mesh_pb2.MeshPacket | None = None,
+    ) -> None:
         with self._lock:
             if self._closed:
                 raise RuntimeError("Command has completed")
@@ -41,6 +53,8 @@ class _CommandScope:
                 self._requests[request_id] = wait_attribute
             else:
                 self._requests.setdefault(request_id, None)
+            if packet is not None:
+                self._sent_packets[request_id] = packet
 
     def _register_handler(self, request_id: int, register: Callable[[], bool]) -> bool:
         """Serialize response registration with closure, including callback rearms."""
@@ -59,9 +73,44 @@ class _CommandScope:
         def invoke(packet: dict[str, Any]) -> Any:
             if self._closed:
                 return None
+            self._record_routing_rejection(packet)
             return context.run(callback, packet)
 
         return invoke
+
+    def _record_routing_rejection(self, packet: dict[str, Any]) -> None:
+        """Retain admitted routing feedback without changing legacy callbacks."""
+        decoded = packet.get("decoded")
+        if not isinstance(decoded, dict):
+            return
+        request_id = decoded.get("requestId")
+        routing = decoded.get("routing")
+        if not isinstance(request_id, int) or not isinstance(routing, dict):
+            return
+        reason = routing.get("errorReason", "NONE")
+        if not isinstance(reason, (str, int)) or reason in ("NONE", 0):
+            return
+        with self._lock:
+            if (
+                self._closed
+                or self._rejection is not None
+                or request_id not in self._requests
+                or (self._deadline is not None and time.monotonic() >= self._deadline)
+            ):
+                return
+            sent = self._sent_packets.get(request_id)
+            self._rejection = RequestRejectedError(
+                reason,
+                nodeNum=sent.to if sent is not None else None,
+                requestId=request_id,
+                operation="command",
+            )
+
+    def _raise_if_rejected(self) -> None:
+        with self._lock:
+            rejection = self._rejection
+        if rejection is not None:
+            raise rejection
 
     def _on_ack(self, packet: dict[str, Any]) -> None:
         """Complete an owned ACK without changing legacy shared error latches."""
@@ -134,7 +183,14 @@ def _command_scope(
     token = _CURRENT_SCOPE.set(scope)
     try:
         _remaining_timeout(math.inf)
-        yield scope
+        try:
+            yield scope
+        except Exception as error:
+            if not isinstance(error, RequestRejectedError):
+                scope._raise_if_rejected()
+            raise
+        else:
+            scope._raise_if_rejected()
     finally:
         try:
             scope._cleanup()

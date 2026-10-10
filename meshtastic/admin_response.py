@@ -67,11 +67,29 @@ class AdminResponseContract:
     expected_sources: frozenset[int]
     response_variant: str
     response_subtype: str | None = None
+    local_node_num: int | None = None
 
     def matches_source(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` came from an allowed response source."""
         source = packet.get("from")
         return isinstance(source, int) and source in self.expected_sources
+
+    def _matches_feedback(self, packet: dict[str, object]) -> bool:
+        """Accept peer feedback or a rejection by the originating router.
+
+        Request IDs are correlated by the response-handler registry before this
+        gate runs. A local ACK only confirms submission; it cannot satisfy a
+        remote read. Local data and decode failures cannot stand in for the peer.
+        """
+        if self.matches_source(packet):
+            return True
+        source = packet.get("from")
+        if self.local_node_num is None or source != self.local_node_num:
+            return False
+        decoded = packet.get("decoded")
+        routing = decoded.get("routing") if isinstance(decoded, dict) else None
+        reason = routing.get("errorReason") if isinstance(routing, dict) else None
+        return reason is not None and reason != "NONE"
 
     def matches(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` satisfies this request's response contract."""
@@ -124,4 +142,5 @@ def contract_for_admin_request(
         expected_sources=frozenset(expected_sources),
         response_variant=response_variant,
         response_subtype=_response_subtype_for_request(request_variant, request),
+        local_node_num=local_node_num,
     )

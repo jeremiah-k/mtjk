@@ -44,8 +44,9 @@ adding stronger correlation did not change that public tuple shape.
 known getter requests, returns an immutable `AdminResponseContract` with:
 
 - `expected_sources`: acceptable `from` node numbers;
-- `response_variant`: the expected `AdminMessage` response oneof field; and
-- `response_subtype`: the expected nested config/module subtype when applicable.
+- `response_variant`: the expected `AdminMessage` response oneof field;
+- `response_subtype`: the expected nested config/module subtype when applicable; and
+- `local_node_num`: the origin router allowed to reject the request.
 
 If a request is not a recognized getter, no typed contract is attached and the
 historical request-ID callback behavior remains available.
@@ -104,6 +105,14 @@ destination is the local node.
 
 A packet from any other source does not satisfy the contract even if its request ID
 and response oneof happen to match.
+
+Routing feedback uses a separate `_matches_feedback` gate after request-ID
+correlation. It accepts feedback from the expected response source and terminal
+routing NAKs from the connected node's router. An origin rejection such as
+PKI_FAILED terminates the getter with RequestRejectedError; it does not need a
+request-scoped ACK/NAK wait or change historical shared acknowledgment flags.
+Local-router ACKs, data, and decode failures cannot satisfy a remote read. The
+source-zero compatibility exception remains limited to local reads.
 
 ## Correlation sequence
 
