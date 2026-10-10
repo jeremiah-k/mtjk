@@ -583,6 +583,16 @@ timeouts are also TimeoutError instances. Request context is available as
 nodeNum, requestId (None before a sent packet is available), and operation.
 Response handler retirement is scoped to the failed or completed request.
 
+## Embedded commands
+
+meshtastic.commands exposes executeCommand, getCommandCapabilities,
+CommandResult, and CommandCapabilities as public interfaces. API contract
+version 1 maintains captured output, returned status and failures, bounded
+managed waits, per-interface command serialization, and caller-owned transport
+lifetime. Supported option spellings are discoverable and may expand additively.
+The standalone CLI continues to support its transport-owning and long-running
+flows. The meshtastic.cli package remains internal implementation machinery.
+
 ## Non-Public and Boundary Rules
 
 - Symbols under `meshtastic/interfaces/ble/*` are internal by default unless

@@ -5,6 +5,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.node_runtime.shared import (
     MAX_CANNED_MESSAGE_LENGTH,
     MAX_RINGTONE_LENGTH,
@@ -394,7 +395,9 @@ class _NodeAdminContentRuntime:
                 else getattr(request, "id", None)
             )
             request_id = request_id_value if isinstance(request_id_value, int) else None
-            if not response_event.wait(timeout=self._node._timeout.expireTimeout):
+            if not response_event.wait(
+                timeout=_remaining_timeout(self._node._timeout.expireTimeout)
+            ):
                 logger.warning("%s", timeout_warning_message)
                 request_wait_runtime = getattr(
                     self._node.iface, "_request_wait_runtime", None

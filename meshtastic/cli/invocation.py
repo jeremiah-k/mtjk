@@ -7,7 +7,7 @@ import contextvars
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import IO
+from typing import IO, NoReturn
 
 _CURRENT_INVOCATION: contextvars.ContextVar[CliInvocation | None] = (
     contextvars.ContextVar("cli_invocation", default=None)
@@ -30,6 +30,8 @@ class CliInvocation:
         Whether user-facing configuration field names use camelCase.
     logfile : IO[str] | None
         Active serial debug output stream owned by this invocation.
+    exit_handler : Callable[[str, int], NoReturn] | None
+        Embedded termination seam; None retains standalone process exit behavior.
     """
 
     args: argparse.Namespace
@@ -37,6 +39,7 @@ class CliInvocation:
     channel_index: int | None = None
     camel_case: bool = False
     logfile: IO[str] | None = None
+    exit_handler: Callable[[str, int], NoReturn] | None = None
 
 
 @contextmanager

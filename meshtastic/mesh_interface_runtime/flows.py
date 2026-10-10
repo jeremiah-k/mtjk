@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 import google.protobuf.json_format
 from google.protobuf import message as protobuf_message
 
+from meshtastic._command_scope import _get_command_output
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.mesh_interface_runtime.request_wait import (
     RESPONSE_WAIT_REQID_ERROR,
@@ -48,7 +49,11 @@ UNKNOWN_SNR_QUARTER_DB = -128
 
 def _emit_response_summary(message: str) -> None:
     """Emit a short response summary without hiding legacy stdout behavior."""
-    logger.info("%s", message)
+    output = _get_command_output()
+    if output is not None:
+        output(message)
+    else:
+        logger.info("%s", message)
 
 
 def _node_label(interface: "MeshInterface", node_num: int) -> str:

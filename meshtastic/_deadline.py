@@ -29,13 +29,7 @@ def _remaining_timeout(timeout: float) -> float:
 @contextmanager
 def _operation_deadline(timeout: float) -> Iterator[float]:
     """Apply a finite positive budget; nested operations cannot extend it."""
-    if (
-        not isinstance(timeout, (int, float))
-        or isinstance(timeout, bool)
-        or not math.isfinite(timeout)
-        or timeout <= 0
-    ):
-        raise ValueError("timeout must be finite and positive")
+    _validate_timeout(timeout)
     deadline = time.monotonic() + timeout
     outer = _DEADLINE.get()
     if outer is not None:
@@ -46,3 +40,19 @@ def _operation_deadline(timeout: float) -> Iterator[float]:
         yield deadline
     finally:
         _DEADLINE.reset(token)
+
+
+def _current_deadline() -> float | None:
+    """Return the enclosing operation deadline for callbacks on other threads."""
+    return _DEADLINE.get()
+
+
+def _validate_timeout(timeout: float) -> None:
+    """Reject invalid programmatic budgets before creating invocation state."""
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be finite and positive")

@@ -17,6 +17,7 @@ from pubsub import pub
 from tabulate import tabulate
 
 import meshtastic.node
+from meshtastic._command_scope import _get_command_output
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.util import (
@@ -312,6 +313,31 @@ class NodeView:
         sortDirection: str | None = None,
         limit: int = 0,
     ) -> str:
+        """Render and print cached nodes with the historical calling convention."""
+        output = self._format_nodes(
+            includeSelf,
+            showFields,
+            roleFilter=roleFilter,
+            hwModelFilter=hwModelFilter,
+            sortField=sortField,
+            sortDirection=sortDirection,
+            limit=limit,
+        )
+        reporter = _get_command_output() or print
+        reporter(output)
+        return output
+
+    def _format_nodes(
+        self,
+        includeSelf: bool = True,
+        showFields: list[str] | None = None,
+        *,
+        roleFilter: list[str] | None = None,
+        hwModelFilter: list[str] | None = None,
+        sortField: str | None = None,
+        sortDirection: str | None = None,
+        limit: int = 0,
+    ) -> str:
         """Produce a formatted table summarizing known mesh nodes.
 
         Parameters
@@ -423,7 +449,6 @@ class NodeView:
         hidden = len(sorted_nodes) - len(shown_nodes)
         if hidden > 0:
             output += f"\n… and {hidden} more not shown"
-        print(output)
         return output
 
     def get_node(

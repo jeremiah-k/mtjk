@@ -105,6 +105,9 @@ class CliContext:
         Top-level invocation state when connected dispatch runs inside ``common()``.
     session_resources : CliSessionResources | None
         Invocation owner for resources that must survive successful action dispatch.
+    owns_interface : bool
+        Whether dispatch may close the connection and print a connection banner.
+        Embedded callers retain ownership and receive requested output through hooks.
     """
 
     interface: MeshInterface
@@ -115,6 +118,7 @@ class CliContext:
     session_resources: CliSessionResources | None = field(
         default_factory=get_current_session_resources
     )
+    owns_interface: bool = True
 
     def retain_failure_cleanup(
         self, cleanup: Callable[[], None]

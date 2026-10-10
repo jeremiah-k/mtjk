@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 
 import meshtastic.util
 from meshtastic._core_constants import DECODE_ERROR_KEY
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.mesh_interface_runtime.request_wait import DECODE_FAILED_PREFIX
 from meshtastic.node_runtime.admin_wait import (
@@ -662,7 +663,7 @@ def _wait_for_section_reload_under_deadline(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        time.sleep(min(poll_interval, remaining))
+        time.sleep(_remaining_timeout(min(poll_interval, remaining)))
     return _received()
 
 
