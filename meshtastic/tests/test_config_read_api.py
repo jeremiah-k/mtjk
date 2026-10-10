@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from google.protobuf.struct_pb2 import Struct
 
 from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._deadline import _operation_deadline, _remaining_timeout
@@ -12,6 +13,7 @@ from meshtastic.admin_response import (
     _CONFIG_RESPONSE_SUBTYPE_BY_REQUEST,
     _MODULE_CONFIG_RESPONSE_SUBTYPE_BY_REQUEST,
 )
+from meshtastic.configuration import _copy_value
 from meshtastic.errors import (
     RequestError,
     RequestRejectedError,
@@ -418,3 +420,69 @@ def test_expired_queue_wait_preserves_unrelated_queued_packet(client, monkeypatc
         assert client.responseHandlers == {}
     finally:
         client.noProto = True
+
+
+def test_unreadable_section_fails_closed_before_transmission(client, monkeypatch):
+    readable = {
+        key: name
+        for key, name in _CONFIG_RESPONSE_SUBTYPE_BY_REQUEST.items()
+        if name != "lora"
+    }
+    monkeypatch.setattr(
+        "meshtastic.configuration._CONFIG_RESPONSE_SUBTYPE_BY_REQUEST", readable
+    )
+
+    with pytest.raises(ValueError, match="Configuration section is not readable"):
+        Node(client, 2, noProto=False).readPreference("lora.region")
+
+
+def test_transport_failure_translates_to_request_error(client, monkeypatch):
+    failure = MeshInterface.MeshInterfaceError("transport gone")
+
+    def send(node, message, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("meshtastic.node._send_admin_with_ack_scope", send)
+    remote = Node(client, 2, noProto=False)
+
+    with pytest.raises(RequestError) as excinfo:
+        remote.readConfig("lora")
+
+    assert excinfo.value.operation == "get_config_request"
+    assert excinfo.value.nodeNum == 2
+    assert excinfo.value.__cause__ is failure
+    assert not isinstance(excinfo.value, RequestTimeoutError)
+
+
+def test_transport_timeout_cause_translates_to_request_timeout(client, monkeypatch):
+    failure = MeshInterface.MeshInterfaceError("slow transport")
+    failure.__cause__ = TimeoutError("backend read timed out")
+
+    def send(node, message, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("meshtastic.node._send_admin_with_ack_scope", send)
+
+    with pytest.raises(RequestTimeoutError, match="slow transport") as excinfo:
+        Node(client, 2, noProto=False).readConfig("lora")
+
+    assert isinstance(excinfo.value, TimeoutError)
+    assert excinfo.value.nodeNum == 2
+    assert excinfo.value.operation == "get_config_request"
+
+
+def test_copy_value_detaches_map_entries():
+    holder = Struct()
+    holder.update({"key": "value"})
+    field = holder.DESCRIPTOR.fields_by_name["fields"]
+
+    copied = _copy_value(holder.fields, field)
+
+    assert copied == {"key": holder.fields["key"]}
+    assert copied["key"] is not holder.fields["key"]
+
+
+def test_copy_value_rejects_unsupported_type():
+    scalar = config_pb2.Config.DESCRIPTOR.fields_by_name["lora"].message_type
+    with pytest.raises(TypeError, match="Unsupported preference value: object"):
+        _copy_value(object(), scalar.fields_by_name["hop_limit"])
