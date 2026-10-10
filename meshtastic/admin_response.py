@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from meshtastic.protobuf import admin_pb2
+from meshtastic._core_constants import DECODE_ERROR_KEY
+from meshtastic.protobuf import admin_pb2, mesh_pb2
 
 _REQUEST_TO_RESPONSE: dict[str, str] = {
     "get_channel_request": "get_channel_response",
@@ -60,6 +61,23 @@ _MODULE_CONFIG_RESPONSE_SUBTYPE_BY_REQUEST: dict[int, str] = {
 }
 
 
+def _routing_rejection_reason(decoded: dict[str, object]) -> str | int | None:
+    """Return a valid non-success routing reason, never a decode diagnostic."""
+    routing = decoded.get("routing")
+    if not isinstance(routing, dict) or DECODE_ERROR_KEY in routing:
+        return None
+    reason = routing.get("errorReason")
+    if isinstance(reason, str):
+        return (
+            reason
+            if reason != "NONE" and reason in mesh_pb2.Routing.Error.keys()
+            else None
+        )
+    if isinstance(reason, int) and not isinstance(reason, bool):
+        return reason if reason != 0 else None
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class AdminResponseContract:
     """Expected source, response variant, and optional config subtype."""
@@ -67,11 +85,31 @@ class AdminResponseContract:
     expected_sources: frozenset[int]
     response_variant: str
     response_subtype: str | None = None
+    local_node_num: int | None = None
 
     def matches_source(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` came from an allowed response source."""
         source = packet.get("from")
         return isinstance(source, int) and source in self.expected_sources
+
+    def _matches_feedback(self, packet: dict[str, object]) -> bool:
+        """Accept peer feedback or a rejection by the originating router.
+
+        Request IDs are correlated by the response-handler registry before this
+        gate runs. A local ACK only confirms submission; it cannot satisfy a
+        remote read. Local data and decode failures cannot stand in for the peer.
+        """
+        if self.matches_source(packet):
+            return True
+        source = packet.get("from")
+        if self.local_node_num is None or source != self.local_node_num:
+            return False
+        decoded = packet.get("decoded")
+        return (
+            _routing_rejection_reason(decoded) is not None
+            if isinstance(decoded, dict)
+            else False
+        )
 
     def matches(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` satisfies this request's response contract."""
@@ -124,4 +162,5 @@ def contract_for_admin_request(
         expected_sources=frozenset(expected_sources),
         response_variant=response_variant,
         response_subtype=_response_subtype_for_request(request_variant, request),
+        local_node_num=local_node_num,
     )
