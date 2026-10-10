@@ -17,7 +17,7 @@ WORKDIR /build
 
 # Install uv in an isolated tool environment.
 RUN python -m venv /opt/uv && \
-    /opt/uv/bin/pip install --no-cache-dir uv==0.12.23
+    /opt/uv/bin/pip install --no-cache-dir uv==0.12.24
 
 # --- Layer 1: Locked dependencies (cached unless project metadata changes) ---
 COPY pyproject.toml uv.lock README.md LICENSE.md ./
