@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from meshtastic.protobuf import admin_pb2
+from meshtastic._core_constants import DECODE_ERROR_KEY
+from meshtastic.protobuf import admin_pb2, mesh_pb2
 
 _REQUEST_TO_RESPONSE: dict[str, str] = {
     "get_channel_request": "get_channel_response",
@@ -60,6 +61,19 @@ _MODULE_CONFIG_RESPONSE_SUBTYPE_BY_REQUEST: dict[int, str] = {
 }
 
 
+def _routing_rejection_reason(decoded: dict[str, object]) -> str | int | None:
+    """Return a valid non-success routing reason, never a decode diagnostic."""
+    routing = decoded.get("routing")
+    if not isinstance(routing, dict) or DECODE_ERROR_KEY in routing:
+        return None
+    reason = routing.get("errorReason")
+    if isinstance(reason, str):
+        return reason if reason != "NONE" and reason in mesh_pb2.Routing.Error.keys() else None
+    if isinstance(reason, int) and not isinstance(reason, bool):
+        return reason if reason != 0 else None
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class AdminResponseContract:
     """Expected source, response variant, and optional config subtype."""
@@ -87,9 +101,11 @@ class AdminResponseContract:
         if self.local_node_num is None or source != self.local_node_num:
             return False
         decoded = packet.get("decoded")
-        routing = decoded.get("routing") if isinstance(decoded, dict) else None
-        reason = routing.get("errorReason") if isinstance(routing, dict) else None
-        return reason is not None and reason != "NONE"
+        return (
+            _routing_rejection_reason(decoded) is not None
+            if isinstance(decoded, dict)
+            else False
+        )
 
     def matches(self, packet: dict[str, object]) -> bool:
         """Return whether ``packet`` satisfies this request's response contract."""

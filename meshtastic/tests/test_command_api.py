@@ -255,7 +255,7 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
 
 @pytest.mark.parametrize(
     "feedback",
-    ["local_ack", "local_data", "local_decode_error", "other_nak", "other_id"],
+    ["local_ack", "local_data", "local_decode_error", "other_nak", "other_id", "other_nak_legacy", "local_decode_routing", "local_numeric_ack"],
 )
 def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
     client: MeshInterface, monkeypatch: pytest.MonkeyPatch, feedback: str
@@ -263,7 +263,7 @@ def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
     def send(envelope: mesh_pb2.ToRadio) -> None:
         request = envelope.packet
         packet = mesh_pb2.MeshPacket(to=1)
-        setattr(packet, "from", 3 if feedback == "other_nak" else 1)
+        setattr(packet, "from", 3 if feedback in {"other_nak", "other_nak_legacy"} else 1)
         packet.decoded.request_id = (
             request.id ^ 1 if feedback == "other_id" else request.id
         )
@@ -279,7 +279,7 @@ def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
             packet.decoded.payload = mesh_pb2.Routing(
                 error_reason=(
                     mesh_pb2.Routing.Error.NONE
-                    if feedback == "local_ack"
+                    if feedback in {"local_ack", "local_numeric_ack"}
                     else mesh_pb2.Routing.Error.PKI_FAILED
                 )
             ).SerializeToString()

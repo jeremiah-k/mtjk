@@ -13,6 +13,7 @@ from weakref import WeakKeyDictionary
 
 from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._deadline import _current_deadline, _remaining_timeout
+from meshtastic.admin_response import _routing_rejection_reason
 from meshtastic.errors import RequestRejectedError
 from meshtastic.protobuf import mesh_pb2
 
@@ -84,11 +85,10 @@ class _CommandScope:
         if not isinstance(decoded, dict):
             return
         request_id = decoded.get("requestId")
-        routing = decoded.get("routing")
-        if not isinstance(request_id, int) or not isinstance(routing, dict):
+        if not isinstance(request_id, int):
             return
-        reason = routing.get("errorReason", "NONE")
-        if not isinstance(reason, (str, int)) or reason in ("NONE", 0):
+        reason = _routing_rejection_reason(decoded)
+        if reason is None:
             return
         with self._lock:
             if (
@@ -99,6 +99,15 @@ class _CommandScope:
             ):
                 return
             sent = self._sent_packets.get(request_id)
+            if sent is None:
+                return
+            source = packet.get("from")
+            local_node = getattr(self._interface.localNode, "nodeNum", None)
+            if not isinstance(source, int) or source not in (
+                sent.to,
+                local_node if isinstance(local_node, int) else None,
+            ):
+                return
             self._rejection = RequestRejectedError(
                 reason,
                 nodeNum=sent.to if sent is not None else None,
