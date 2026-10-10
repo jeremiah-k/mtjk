@@ -305,6 +305,45 @@ def test_connection_wait_shares_budget(client):
         client.noProto = True
 
 
+@pytest.mark.parametrize("cause", ["stored_failure", "abort_reason"])
+def test_expired_connection_deadline_preserves_more_specific_failure(
+    client, monkeypatch, cause
+):
+    """A fatal failure or abort observed at the deadline beats a generic timeout."""
+    client.noProto = False
+    failure = RuntimeError("transport failed during connect")
+
+    def expire_wait(_seconds):
+        if cause == "stored_failure":
+            client.failure = failure
+        time.sleep(0.01)
+        return False
+
+    monkeypatch.setattr(client.isConnected, "wait", expire_wait)
+    if cause == "abort_reason":
+        monkeypatch.setattr(
+            client,
+            "_connect_wait_should_abort",
+            lambda: "transport closed",
+            raising=False,
+        )
+    try:
+        with _operation_deadline(0.002):
+            if cause == "stored_failure":
+                with pytest.raises(
+                    RuntimeError, match="transport failed during connect"
+                ):
+                    client._wait_connected(timeout=0.1)
+            else:
+                with pytest.raises(
+                    MeshInterface.MeshInterfaceError, match="transport closed"
+                ):
+                    client._wait_connected(timeout=0.1)
+    finally:
+        client.noProto = True
+        client.failure = None
+
+
 def test_full_tx_queue_shares_budget_and_removes_unsent_packet(client, monkeypatch):
     client.noProto = False
     client.isConnected.set()

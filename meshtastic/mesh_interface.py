@@ -1592,7 +1592,6 @@ class MeshInterface:  # pylint: disable=R0902
                         )
                         raise MeshInterface.MeshInterfaceError(abort_reason)
             if not connected:
-                _remaining_timeout(timeout)
                 if self.failure is not None:
                     raise self.failure
                 if callable(abort_check):
@@ -1607,6 +1606,7 @@ class MeshInterface:  # pylint: disable=R0902
                             self._last_disconnect_source or "unknown",
                         )
                         raise MeshInterface.MeshInterfaceError(abort_reason_str)
+                _remaining_timeout(timeout)
                 logger.log(
                     self._connect_failure_log_level(),
                     "Timed out waiting for connection completion (isConnected=%s, failure=%r, last_disconnect_source=%s)",
