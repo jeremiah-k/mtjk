@@ -202,6 +202,36 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
 
 
 @pytest.mark.parametrize(
+    ("source", "reason", "rejected"),
+    [
+        (1, "PKI_FAILED", True),
+        (2, "NOT_AUTHORIZED", True),
+        (3, "PKI_FAILED", False),
+        (0, "PKI_FAILED", False),
+        (1, 0, False),
+        (1, "NONE", False),
+        (1, "malformed routing payload", False),
+    ],
+)
+def test_command_scope_records_only_valid_routing_rejections(
+    client: MeshInterface, source: int, reason: str | int, rejected: bool
+) -> None:
+    """A request ID alone is insufficient to admit a command-owned NAK."""
+    scope = _CommandScope(client, lambda _message: None)
+    request = mesh_pb2.MeshPacket(to=2, id=0xAABB)
+    scope._track(request.id, None, packet=request)
+    scope._record_routing_rejection(
+        {"from": source, "decoded": {"requestId": request.id, "routing": {"errorReason": reason}}}
+    )
+    if rejected:
+        with pytest.raises(RequestRejectedError):
+            scope._raise_if_rejected()
+    else:
+        scope._raise_if_rejected()
+    scope._cleanup()
+
+
+@pytest.mark.parametrize(
     ("action", "operation"),
     [
         (["--get", "lora.hopLimit"], "get_config_request"),
