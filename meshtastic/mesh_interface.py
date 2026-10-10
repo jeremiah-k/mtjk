@@ -653,13 +653,29 @@ class MeshInterface:  # pylint: disable=R0902
         return self._node_view.show_info(file)
 
     def showNodes(
-        self, includeSelf: bool = True, showFields: list[str] | None = None
+        self,
+        includeSelf: bool = True,
+        showFields: list[str] | None = None,
+        *,
+        roleFilter: list[str] | None = None,
+        hwModelFilter: list[str] | None = None,
+        sortField: str | None = None,
+        sortDirection: str | None = None,
+        limit: int = 0,
     ) -> str:
         """Produce a formatted table summarizing known mesh nodes.
 
         Delegates to self.node_view.showNodes().
         """
-        return self._node_view.show_nodes(includeSelf, showFields)
+        return self._node_view.show_nodes(
+            includeSelf,
+            showFields,
+            roleFilter=roleFilter,
+            hwModelFilter=hwModelFilter,
+            sortField=sortField,
+            sortDirection=sortDirection,
+            limit=limit,
+        )
 
     def getNode(
         self,

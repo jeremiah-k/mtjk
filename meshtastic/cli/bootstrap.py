@@ -23,6 +23,7 @@ import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliExit
 from meshtastic.cli.context import _terminate_cli as _terminate_cli_with_exit
+from meshtastic.cli.messaging_service_actions import _node_query_error
 from meshtastic.cli.session_resources import CliSessionResources
 from meshtastic.mesh_interface import MeshInterface
 
@@ -255,6 +256,8 @@ def _validate_and_normalize_args(
     """Validate pre-connect arguments and apply historical default mutations."""
     if cli_config_preview.preview_requested(args):
         _validate_dry_run_invocation(args, parser)
+    if error := _node_query_error(args):
+        parser.error(error)
     if args.quiet and (args.debug or args.listen or args.debuglib):
         parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
     if (args.contact_verified or args.contact_ignore) and not args.contact_qr:

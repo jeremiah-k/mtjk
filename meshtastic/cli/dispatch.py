@@ -141,6 +141,7 @@ def _run_connected_actions(context: CliContext, hooks: DispatchHooks) -> None:
     outcome = context.outcome
     action_error: BaseException | None = None
     try:
+        messaging_service_actions._validate_nodes_query(context, hooks.services)
         _print_connection(context, hooks)
 
         # Action modules are internal implementation packages; these intentionally
@@ -163,7 +164,7 @@ def _run_connected_actions(context: CliContext, hooks: DispatchHooks) -> None:
             device_actions._handle_lockdown_action(context, hooks.device)
             device_actions._handle_key_verification_action(context, hooks.device)
             messaging_service_actions._handle_information_actions(
-                context, hooks.services
+                context, hooks.services, nodes_query_validated=True
             )
 
         if not outcome.stop_processing:

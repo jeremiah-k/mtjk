@@ -746,7 +746,7 @@ def test_handleFromRadio_with_node_info(
             )
             assert re.search(r"682584012", caplog.text, re.MULTILINE)
             # validate some of showNodes() output
-            iface.showNodes()
+            iface.showNodes(showFields=["user.longName", "user.id", "user.shortName"])
             out, err = capsys.readouterr()
             assert re.search(r" 1 ", out, re.MULTILINE)
             assert re.search(r"│ Unknown 67cc │ ", out, re.MULTILINE)
@@ -775,7 +775,7 @@ def test_handleFromRadio_with_node_info_tbeam1(
             assert re.search(r"TBeam 1", caplog.text, re.MULTILINE)
             assert re.search(r"2127707136", caplog.text, re.MULTILINE)
             # validate some of showNodes() output
-            iface.showNodes()
+            iface.showNodes(showFields=["user.longName", "user.id"])
             out, err = capsys.readouterr()
             assert re.search(r" 1 ", out, re.MULTILINE)
             assert re.search(r"│ TBeam 1 │ ", out, re.MULTILINE)
@@ -1376,9 +1376,10 @@ def test_showNodes_exclude_self(
     with caplog.at_level(logging.DEBUG):
         iface = iface_with_nodes
         iface.localNode.nodeNum = 2475227164
-        iface.showNodes()
+        id_fields = ["user.longName", "user.id"]
+        iface.showNodes(showFields=id_fields)
         out_with_self, _ = capsys.readouterr()
-        iface.showNodes(includeSelf=False)
+        iface.showNodes(includeSelf=False, showFields=id_fields)
         out_without_self, _ = capsys.readouterr()
         assert "!9388f81c" in out_with_self
         assert "!9388f81c" not in out_without_self

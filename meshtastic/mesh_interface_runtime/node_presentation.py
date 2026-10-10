@@ -199,7 +199,7 @@ def _format_node_field(
     elif col_name == "position.altitude":
         return _format_numeric_value(raw_value, 0, "m")
     elif col_name == "since":
-        return _format_time_ago(raw_value) or "N/A"
+        return _format_time_ago(raw_value)
     elif col_name == "snr":
         return _format_numeric_value(raw_value, 0, " dB")
     elif col_name == "user.shortName":

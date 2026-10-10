@@ -112,7 +112,13 @@ def test_nodes_show_fields_accepts_schema_fields_absent_from_node_database(
         main()
 
     interface.showNodes.assert_called_once_with(
-        True, ["user.id", "environmentMetrics.temperature"]
+        True,
+        ["user.id", "environmentMetrics.temperature"],
+        roleFilter=None,
+        hwModelFilter=None,
+        sortField=None,
+        sortDirection=None,
+        limit=0,
     )
 
 
@@ -181,7 +187,13 @@ def test_nodes_show_fields_accepts_schema_field_without_node_database(
         main()
 
     interface.showNodes.assert_called_once_with(
-        True, ["environmentMetrics.temperature"]
+        True,
+        ["environmentMetrics.temperature"],
+        roleFilter=None,
+        hwModelFilter=None,
+        sortField=None,
+        sortDirection=None,
+        limit=0,
     )
 
 
@@ -217,3 +229,34 @@ def test_channel_delete_fails_closed_if_exit_seam_returns() -> None:
         "Warning: Need to specify '--ch-index' for '--ch-del'.", 1
     )
     interface.getNode.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize(
+    "query_args",
+    [
+        ["--role", "client"],
+        ["--hwmodel", "rak"],
+        ["--sort", "name"],
+        ["--limit", "1"],
+        ["--nodes", "--sort", "snr:sideways"],
+        ["--nodes", "--sort", ""],
+        ["--nodes", "--limit", "-1"],
+        ["--nodes", "--role", ",,"],
+    ],
+)
+def test_invalid_node_queries_fail_before_transport_or_reboot(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    query_args: list[str],
+) -> None:
+    monkeypatch.setattr(
+        sys, "argv", ["meshtastic", "--host", "radio", "--reboot", *query_args]
+    )
+    with patch("meshtastic.tcp_interface.TCPInterface") as transport:
+        with pytest.raises(SystemExit) as error:
+            main()
+    assert error.value.code == 2
+    transport.assert_not_called()
+    assert "error:" in capsys.readouterr().err

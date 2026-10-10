@@ -67,6 +67,7 @@ class MessagingServiceHooks:
     remote_hardware_client: Callable[[Any], Any]
     get_pref: GetPrefHook
     validate_cli_show_fields: Callable[[Any, list[str]], None]
+    validate_cli_sort_field: Callable[[Any, str], None]
     newer_version: Callable[[], str | None]
     install_upgrade_hint: str
     powermon_available: Callable[[], bool]
@@ -355,12 +356,107 @@ def _call_get_pref(
     return get_pref(node, name, cli_print=cli_print)
 
 
+def _parse_sort_spec(spec: str) -> tuple[str, str | None]:
+    """Split a --sort value into a field name and optional asc/desc direction.
+
+    Parameters
+    ----------
+    spec : str
+        Raw --sort value, for example "snr", "hwmodel:asc", or
+        "deviceMetrics.batteryLevel:desc".
+
+    Returns
+    -------
+    tuple[str, str | None]
+        The field token and the lowercased direction, or None when no
+        direction suffix was given.
+
+    Raises
+    ------
+    ValueError
+        When the field is empty or the direction suffix is not asc/desc.
+    """
+    field, separator, direction = spec.partition(":")
+    field = field.strip()
+    direction = direction.strip().lower()
+    if not field:
+        raise ValueError(f"--sort requires a field name, got '{spec}'")
+    if separator and direction not in ("asc", "desc"):
+        raise ValueError(f"--sort direction must be 'asc' or 'desc', got '{direction}'")
+    return field, direction if separator else None
+
+
+def _clean_filter_patterns(values: list[str] | None) -> list[str] | None:
+    """Normalize comma-split filter values to stripped, casefolded substrings."""
+    if not values:
+        return None
+    cleaned = [value.strip().casefold() for value in values]
+    return [value for value in cleaned if value] or None
+
+
+def _node_query_error(args: Any) -> str | None:
+    """Validate query syntax before a transport or mutating action can run."""
+    if getattr(args, "dry_run", False):
+        return None
+    flags = [
+        flag
+        for name, flag in (
+            ("role", "--role"),
+            ("hwmodel", "--hwmodel"),
+            ("sort", "--sort"),
+            ("limit", "--limit"),
+        )
+        if getattr(args, name, None) is not None
+    ]
+    if flags and not getattr(args, "nodes", False):
+        return f"{', '.join(flags)} can only be used with --nodes"
+    if (limit := getattr(args, "limit", None)) is not None and limit < 0:
+        return "--limit expects a non-negative integer"
+    for name in ("role", "hwmodel"):
+        values = getattr(args, name, None)
+        if values is not None and not _clean_filter_patterns(values):
+            return f"--{name} requires at least one non-empty filter value"
+    if (sort := getattr(args, "sort", None)) is not None:
+        try:
+            _parse_sort_spec(sort)
+        except ValueError as error:
+            return str(error)
+    return None
+
+
+def _validate_nodes_query(context: CliContext, hooks: MessagingServiceHooks) -> None:
+    """Reject invalid embedded queries before connected device actions."""
+    if error := _node_query_error(context.args):
+        _terminate_cli(hooks.cli_exit, error, 1)
+    if getattr(context.args, "dry_run", False) or not getattr(
+        context.args, "nodes", False
+    ):
+        return
+    if context.args.dest != BROADCAST_ADDR:
+        _terminate_cli(
+            hooks.cli_exit, "Showing node list of a remote node is not supported.", 1
+        )
+    if getattr(context.args, "show_fields", None):
+        hooks.validate_cli_show_fields(context.interface, context.args.show_fields)
+    if getattr(context.args, "sort", None) is not None:
+        field, _direction = _parse_sort_spec(context.args.sort)
+        hooks.validate_cli_sort_field(context.interface, field)
+
+
 def _handle_information_actions(
-    context: CliContext, hooks: MessagingServiceHooks
+    context: CliContext,
+    hooks: MessagingServiceHooks,
+    *,
+    nodes_query_validated: bool = False,
 ) -> None:
     """Handle info, preference reads, node listing, and show-field validation."""
     args = context.args
     interface = context.interface
+    if error := _node_query_error(args):
+        context.outcome.close_now = True
+        hooks.cli_print(error)
+        context.outcome.stop_processing = True
+        return
 
     if args.info:
         # Requested results stay visible even under --quiet and remain
@@ -408,9 +504,23 @@ def _handle_information_actions(
             hooks.cli_print("Showing node list of a remote node is not supported.")
             context.outcome.stop_processing = True
             return
-        if args.show_fields:
+        if args.show_fields and not nodes_query_validated:
             hooks.validate_cli_show_fields(interface, args.show_fields)
-        interface.showNodes(True, args.show_fields)
+        sort_field: str | None = None
+        sort_direction: str | None = None
+        if args.sort is not None:
+            sort_field, sort_direction = _parse_sort_spec(args.sort)
+            if not nodes_query_validated:
+                hooks.validate_cli_sort_field(interface, sort_field)
+        interface.showNodes(
+            True,
+            args.show_fields,
+            roleFilter=_clean_filter_patterns(args.role),
+            hwModelFilter=_clean_filter_patterns(args.hwmodel),
+            sortField=sort_field or None,
+            sortDirection=sort_direction,
+            limit=args.limit if args.limit is not None else 0,
+        )
 
     if args.show_fields and not args.nodes:
         context.outcome.close_now = True
