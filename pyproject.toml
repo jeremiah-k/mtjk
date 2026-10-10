@@ -93,7 +93,7 @@ required-version = ">=0.12.22"
 default-groups = ["dev"]
 
 [tool.uv.sources]
-# Immutable source pin; see DEPENDENCY_POLICY.md before changing it.
+# Immutable source pin; see docs/maintainers/dependency-policy.md before changing it.
 riden = { git = "https://github.com/geeksville/riden.git", rev = "27fd58f069a089676dcaaea2ccb8dc8d24e4c6d9" }
 
 [tool.uv.build-backend]

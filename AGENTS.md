@@ -31,9 +31,9 @@ This document tracks coding standards and API refactoring decisions for the Mesh
 ## BLE API Refactoring Decisions
 
 Canonical compatibility/deprecation inventory now lives in
-`COMPATIBILITY.md`.
-`CONTRIBUTING.md` keeps the policy summary and links to the inventory.
-Use `COMPATIBILITY.md` as the single source of truth for:
+`docs/compatibility.md`.
+`docs/contributing.md` keeps the policy summary and links to the inventory.
+Use `docs/compatibility.md` as the single source of truth for:
 
 - pinned BLE baseline (`2.7.7`),
 - required historical BLE compatibility shims (including
@@ -91,11 +91,11 @@ Quick inventory command:
 
 ### Compatibility Alias Inventory (source of truth)
 
-- Treat `COMPATIBILITY.md` as authoritative for maintained compatibility names,
+- Treat `docs/compatibility.md` as authoritative for maintained compatibility names,
   warning policy, and status.
 - Treat `COMPAT_STABLE_SHIM` / `COMPAT_DEPRECATE` markers as the grep-able
   implementation inventory for intentionally maintained aliases.
-- If a symbol is not listed in `COMPATIBILITY.md` and is not marked with a
+- If a symbol is not listed in `docs/compatibility.md` and is not marked with a
   `COMPAT_*` marker in code, do not add compatibility aliases by default.
 - For `Node.startOTA`, canonical first-party usage is
   `startOTA(mode=..., ota_file_hash=...)`; legacy aliases (`ota_mode`,

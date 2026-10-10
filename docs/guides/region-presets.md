@@ -212,7 +212,7 @@ provided alongside them.
 Unknown enum values should remain representable as integers. Do not require a current
 Python enum name before storing or displaying a firmware-provided capability.
 
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the repository-wide naming and
+See [COMPATIBILITY.md](../compatibility.md) for the repository-wide naming and
 replacement-compatibility policy.
 
 ## Adding or changing capability behavior

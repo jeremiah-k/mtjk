@@ -3,7 +3,7 @@
 These tests verify that old documented import paths still work, ensuring
 backward compatibility for users' existing code after the major refactor.
 
-Reference: COMPATIBILITY.md for documented compatibility aliases.
+Reference: docs/compatibility.md for documented compatibility aliases.
 """
 
 # pylint: disable=no-name-in-module
@@ -138,14 +138,14 @@ class TestNodeRuntimeImports:
     Only explicitly documented compatibility exports (like toNodeNum) are
     guaranteed stable. Underscore-prefixed internals may change without notice.
 
-    Reference: COMPATIBILITY.md "Runtime Import Compatibility" section.
+    Reference: docs/compatibility.md "Runtime Import Compatibility" section.
     """
 
     def test_to_node_num_export_from_settings_runtime(self) -> None:
         """Test that toNodeNum is exported from settings_runtime for mocking compatibility.
 
         This is a COMPAT_STABLE_SHIM explicitly maintained for test ecosystem
-        compatibility. Documented in COMPATIBILITY.md.
+        compatibility. Documented in docs/compatibility.md.
         """
         from meshtastic.node_runtime.settings_runtime import (  # pylint: disable=import-outside-toplevel
             toNodeNum,

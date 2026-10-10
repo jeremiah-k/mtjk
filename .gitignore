@@ -31,7 +31,6 @@ junit.xml
 
 # === Project ===
 README
-docs/
 log_*
 nanopb-*
 .worktrees/

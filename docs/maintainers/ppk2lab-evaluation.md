@@ -1,4 +1,6 @@
-# PPK2 Backend Evaluation: ppk2lab (experiment)
+# PPK2 backend evaluation (parked experiment)
+
+This is a dated investigation record, not an endorsed or active backend migration. Recheck package versions, hardware support, and policy before reopening it.
 
 Status: **parked (2026-09-29) — no PPK2 hardware is available for the
 evaluation.** The production powermon backend remains `ppk2-api` 0.9.2 from

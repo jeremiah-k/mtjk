@@ -64,22 +64,9 @@ example is error handling: library code generally raises exceptions instead of
 terminating the host process with `sys.exit()`. Safer defaults and internal
 logging behavior may also differ from older upstream releases.
 
-Local CLI configuration writes are verified against fresh device state. After a
-local `--set` batch is written and committed, and after a local `--configure`
-reconnect/reload, the CLI re-reads the affected `LocalConfig`/`LocalModuleConfig`
-sections from the device and compares them to the requested values. A value
-mismatch, a section that never reloads, or a failed verification readback exits
-nonzero with an error naming the affected fields/sections (for example
-`ERROR: --set was sent, but fresh device state reports different values for:
-<fields>. The device did not apply the requested value(s).` or
-`ERROR: configuration was sent, but fresh device state did not confirm the
-requested settings.`); a verified apply prints a confirming line. `--dry-run`
-never writes or verifies, noProto `--set` runs skip verification (exit 0)
-and never report a device-verified success, and remote (`--dest`) targets keep
-their existing behavior. This changes CLI exit behavior only; public library
-setters keep their timing and return values.
+Local CLI configuration writes use fresh device readback where supported. A failed or incomplete verification is reported as a failed CLI operation, rather than a confirmed apply. Dry runs and remote operations have different verification limits; see [CLI configuration and verification](docs/guides/cli-configuration.md) for those distinctions.
 
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the maintained compatibility
+See [COMPATIBILITY.md](docs/compatibility.md) for the maintained compatibility
 contract and known behavioral differences.
 
 ## Notable work maintained here
@@ -99,8 +86,8 @@ work include:
   features;
 - simplified Trusted Publisher-based PyPI releases.
 
-For current design details, see [ARCHITECTURE.md](ARCHITECTURE.md). BLE-specific
-implementation and integration notes live in [BLE.md](BLE.md).
+For current design details, see [ARCHITECTURE.md](docs/architecture.md). BLE-specific
+implementation and integration notes live in [BLE.md](docs/guides/ble.md).
 
 ## Installation
 
@@ -162,7 +149,7 @@ uv tool install "git+https://github.com/jeremiah-k/mtjk.git@develop"
 
 If `mtjk` is not found after installation, run `uv tool update-shell` and
 restart your shell. For development inside a cloned checkout, use the
-project environment described in [CONTRIBUTING.md](CONTRIBUTING.md#local-setup-and-validation).
+project environment described in [CONTRIBUTING.md](docs/contributing.md#local-setup-and-validation).
 
 ## Using mtjk as a Python dependency
 
@@ -211,65 +198,13 @@ with meshtastic.serial_interface.SerialInterface() as interface:
 
 There is intentionally no `import mtjk` package.
 
-### Query cached nodes from Python
+### Working with cached nodes
 
-`MeshInterface.queryNodes()` returns detached node records with the same filters
-and sorting as the node table, without printing or sending radio requests:
-
-```python
-result = interface.queryNodes(
-    includeSelf=False,
-    roleFilter=["client"],
-    hwModelFilter=["rak"],
-    sortField="last_seen",
-    limit=20,
-)
-for node in result.nodes:
-    print(node["num"], node.get("user", {}).get("longName"))
-print(result.returned, result.matched, result.total)
-```
-
-The records are copies, including nested dictionaries and protobufs. Changes to
-one result cannot change the client cache, and receive updates cannot change a
-captured result. A zero limit returns every match. Filters accept alternatives
-within each field and combine role and hardware filters with AND. Unknown sort
-fields and invalid query options raise `ValueError`.
-
-For machine-readable command output, use `mtjk --nodes --json`, optionally with
-`--role`, `--hwmodel`, `--sort`, and `--limit`. It emits one document containing
-`schema_version: 1`, `captured_at` (Unix seconds), `total` (after self selection),
-`matched` (before limiting), `returned`, `truncated`, and `nodes`. Node keys retain
-the cache's camelCase spelling; measurements and timestamps remain numeric.
-`result.toDict()` produces the same document in Python. Bytes use `base64:` plus
-Base64, protobuf values use protobuf JSON conventions, and non-finite numbers
-become null. Internal packet payloads and administrative session keys are omitted
-from JSON. Other actions and table-only `--show-fields` cannot be combined with
-`--nodes --json`.
+`MeshInterface.queryNodes()` returns detached cached node observations and applies filters without making a radio request. `mtjk --nodes --json` exposes the same versioned data for command-line consumers. See [Cached node queries](docs/guides/node-queries.md) for examples, filtering, numeric values, JSON normalization, and the limits of cached data.
 
 ## Documentation
 
-The maintained project documentation is intentionally small:
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) — current architecture and design
-  boundaries;
-- [COMPATIBILITY.md](COMPATIBILITY.md) — compatibility policy, aliases, and
-  intentional behavioral differences;
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local maintenance workflow and CI checks;
-- [BLE.md](BLE.md) — detailed BLE architecture and integration guidance;
-- [EMBEDDED_COMMANDS.md](EMBEDDED_COMMANDS.md) — execute CLI actions on a
-  caller-owned connection;
-- [CONFIGURATION_READS.md](CONFIGURATION_READS.md) — typed synchronous reads,
-  timeout semantics, and error handling;
-- [ADMIN_RESPONSE_CONTRACTS.md](ADMIN_RESPONSE_CONTRACTS.md)
-  — admin request/response invariants;
-- [LOCKDOWN.md](LOCKDOWN.md) — lockdown/authentication
-  behavior;
-- [REGION_PRESETS.md](REGION_PRESETS.md) — region-preset
-  API behavior.
-
-Older refactor plans, dependency campaign notes, and device-specific manual test
-logs are intentionally not maintained as active documentation; Git history is
-the source for that development history.
+Start with the [documentation index](docs/index.md) for setup, library APIs, CLI behavior, compatibility, maintenance, and implementation references. The root README is an introduction, not a second documentation tree.
 
 ## Support
 
@@ -279,14 +214,4 @@ Report `mtjk`-specific issues here:
 
 Please do not file `mtjk`-specific issues with upstream maintainers.
 
-## Release notes for maintainers
-
-- Versions follow the upstream version with a `.postN` suffix, for example
-  `2.7.11.post8`.
-- Publish a GitHub release with tag `vX.Y.Z[.postN]` (or the same version without
-  the leading `v`).
-- The PyPI workflow verifies that the release tag matches `pyproject.toml`, runs
-  the standard `python -m build`, and publishes the generated source and wheel
-  distributions with PyPI Trusted Publishing.
-- The PyPI Trusted Publisher is configured for
-  `jeremiah-k/mtjk` + `.github/workflows/pypi-publish.yml` + `pypi-release`.
+Release procedures and publishing requirements are documented in [Releases](docs/maintainers/releases.md).
