@@ -110,7 +110,7 @@ class _CommandScope:
                 return
             self._rejection = RequestRejectedError(
                 reason,
-                nodeNum=sent.to if sent is not None else None,
+                nodeNum=sent.to,
                 requestId=request_id,
                 operation="command",
             )

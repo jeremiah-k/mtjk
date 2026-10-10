@@ -92,7 +92,7 @@ class AdminResponseContract:
         source = packet.get("from")
         return isinstance(source, int) and source in self.expected_sources
 
-    def _matches_feedback(self, packet: dict[str, object]) -> bool:
+    def matches_feedback(self, packet: dict[str, object]) -> bool:
         """Accept peer feedback or a rejection by the originating router.
 
         Request IDs are correlated by the response-handler registry before this

@@ -197,9 +197,9 @@ completion is decided by the correlated data response. These methods send with
 A routing ACK is never converted into or returned as the requested response object.
 
 Routing feedback is classified once per inbound packet: a routing payload whose
-`errorReason` key is absent or equal to `NONE` is a routing ACK; every other
-value (including malformed ones, such as a decode-failed marker) is a routing
-NAK; a packet without a routing payload is data.
+`errorReason` key is absent or equal to `NONE`, `0`, or `None` is a routing ACK;
+every other value (including malformed ones, such as a decode-failed marker) is a
+routing NAK; a packet without a routing payload is data.
 
 A routing NAK for the request id is not the requested protobuf, so the typed
 handler is consumed and its callback receives the NAK packet itself as the

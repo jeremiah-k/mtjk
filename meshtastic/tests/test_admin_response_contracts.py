@@ -93,7 +93,7 @@ def test_remote_contract_distinguishes_origin_rejection_from_peer_feedback(
     )
     assert contract is not None
     packet = {"from": source, "decoded": decoded}
-    assert contract._matches_feedback(packet) is allowed
+    assert contract.matches_feedback(packet) is allowed
     assert contract.matches_source(packet) is (source == 0x1234)
 
 
@@ -105,7 +105,7 @@ def test_remote_contract_without_local_identity_rejects_other_sources() -> None:
         local_node_num=None,
     )
     assert contract is not None
-    assert not contract._matches_feedback(
+    assert not contract.matches_feedback(
         {"from": 0, "decoded": {"routing": {"errorReason": "PKI_FAILED"}}}
     )
 
