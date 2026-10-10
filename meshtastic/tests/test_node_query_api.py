@@ -220,3 +220,35 @@ def test_cli_json_rejects_other_actions_before_dispatch(interface, extra):
         with pytest.raises(SystemExit):
             _dispatch_json(interface, ["--nodes", "--json", *extra])
     actions.assert_not_called()
+
+
+def test_non_boolean_include_self_is_rejected(interface):
+    with pytest.raises(ValueError, match="includeSelf must be a boolean"):
+        interface.queryNodes(includeSelf="yes")
+
+
+def test_json_encodes_list_typed_observations(interface):
+    interface.nodesByNum[5] = {
+        "num": 5,
+        "user": {"longName": "Listed", "role": "CLIENT"},
+        "lastHeard": 40,
+        "positionQueue": [1, 2.5, "x"],
+    }
+
+    document = interface.queryNodes(includeSelf=False).toDict()
+
+    encoded = next(node for node in document["nodes"] if node["num"] == 5)
+    assert encoded["positionQueue"] == [1, 2.5, "x"]
+
+
+def test_json_rejects_unsupported_observations(interface):
+    interface.nodesByNum[6] = {
+        "num": 6,
+        "user": {"longName": "Opaque", "role": "CLIENT"},
+        "lastHeard": 50,
+        "handle": object(),
+    }
+    result = interface.queryNodes(includeSelf=False)
+
+    with pytest.raises(TypeError, match="Cannot encode node value of type object"):
+        result.toDict()
