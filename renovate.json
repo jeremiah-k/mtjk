@@ -38,7 +38,7 @@
       "allowedVersions": "<3"
     },
     {
-      "description": "Manually reviewed 2026-09-16 (see DEPENDENCY_POLICY.md): release-sparse but source-active dependencies; suppress the release-age abandonment signal",
+      "description": "Manually reviewed 2026-09-16 (see docs/maintainers/dependency-policy.md): release-sparse but source-active dependencies; suppress the release-age abandonment signal",
       "matchManagers": ["pep621"],
       "matchPackageNames": ["pyserial", "segno"],
       "abandonmentThreshold": null

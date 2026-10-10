@@ -1,7 +1,7 @@
 """Regression tests pinning typed ADMIN_APP handler lifetime.
 
 These tests are permanent pins for the correlation contracts in
-ADMIN_RESPONSE_CONTRACTS.md as they apply to typed (matcher-bound) admin
+docs/internals/admin-response-contracts.md as they apply to typed (matcher-bound) admin
 getter handlers:
 
 1. A routing ACK leaves the typed handler pending for the correlated data

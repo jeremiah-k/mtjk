@@ -1,4 +1,3 @@
-# Development Guide
+# Development guide
 
-The canonical development guide and pull-request policy live at the repository
-root: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+The current maintainer workflow and pull-request policy are in the [development guide](../docs/contributing.md).

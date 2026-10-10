@@ -35,3 +35,9 @@ All request failures derive from RequestError, which is also a
 MeshInterface.MeshInterfaceError. RequestTimeoutError is also a TimeoutError.
 Use adminIndex=0 to force channel zero, or omit it to select the configured
 admin channel.
+
+## Choosing the read path
+
+These APIs request fresh responses; a cached protobuf section is not evidence that a particular request completed. Use `queryNodes` for cached observations instead. Embedded callers who want CLI-style text and validation can use `executeCommand`, but its `CommandResult.output` is not a typed configuration document.
+
+A timeout applies to waits managed by the library, not to every possible blocking operation in a transport backend. A timed-out write or request can still have reached a device; do not assume rollback.

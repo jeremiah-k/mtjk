@@ -320,7 +320,7 @@ NOISE_EXPORTS = {
     # Removing an established root export (anything imported, assigned, or
     # served by a documented lazy __getattr__ alias in __init__.py — e.g.
     # `fixme`, the lazy `meshtastic.serial` alias) is a breaking change and
-    # must never be silenced here. See COMPATIBILITY.md.
+    # must never be silenced here. See docs/compatibility.md.
     # stdlib modules imported in __init__.py - implementation details, not public API
     "*",
     "base64",

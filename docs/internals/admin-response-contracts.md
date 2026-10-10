@@ -271,7 +271,7 @@ node record for `adminSessionPassKey`.
 The admin transport copies the caller's protobuf before adding the passkey so the
 caller's message object is not mutated as a side effect of sending it.
 
-This is separate from the USB lockdown flow documented in [LOCKDOWN.md](LOCKDOWN.md),
+This is separate from the USB lockdown flow documented in [LOCKDOWN.md](../guides/lockdown.md),
 which intentionally uses a different local, unencrypted transport contract.
 
 ## Adding a new administrative getter
@@ -308,7 +308,7 @@ At the same time, the compatibility boundary is preserved where practical:
 - unknown/unmapped admin requests fall back to ordinary request-ID correlation rather
   than becoming unusable.
 
-See the repository-level [COMPATIBILITY.md](COMPATIBILITY.md) for the broader
+See the repository-level [COMPATIBILITY.md](../compatibility.md) for the broader
 compatibility policy.
 
 ## Receipt-proof metadata

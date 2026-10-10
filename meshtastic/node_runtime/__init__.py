@@ -3,7 +3,7 @@
 The ``node_runtime`` package is an implementation detail and its ``__all__``
 list is not public API. Runtime compatibility guarantees are limited to entries
 in ``meshtastic/_runtime_compatibility.json`` and documented in
-``COMPATIBILITY.md``.
+``docs/compatibility.md``.
 """
 
 from .shared import (

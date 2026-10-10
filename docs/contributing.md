@@ -8,25 +8,9 @@
 
 ## Maintained documentation
 
-Keep documentation changes focused on the small set of files that describe the
-current project rather than creating new refactor journals or one-off checklists:
+Use the [documentation index](index.md) as the navigation entry point. Document public behavior near the corresponding API guide, compatibility rules in [Compatibility](compatibility.md), and implementation constraints in [Architecture](architecture.md) or the [admin response contracts](internals/admin-response-contracts.md). Keep dated experiments visibly labeled as such, and use Git history for superseded temporary plans.
 
-- `README.md` — project purpose, installation, status, and user-facing overview;
-- `ARCHITECTURE.md` — current internal boundaries and ownership model;
-- `COMPATIBILITY.md` — public compatibility policy and alias inventory;
-- `CONTRIBUTING.md` — maintenance workflow and validation commands;
-- `DEPENDENCY_POLICY.md` — dependency health policy: Renovate abandonment
-  exceptions (with revisit dates) and the rules for Git source dependencies;
-- `BLE.md` — detailed BLE architecture and integration contracts;
-- `PPK2LAB_EVALUATION.md` — living evaluation plan for a possible ppk2lab
-  powermon backend; retire it into git history once the backend decision is
-  made;
-- subsystem contract documents under `meshtastic/` where the contract belongs
-  next to the implementation.
-
-Git history is the record for completed refactor plans, dependency campaigns,
-and temporary investigation notes. Do not keep those files as active policy once
-the work has landed.
+Documentation should describe verified behavior and limits without implying this fork is a replacement for upstream project governance or support.
 
 ## Repository resources
 
@@ -62,11 +46,11 @@ source of truth for `mtjk` maintenance policy.
 Use this policy for all code changes (especially AI-assisted refactors):
 
 - Canonical compatibility/deprecation inventory is maintained in
-  `COMPATIBILITY.md`.
+  `docs/compatibility.md`.
 - New public API names should prefer `camelCase` (for example `sendText`,
   `sendData`).
 - Existing public compatibility names must remain callable, including legacy BLE
-  `snake_case` names documented in `COMPATIBILITY.md`.
+  `snake_case` names documented in `docs/compatibility.md`.
 - Internal helpers should be underscore-prefixed `snake_case` (for example
   `_send_packet`).
 - Do not break existing public API names for compatibility.
@@ -102,7 +86,7 @@ Use this pinned baseline for BLE compatibility decisions:
 - Baseline file: `meshtastic/ble_interface.py`
 
 Historical required BLE wrappers and warning policy are tracked in
-`COMPATIBILITY.md` under **BLE Historical Baseline (2.7.7)**.
+`docs/compatibility.md` under **BLE Historical Baseline (2.7.7)**.
 
 ## Local setup and validation
 
@@ -333,4 +317,4 @@ For stricter type checking (optional, not required by CI):
 uv run --locked mypy meshtastic/ --strict
 ```
 
-For more commands see [CI workflow](.github/workflows/ci.yml)
+For more commands see [CI workflow](../.github/workflows/ci.yml)

@@ -272,7 +272,7 @@ Library callers instead receive normal Python exceptions:
 - `TimeoutError` when no status arrives and reboot-without-status is not allowed.
 
 The library does not terminate the process. This follows the repository-wide error
-policy described in [COMPATIBILITY.md](COMPATIBILITY.md).
+policy described in [COMPATIBILITY.md](../compatibility.md).
 
 ## Compatibility and maintenance rules
 

@@ -619,7 +619,7 @@ When adding/changing compatibility behavior:
 5. Keep `.github/workflows/ci.yml` compatibility validation green:
    - inventory marker check (`rg -n "COMPAT_STABLE_SHIM|COMPAT_DEPRECATE" meshtastic`)
    - compatibility-focused pytest targets for alias callability and warning behavior
-6. Run full project checks as documented in `CONTRIBUTING.md`.
+6. Run full project checks as documented in `docs/contributing.md`.
 7. If a compatibility symbol is listed in both BLE status and module-mapping
    tables, update both entries in the same change to keep inventories aligned.
 

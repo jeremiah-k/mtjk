@@ -55,7 +55,7 @@ methods are thin delegates into narrower runtimes.
 - transport-facing collaborator ports.
 
 The runtime package is internal unless a specific compatibility export is listed
-in `COMPATIBILITY.md` and `meshtastic/_runtime_compatibility.json`.
+in `docs/compatibility.md` and `meshtastic/_runtime_compatibility.json`.
 
 ### Node
 
@@ -120,7 +120,7 @@ The public `meshtastic.ble_interface` module remains a compatibility facade.
 Historical `BLEInterface.BLEError` catching behavior and its `kind` metadata are
 preserved while newer typed BLE exceptions provide more specific context.
 
-See [BLE.md](BLE.md) for detailed BLE contracts, locking rules, and integration
+See [BLE.md](guides/ble.md) for detailed BLE contracts, locking rules, and integration
 examples.
 
 ## Concurrency and lifecycle ownership
@@ -161,7 +161,7 @@ Internal runtime modules, underscore-prefixed helpers, and collaborator classes
 are free to change unless they are explicitly promoted to a compatibility
 contract.
 
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the detailed policy.
+See [COMPATIBILITY.md](compatibility.md) for the detailed policy.
 
 ## Error handling
 
@@ -207,7 +207,7 @@ as cleanup-only tools. The maintained checks include:
 - API baseline and import-compatibility checks;
 - simulator and hardware smoke lanes for transport/firmware behavior.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands that mirror CI.
+See [CONTRIBUTING.md](contributing.md) for the commands that mirror CI.
 
 ## Upstream relationship
 

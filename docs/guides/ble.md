@@ -1,6 +1,6 @@
 # BLE Integration Guide
 
-This document is the BLE-specific companion to [ARCHITECTURE.md](ARCHITECTURE.md).
+This document is the BLE-specific companion to [ARCHITECTURE.md](../architecture.md).
 It covers the current BLE implementation, common field pitfalls, and recommended
 patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 
@@ -86,7 +86,7 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 ### Key design choices
 
 - **Process-wide address gate.** A registry in
-  [`meshtastic/interfaces/ble/gating.py`](meshtastic/interfaces/ble/gating.py)
+  [`meshtastic/interfaces/ble/gating.py`](../../meshtastic/interfaces/ble/gating.py)
   prevents two live interfaces from connecting to the same normalized BLE
   address at the same time. Stale (dead-owner) claims are pruned automatically
   after `BLEConfig.CONNECTION_GATE_UNOWNED_STALE_SECONDS` (default 300 s).
@@ -95,7 +95,7 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 - **Direct-first explicit address semantics.** When an address or identifier is
   available, a direct connect is tried first (see
   `BLEConfig.DIRECT_CONNECT_TIMEOUT_SECONDS` in
-  [`meshtastic/interfaces/ble/constants.py`](meshtastic/interfaces/ble/constants.py),
+  [`meshtastic/interfaces/ble/constants.py`](../../meshtastic/interfaces/ble/constants.py),
   default 12 s).
   - For caller-explicit BLE addresses (`AA:BB:CC:DD:EE:FF` passed via
     `connect(address=...)`), retries stay direct-only and do **not** fall back
@@ -155,7 +155,7 @@ When code paths must hold multiple BLE locks, always acquire in this order to
 prevent deadlocks:
 
 1. Per-address lock (`_addr_lock_context` in
-   [`meshtastic/interfaces/ble/gating.py`](meshtastic/interfaces/ble/gating.py))
+   [`meshtastic/interfaces/ble/gating.py`](../../meshtastic/interfaces/ble/gating.py))
 2. Global registry lock (`_REGISTRY_LOCK` in the same module) only for short,
    non-blocking registry updates
 3. Interface connect lock (`_connect_lock`)
@@ -281,7 +281,7 @@ dispatcher.report_notification_handler_error("Error in FROMNUM notification hand
 ### `RetryPolicy` / `ReconnectPolicy`
 
 The BLE read loop and auto-reconnect use policies from
-[`meshtastic/interfaces/ble/policies.py`](meshtastic/interfaces/ble/policies.py).
+[`meshtastic/interfaces/ble/policies.py`](../../meshtastic/interfaces/ble/policies.py).
 
 Use `RetryPolicy` for bounded retry decisions in the receive/read paths.
 
