@@ -68,7 +68,11 @@ def _routing_rejection_reason(decoded: dict[str, object]) -> str | int | None:
         return None
     reason = routing.get("errorReason")
     if isinstance(reason, str):
-        return reason if reason != "NONE" and reason in mesh_pb2.Routing.Error.keys() else None
+        return (
+            reason
+            if reason != "NONE" and reason in mesh_pb2.Routing.Error.keys()
+            else None
+        )
     if isinstance(reason, int) and not isinstance(reason, bool):
         return reason if reason != 0 else None
     return None

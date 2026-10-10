@@ -221,7 +221,10 @@ def test_command_scope_records_only_valid_routing_rejections(
     request = mesh_pb2.MeshPacket(to=2, id=0xAABB)
     scope._track(request.id, None, packet=request)
     scope._record_routing_rejection(
-        {"from": source, "decoded": {"requestId": request.id, "routing": {"errorReason": reason}}}
+        {
+            "from": source,
+            "decoded": {"requestId": request.id, "routing": {"errorReason": reason}},
+        }
     )
     if rejected:
         with pytest.raises(RequestRejectedError):
@@ -285,7 +288,16 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
 
 @pytest.mark.parametrize(
     "feedback",
-    ["local_ack", "local_data", "local_decode_error", "other_nak", "other_id", "other_nak_legacy", "local_decode_routing", "local_numeric_ack"],
+    [
+        "local_ack",
+        "local_data",
+        "local_decode_error",
+        "other_nak",
+        "other_id",
+        "other_nak_legacy",
+        "local_decode_routing",
+        "local_numeric_ack",
+    ],
 )
 def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
     client: MeshInterface, monkeypatch: pytest.MonkeyPatch, feedback: str
@@ -293,7 +305,9 @@ def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
     def send(envelope: mesh_pb2.ToRadio) -> None:
         request = envelope.packet
         packet = mesh_pb2.MeshPacket(to=1)
-        setattr(packet, "from", 3 if feedback in {"other_nak", "other_nak_legacy"} else 1)
+        setattr(
+            packet, "from", 3 if feedback in {"other_nak", "other_nak_legacy"} else 1
+        )
         packet.decoded.request_id = (
             request.id ^ 1 if feedback == "other_id" else request.id
         )
