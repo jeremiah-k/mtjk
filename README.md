@@ -221,6 +221,8 @@ The maintained project documentation is intentionally small:
   intentional behavioral differences;
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local maintenance workflow and CI checks;
 - [BLE.md](BLE.md) — detailed BLE architecture and integration guidance;
+- [CONFIGURATION_READS.md](CONFIGURATION_READS.md) — typed synchronous reads,
+  timeout semantics, and error handling;
 - [ADMIN_RESPONSE_CONTRACTS.md](ADMIN_RESPONSE_CONTRACTS.md)
   — admin request/response invariants;
 - [LOCKDOWN.md](LOCKDOWN.md) — lockdown/authentication

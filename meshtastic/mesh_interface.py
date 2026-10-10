@@ -26,6 +26,7 @@ from meshtastic._core_constants import (
     LAST_DISCONNECT_SOURCE_TYPE_ERROR,
     NODELESS_WANT_CONFIG_ID,
 )
+from meshtastic._deadline import _remaining_timeout
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
 from meshtastic._publishing import publishing_thread as publishingThread
 from meshtastic._response_types import ResponseHandler
@@ -1569,7 +1570,7 @@ class MeshInterface:  # pylint: disable=R0902
             Re-raises a stored fatal exception if one occurred during connection.
         """
         if not self.noProto:
-            deadline = time.monotonic() + timeout
+            deadline = time.monotonic() + _remaining_timeout(timeout)
             abort_check = getattr(self, "_connect_wait_should_abort", None)
             connected = False
             while time.monotonic() < deadline:
@@ -1605,6 +1606,7 @@ class MeshInterface:  # pylint: disable=R0902
                             self._last_disconnect_source or "unknown",
                         )
                         raise MeshInterface.MeshInterfaceError(abort_reason_str)
+                _remaining_timeout(timeout)
                 logger.log(
                     self._connect_failure_log_level(),
                     "Timed out waiting for connection completion (isConnected=%s, failure=%r, last_disconnect_source=%s)",

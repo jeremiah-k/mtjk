@@ -11,6 +11,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
+from meshtastic._deadline import _DeadlineExpired, _remaining_timeout
 from meshtastic.payload_limits import _validate_firmware_payload_limits
 from meshtastic.protobuf import mesh_pb2
 
@@ -204,6 +205,7 @@ class _QueueSendRuntime:
         # Validate the final envelope as well as any typed inner payload. This
         # catches nanopb limits on fields populated by the send pipeline itself
         # (for example MeshPacket.channel/hop_limit) and direct ToRadio messages.
+        _remaining_timeout(self._queue_wait_timeout_seconds)
         _validate_firmware_payload_limits(to_radio, context="ToRadio")
         if not to_radio.HasField("packet"):
             send_impl(to_radio)
@@ -231,6 +233,7 @@ class _QueueSendRuntime:
 
         try:
             while True:
+                _remaining_timeout(self._queue_wait_timeout_seconds)
                 to_resend = self._pop_for_send()
                 if to_resend is None:
                     with self._lock:
@@ -256,7 +259,7 @@ class _QueueSendRuntime:
                         )
 
                     logger.debug("Waiting for free space in TX Queue")
-                    sleep_fn(self._queue_wait_delay_seconds)
+                    sleep_fn(_remaining_timeout(self._queue_wait_delay_seconds))
                     continue
 
                 wait_deadline = None
@@ -276,6 +279,10 @@ class _QueueSendRuntime:
                     logger.debug("Resending packet ID %08x %s", packet_id, packet)
                 send_impl(packet)
                 sent_packet_ids.add(packet_id)
+        except _DeadlineExpired:
+            if to_radio.packet.id not in sent_packet_ids:
+                _drop_unsent_incoming()
+            raise
         finally:
             self._reconcile_resent_queue(
                 resent_queue=resent_queue,

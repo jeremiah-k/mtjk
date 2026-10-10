@@ -24,7 +24,20 @@ from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
 
 from meshtastic._core_constants import DECODE_ERROR_KEY
+from meshtastic._deadline import _operation_deadline
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
+from meshtastic.configuration import (
+    PreferenceValue,
+    _config_request,
+    _copy_value,
+    _preference_path,
+)
+from meshtastic.errors import (
+    RequestError,
+    RequestRejectedError,
+    RequestTimeoutError,
+    ResponseDecodeError,
+)
 from meshtastic.mesh_interface_runtime.request_wait import DECODE_FAILED_PREFIX
 from meshtastic.node_runtime import contact_runtime
 from meshtastic.node_runtime.admin_wait import (
@@ -91,6 +104,7 @@ from meshtastic.protobuf import (
     device_ui_pb2,
     localonly_pb2,
     mesh_pb2,
+    module_config_pb2,
 )
 from meshtastic.util import (
     Timeout,
@@ -1776,6 +1790,156 @@ class Node:  # pylint: disable=too-many-instance-attributes
         logger.info("Sending input event %d", event_code)
         return self._send_admin_op(message)
 
+    def readConfig(
+        self,
+        section: str,
+        *,
+        timeout: float = ADMIN_RESPONSE_WAIT_SECONDS,
+        adminIndex: int | None = None,
+    ) -> config_pb2.Config:
+        """Fetch a fresh local-config section as a detached Config protobuf.
+
+        Parameters
+        ----------
+        section : str
+            Protobuf section name (for example lora or device), accepting its
+            JSON camelCase spelling as well.
+        timeout : float
+            Finite positive budget shared by connection, queue and response
+            waits. Transport I/O retains the transport's own timeout.
+        adminIndex : int | None
+            Admin channel override; None selects the configured channel.
+
+        Returns
+        -------
+        config_pb2.Config
+            A copied response containing the requested section. The node's
+            localConfig cache is neither consulted nor changed.
+
+        Raises
+        ------
+        ValueError
+            If the section, channel or timeout is invalid.
+        meshtastic.errors.RequestError
+            If transmission fails, times out, is rejected or cannot be decoded.
+        """
+        request = admin_pb2.AdminMessage()
+        request.get_config_request = admin_pb2.AdminMessage.ConfigType.ValueType(
+            _config_request(section, module=False)
+        )
+        return self._read_config_response(
+            request, "get_config_response", config_pb2.Config, timeout, adminIndex
+        )
+
+    def readModuleConfig(
+        self,
+        section: str,
+        *,
+        timeout: float = ADMIN_RESPONSE_WAIT_SECONDS,
+        adminIndex: int | None = None,
+    ) -> module_config_pb2.ModuleConfig:
+        """Fetch a fresh module section as a detached ModuleConfig protobuf.
+
+        Section naming, deadline, error and cache-isolation contracts match
+        readConfig. For example, readModuleConfig("mqtt").mqtt returns the
+        device's MQTT settings. Enum values retain protobuf numeric semantics.
+        """
+        request = admin_pb2.AdminMessage()
+        request.get_module_config_request = (
+            admin_pb2.AdminMessage.ModuleConfigType.ValueType(
+                _config_request(section, module=True)
+            )
+        )
+        return self._read_config_response(
+            request,
+            "get_module_config_response",
+            module_config_pb2.ModuleConfig,
+            timeout,
+            adminIndex,
+        )
+
+    def readPreference(
+        self,
+        path: str,
+        *,
+        timeout: float = ADMIN_RESPONSE_WAIT_SECONDS,
+        adminIndex: int | None = None,
+    ) -> PreferenceValue:
+        """Read a fresh preference, such as lora.region or mqtt.enabled.
+
+        Paths accept protobuf snake_case and JSON camelCase field spellings.
+        The complete path is validated before transmission. Scalar values
+        retain protobuf types (including numeric enums); message, repeated and
+        map values are detached copies. Missing scalar fields return protobuf
+        defaults. Repeated fields and maps can be read but cannot be traversed
+        by index or key. A section-only path returns its message.
+
+        The timeout and typed errors follow readConfig. Reading does not mutate
+        the node's localConfig or moduleConfig caches.
+        """
+        module, fields = _preference_path(path)
+        response: Message
+        if module:
+            response = self.readModuleConfig(
+                fields[0].name, timeout=timeout, adminIndex=adminIndex
+            )
+        else:
+            response = self.readConfig(
+                fields[0].name, timeout=timeout, adminIndex=adminIndex
+            )
+        value: object = response
+        for field in fields:
+            value = getattr(value, field.name)
+        return _copy_value(value, fields[-1])
+
+    def _read_config_response(
+        self,
+        message: admin_pb2.AdminMessage,
+        response_field: str,
+        response_type: type[_AdminResponseT],
+        timeout: float,
+        admin_index: int | None,
+    ) -> _AdminResponseT:
+        """Apply one deadline to transmission and correlated response ownership."""
+        if admin_index is not None and (
+            isinstance(admin_index, bool)
+            or not isinstance(admin_index, int)
+            or not 0 <= admin_index < _MAX_CHANNELS
+        ):
+            raise ValueError(f"adminIndex must be between 0 and {_MAX_CHANNELS - 1}")
+        operation = message.WhichOneof("payload_variant") or ""
+        try:
+            with _operation_deadline(timeout) as deadline:
+                result = self._request_admin_response(
+                    message,
+                    response_field,
+                    response_type,
+                    response_timeout_seconds=timeout,
+                    response_deadline=deadline,
+                    admin_index=admin_index,
+                    raise_on_timeout=True,
+                )
+        except RequestError:
+            raise
+        except TimeoutError as exc:
+            raise RequestTimeoutError(
+                str(exc), nodeNum=self.nodeNum, operation=operation
+            ) from exc
+        except (_MeshInterfaceError, OSError) as exc:
+            error_type = (
+                RequestTimeoutError
+                if isinstance(exc.__cause__, TimeoutError)
+                else RequestError
+            )
+            raise error_type(
+                str(exc), nodeNum=self.nodeNum, operation=operation
+            ) from exc
+        if result is None:
+            raise RequestError(
+                "Request was not sent", nodeNum=self.nodeNum, operation=operation
+            )
+        return result
+
     def _request_admin_response(
         self,
         message: admin_pb2.AdminMessage,
@@ -1784,6 +1948,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
         *,
         response_timeout_seconds: float,
         response_deadline: float | None = None,
+        admin_index: int | None = None,
+        raise_on_timeout: bool = False,
     ) -> _AdminResponseT | None:
         """Send an admin request and return a copied named response field.
 
@@ -1793,6 +1959,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if response_timeout_seconds <= 0:
             raise ValueError("response timeout must be positive")
 
+        operation = message.WhichOneof("payload_variant") or ""
+        node_num = getattr(self, "nodeNum", None)
         result: _AdminResponseT | None = None
         failure_error: _MeshInterfaceError | None = None
         completed = threading.Event()
@@ -1819,8 +1987,11 @@ class Node:  # pylint: disable=too-many-instance-attributes
                             request_id=request_id,
                             message=f"Routing error on response: {error_reason}",
                         )
-                    failure_error = _MeshInterfaceError(
-                        f"Routing error on response: {error_reason}"
+                    failure_error = RequestRejectedError(
+                        error_reason,
+                        nodeNum=node_num,
+                        requestId=request_id,
+                        operation=operation,
                     )
                     completed.set()
                     return
@@ -1843,7 +2014,14 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     DECODE_ERROR_KEY, f"{DECODE_FAILED_PREFIX}unknown error"
                 )
                 message = f"Failed to decode admin payload: {admin_decode_error}"
-                failure_error = _MeshInterfaceError(message)
+                failure_error = ResponseDecodeError(
+                    message,
+                    nodeNum=node_num,
+                    requestId=(
+                        decoded.get("requestId") if isinstance(decoded, dict) else None
+                    ),
+                    operation=operation,
+                )
                 completed.set()
                 return
             has_field = getattr(raw_admin, "HasField", None)
@@ -1858,12 +2036,16 @@ class Node:  # pylint: disable=too-many-instance-attributes
             result = response
             completed.set()
 
+        send_kwargs: dict[str, Any] = {}
+        if admin_index is not None:
+            send_kwargs["adminIndex"] = admin_index
         request = _send_admin_with_ack_scope(
             self,
             message,
             scope_ack=False,
             wantResponse=True,
             onResponse=_on_response,
+            **send_kwargs,
         )
         if request is None:
             return None
@@ -1886,6 +2068,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     0.0, min(remaining_timeout, response_deadline - time.monotonic())
                 )
             if not completed.wait(timeout=remaining_timeout):
+                if raise_on_timeout:
+                    raise RequestTimeoutError(
+                        "Timed out waiting for admin response",
+                        nodeNum=node_num,
+                        requestId=request_id,
+                        operation=operation,
+                    )
                 return None
             if failure_error is not None:
                 raise failure_error
