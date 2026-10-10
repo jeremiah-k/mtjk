@@ -78,7 +78,12 @@ def _close_interface_if_requested(context: CliContext) -> None:
     """Close a one-shot interface at most once despite earlier lifecycle failures."""
     args = context.args
     outcome = context.outcome
-    if args.seriallog or not outcome.close_now or outcome.interface_close_attempted:
+    if (
+        not context.owns_interface
+        or args.seriallog
+        or not outcome.close_now
+        or outcome.interface_close_attempted
+    ):
         return
 
     outcome.interface_close_attempted = True
@@ -142,7 +147,8 @@ def _run_connected_actions(context: CliContext, hooks: DispatchHooks) -> None:
     action_error: BaseException | None = None
     try:
         messaging_service_actions._validate_nodes_query(context, hooks.services)
-        _print_connection(context, hooks)
+        if context.owns_interface:
+            _print_connection(context, hooks)
 
         # Action modules are internal implementation packages; these intentionally
         # private entrypoints avoid expanding the backwards-compatible public API.

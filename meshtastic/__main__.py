@@ -43,11 +43,13 @@ from meshtastic._branding import (
     PROJECT_ISSUE_URL,
     _format_cli_version,
 )
+from meshtastic._command_scope import _get_command_scope
 
 # COMPAT_STABLE_SHIM: LOCAL_ADDR remains importable from meshtastic.__main__.
 # pylint: disable=unused-import
 from meshtastic._core_constants import BROADCAST_ADDR  # noqa: F401
 from meshtastic._core_constants import LOCAL_ADDR  # noqa: F401
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.cli.config_preview import (
     PREVIEW_CURRENT_NOT_SET as _PREVIEW_CURRENT_NOT_SET,
 )
@@ -319,6 +321,9 @@ def _cli_exit(message: str, return_value: int = 1) -> NoReturn:
     return_value : int
         Process exit code (0 for success, non-zero for error).
     """
+    invocation = cli_invocation.get_current_invocation()
+    if invocation is not None and invocation.exit_handler is not None:
+        invocation.exit_handler(message, return_value)
     output = cli_invocation._get_cli_output()  # noqa: SLF001
     if output is not None and output is not _cli_print:
         _cli_print(message, force=True)
@@ -1336,6 +1341,8 @@ def _handle_set_command(
     set_entries = _normalize_set_entries(args.set)
     _ensure_set_sections_loaded(node, set_entries)
     if not _preflight_set_entries(node, set_entries):
+        if _get_command_scope(interface) is not None:
+            _cli_exit("Invalid --set preference batch", 2)
         return
 
     pre_write_config_id = getattr(interface, "configId", None)
@@ -1376,7 +1383,7 @@ def _handle_set_command(
             node.commitSettingsTransaction()
             # Mirror the --configure path: give the device time to settle
             # (and, if it reboots, to drop the link) before verifying.
-            time.sleep(CONFIG_COMMIT_SETTLE_SECONDS)
+            time.sleep(_remaining_timeout(CONFIG_COMMIT_SETTLE_SECONDS))
 
     local_node = getattr(interface, "localNode", None)
     if fields and node is local_node and not getattr(node, "noProto", False):

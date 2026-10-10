@@ -28,6 +28,7 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import Message
 
 import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.supported_device import SupportedDevice
 from meshtastic.version import PACKAGE_NAME, get_active_version
 
@@ -473,7 +474,7 @@ class Timeout:
             Seconds from now until expiration. If ``None`` (the default), the
             instance's configured ``expireTimeout`` is used.
         """
-        self.expireTime = time.time() + (
+        self.expireTime = time.time() + _remaining_timeout(
             self.expireTimeout if expireTimeout is None else expireTimeout
         )
 
@@ -497,7 +498,8 @@ class Timeout:
         while time.time() < self.expireTime:
             if all(getattr(target, attr_name, None) for attr_name in attr_names):
                 return True
-            time.sleep(self.sleepInterval)
+            time.sleep(_remaining_timeout(self.sleepInterval))
+        _remaining_timeout(self.expireTimeout)
         return False
 
     def waitForAckNak(
@@ -524,7 +526,8 @@ class Timeout:
             if any(map(lambda a: getattr(acknowledgment, a, None), attrs)):
                 acknowledgment.reset()
                 return True
-            time.sleep(self.sleepInterval)
+            time.sleep(_remaining_timeout(self.sleepInterval))
+        _remaining_timeout(self.expireTimeout)
         return False
 
     def waitForTraceRoute(
@@ -554,7 +557,8 @@ class Timeout:
             if getattr(acknowledgment, attr, None):
                 acknowledgment.reset()
                 return True
-            time.sleep(self.sleepInterval)
+            time.sleep(_remaining_timeout(self.sleepInterval))
+        _remaining_timeout(self.expireTimeout)
         return False
 
     def _wait_for_ack_attribute(self, acknowledgment: Any, attr: str) -> bool:
@@ -564,7 +568,8 @@ class Timeout:
             if getattr(acknowledgment, attr, None):
                 acknowledgment.reset()
                 return True
-            time.sleep(self.sleepInterval)
+            time.sleep(_remaining_timeout(self.sleepInterval))
+        _remaining_timeout(self.expireTimeout)
         return False
 
     def waitForTelemetry(self, acknowledgment: Any) -> bool:

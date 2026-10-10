@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 
 from google.protobuf.message import Message
 
+from meshtastic._command_scope import _get_command_scope
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
 from meshtastic.mesh_interface_runtime.flows import (
     DEFAULT_TELEMETRY_TYPE,
@@ -343,6 +344,41 @@ class SendPipeline:
         response_wait_attr: str | None = None,
     ) -> mesh_pb2.MeshPacket:
         """Send payload data while optionally pre-registering request-scoped wait bookkeeping."""
+        command_scope = _get_command_scope(self._port.facade)
+        if (
+            command_scope is not None
+            and wantAck
+            and not wantResponse
+            and response_wait_attr is None
+        ):
+            response_wait_attr = WAIT_ATTR_NAK
+        if (
+            command_scope is not None
+            and response_wait_attr == WAIT_ATTR_NAK
+            and not wantResponse
+        ):
+            # Node's legacy ACK reporter also writes shared acknowledgment
+            # latches. Embedded actions own only their correlated request.
+            from meshtastic.node import Node  # pylint: disable=import-outside-toplevel
+
+            if (
+                onResponse is None
+                or getattr(onResponse, "__func__", None) is Node.onAckNak
+            ):
+                onResponse = command_scope._on_ack
+                onResponseAckPermitted = True
+                local_num = self.local_node.nodeNum
+
+                def _reject_data(_packet: dict[str, Any]) -> bool:
+                    return False
+
+                def _matches_ack_source(packet: dict[str, Any]) -> bool:
+                    # _send_packet resolves broadcast, local and database
+                    # identifiers before transmitting this packet.
+                    return packet.get("from") in {meshPacket.to, local_num}
+
+                responseMatcher = _reject_data
+                responseFeedbackMatcher = _matches_ack_source
         serializer = getattr(data, "SerializeToString", None)
         payload: bytes | bytearray | memoryview
         if callable(serializer):
@@ -454,6 +490,8 @@ class SendPipeline:
                     f"Packet id {meshPacket.id} is already used by a live response handler or quarantined request"
                 )
         try:
+            if command_scope is not None:
+                command_scope._track(meshPacket.id, response_wait_attr)
             if response_wait_attr is not None and not wait_request_registered:
                 self._clear_wait_error(response_wait_attr, request_id=meshPacket.id)
             return self._port.send_packet(
@@ -860,6 +898,10 @@ class SendPipeline:
 
     def wait_for_ack_nak(self) -> None:
         """Wait until an acknowledgement (ACK) or negative acknowledgement (NAK) is received or the wait times out."""
+        command_scope = _get_command_scope(self._port.facade)
+        if command_scope is not None:
+            command_scope._wait_for_acks()
+            return
         success = self._timeout.waitForAckNak(self._acknowledgment)
         self._raise_wait_error_if_present(WAIT_ATTR_NAK)
         if not success:

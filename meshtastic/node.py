@@ -24,7 +24,11 @@ from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
 
 from meshtastic._core_constants import DECODE_ERROR_KEY
-from meshtastic._deadline import _operation_deadline
+from meshtastic._deadline import (
+    _current_deadline,
+    _operation_deadline,
+    _remaining_timeout,
+)
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
 from meshtastic.configuration import (
     PreferenceValue,
@@ -1959,6 +1963,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
         if response_timeout_seconds <= 0:
             raise ValueError("response timeout must be positive")
 
+        outer_deadline = _current_deadline()
+        if outer_deadline is not None:
+            response_deadline = (
+                min(response_deadline, outer_deadline)
+                if response_deadline is not None
+                else outer_deadline
+            )
         operation = message.WhichOneof("payload_variant") or ""
         node_num = getattr(self, "nodeNum", None)
         result: _AdminResponseT | None = None
@@ -2063,6 +2074,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
         runtime = getattr(self.iface, "_request_wait_runtime", None)
         try:
             remaining_timeout = response_timeout_seconds
+            if outer_deadline is not None and not completed.is_set():
+                remaining_timeout = _remaining_timeout(remaining_timeout)
             if response_deadline is not None:
                 remaining_timeout = max(
                     0.0, min(remaining_timeout, response_deadline - time.monotonic())
@@ -2075,6 +2088,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
                         requestId=request_id,
                         operation=operation,
                     )
+                if outer_deadline is not None:
+                    _remaining_timeout(response_timeout_seconds)
                 return None
             if failure_error is not None:
                 raise failure_error

@@ -21,6 +21,7 @@ from typing import Any, NamedTuple, NoReturn
 from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.util
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.cli import config_io as _config_io
 from meshtastic.cli import configure_values
 from meshtastic.cli import preference_runtime as cli_preference_runtime
@@ -401,14 +402,14 @@ def _post_configure_reconnect_and_verify(
         if getattr(interface, "configId", None) != pre_op_config_id:
             logger.info("Device rebooted (generation counter advanced).")
             break
-        time.sleep(CONFIG_POLL_INTERVAL_SECONDS)
+        time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
 
     if not interface.isConnected.is_set():
         while time.monotonic() < deadline:
             if interface.isConnected.is_set():
                 logger.info("Device reconnected.")
                 break
-            time.sleep(CONFIG_POLL_INTERVAL_SECONDS)
+            time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
 
     if not interface.isConnected.is_set():
         logger.warning(

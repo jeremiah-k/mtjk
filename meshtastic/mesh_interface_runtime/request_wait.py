@@ -6,9 +6,12 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
+from meshtastic._command_scope import _get_command_scope_for_runtime
 from meshtastic._core_constants import DECODE_ERROR_KEY
+from meshtastic._deadline import _remaining_timeout
 from meshtastic._response_types import ResponseHandler
 from meshtastic.protobuf import portnums_pb2
 from meshtastic.util import Acknowledgment, Timeout
@@ -141,6 +144,35 @@ class _RequestWaitRuntime:
         is true and the request id belongs to a callback, active wait, or
         unexpired reply quarantine.
         """
+        command_scope = _get_command_scope_for_runtime(self)
+        if command_scope is not None:
+            callback = command_scope._bind_callback(callback)
+        register = partial(
+            self._register_response_handler,
+            request_id,
+            callback,
+            ack_permitted=ack_permitted,
+            is_ack_nak_handler=is_ack_nak_handler,
+            matcher=matcher,
+            feedback_matcher=feedback_matcher,
+            reject_if_registered=reject_if_registered,
+        )
+        if command_scope is not None:
+            return command_scope._register_handler(request_id, register)
+        return register()
+
+    def _register_response_handler(
+        self,
+        request_id: int,
+        callback: Callable[[dict[str, Any]], Any],
+        *,
+        ack_permitted: bool,
+        is_ack_nak_handler: bool,
+        matcher: Callable[[dict[str, Any]], bool] | None,
+        feedback_matcher: Callable[[dict[str, Any]], bool] | None,
+        reject_if_registered: bool,
+    ) -> bool:
+        """Register response state under its lock after command admission."""
         now = time.monotonic()
         with self._lock:
             self._prune_stale_response_handlers_locked(now=now)
@@ -285,8 +317,9 @@ class _RequestWaitRuntime:
         wait_acks = self._get_wait_acks()
         active_wait_request_ids = self._get_active_wait_request_ids()
         active_ids = active_wait_request_ids.setdefault(acknowledgment_attr, set())
-        wait_errors.pop((acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID), None)
-        wait_acks.discard((acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID))
+        if _get_command_scope_for_runtime(self) is None:
+            wait_errors.pop((acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID), None)
+            wait_acks.discard((acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID))
         active_ids.add(request_id)
         retired_ids = self.prune_retired_wait_request_ids_locked(acknowledgment_attr)
         retired_ids.pop(request_id, None)
@@ -509,12 +542,13 @@ class _RequestWaitRuntime:
                     active_request_ids.discard(request_id)
                     if not active_request_ids:
                         active_wait_request_ids.pop(acknowledgment_attr, None)
-                        wait_errors.pop(
-                            (acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID), None
-                        )
-                        wait_acks.discard(
-                            (acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID)
-                        )
+                        if _get_command_scope_for_runtime(self) is None:
+                            wait_errors.pop(
+                                (acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID), None
+                            )
+                            wait_acks.discard(
+                                (acknowledgment_attr, UNSCOPED_WAIT_REQUEST_ID)
+                            )
                     else:
                         active_wait_request_ids[acknowledgment_attr] = (
                             active_request_ids
@@ -560,7 +594,7 @@ class _RequestWaitRuntime:
         timeout_seconds: float,
     ) -> bool:
         """Poll request-scoped wait state until ACK/error or timeout."""
-        deadline = time.monotonic() + timeout_seconds
+        deadline = time.monotonic() + _remaining_timeout(timeout_seconds)
         timeout = self._get_timeout()
         sleep_interval = max(0.01, float(getattr(timeout, "sleepInterval", 0.1)))
         while time.monotonic() < deadline:
@@ -573,7 +607,12 @@ class _RequestWaitRuntime:
                 if key in wait_acks:
                     wait_acks.discard(key)
                     return True
-            time.sleep(sleep_interval)
+            time.sleep(
+                _remaining_timeout(
+                    min(sleep_interval, max(0.0, deadline - time.monotonic()))
+                )
+            )
+        _remaining_timeout(timeout_seconds)
         return False
 
     def record_routing_wait_error(
