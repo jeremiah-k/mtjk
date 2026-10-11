@@ -9,18 +9,19 @@ Cleanup/error handling: graceful Ctrl+C exit and clean interface close.
 
 import argparse
 import time
+from typing import Any
 
 from pubsub import pub
 
 from meshtastic.tcp_interface import TCPInterface
 
 
-def on_receive(packet, interface):  # pylint: disable=unused-argument
+def on_receive(packet: Any, _interface: Any) -> None:
     """Print each inbound packet."""
     print(f"Received: {packet}")
 
 
-def on_connection(interface, topic=pub.AUTO_TOPIC):  # pylint: disable=unused-argument
+def on_connection(interface: Any, _topic: Any = pub.AUTO_TOPIC) -> None:
     """Send a broadcast text when connected."""
     print("Connected. Sending one broadcast message.")
     interface.sendText("hello mesh")

@@ -23,6 +23,7 @@ junit.xml
 .commandcode/
 .omo/
 .github/instructions/codacy.instructions.md
+coderabbit_actionable_items.md
 
 # === IDE & Editor ===
 .*swp

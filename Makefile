@@ -24,7 +24,7 @@ ci-base:
 
 ci:
 	$(MAKE) ci-base
-	$(UV_RUN) mypy meshtastic/ --strict
+	$(UV_RUN) mypy meshtastic/ examples/ --strict
 
 # generate the markdown configuration field reference
 field-reference:
