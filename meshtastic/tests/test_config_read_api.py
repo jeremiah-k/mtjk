@@ -3,10 +3,13 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from google.protobuf.struct_pb2 import Struct
 
+import meshtastic._deadline as _deadline_module
+import meshtastic.mesh_interface as _mesh_interface_module
 from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._deadline import _operation_deadline, _remaining_timeout
 from meshtastic.admin_response import (
@@ -315,10 +318,25 @@ def test_expired_connection_deadline_preserves_more_specific_failure(
     client.noProto = False
     failure = RuntimeError("transport failed during connect")
 
+    # Pin the deadline-aware modules to a controlled monotonic clock. Real
+    # scheduler jitter on loaded CI runners could otherwise exhaust the short
+    # budget before the wait loop starts, raising _DeadlineExpired without
+    # ever observing the stored failure or abort. The faked wait advances the
+    # clock past the budget so expiry always lands mid-wait.
+    clock = {"now": 1000.0}
+
+    def fake_monotonic() -> float:
+        return clock["now"]
+
+    for module in (_mesh_interface_module, _deadline_module):
+        frozen_time = SimpleNamespace(**vars(module.time))
+        frozen_time.monotonic = fake_monotonic
+        monkeypatch.setattr(module, "time", frozen_time)
+
     def expire_wait(_seconds):
         if cause == "stored_failure":
             client.failure = failure
-        time.sleep(0.01)
+        clock["now"] += 1.0
         return False
 
     monkeypatch.setattr(client.isConnected, "wait", expire_wait)
