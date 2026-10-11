@@ -201,7 +201,7 @@ Run all CI checks locally with a single command:
 make ci
 ```
 
-This runs the same checks as CI (pylint for library code, ruff for tests, mypy, pytest with coverage).
+This runs the same checks as CI (pylint for library code, ruff for tests, strict mypy, pytest with coverage).
 
 ### Artifact smoke gate
 
@@ -266,7 +266,7 @@ Alternatively, run each check individually:
 uv run --locked pytest --cov=meshtastic --cov-report=xml
 uv run --locked pylint meshtastic examples/
 .trunk/trunk check --filter=ruff meshtastic/tests tests
-uv run --locked mypy meshtastic/
+uv run --locked mypy meshtastic/ --strict
 ```
 
 To run the `meshtasticd` simulator integration lane locally (same flow as CI):
@@ -310,11 +310,5 @@ make smoke1-destructive
 Hardware smoke expectations belong in the tests themselves. When firmware
 behavior changes intentionally, update the affected smoke assertions and any
 user-visible compatibility notes in the same change.
-
-For stricter type checking (optional, not required by CI):
-
-```bash
-uv run --locked mypy meshtastic/ --strict
-```
 
 For more commands see [CI workflow](../.github/workflows/ci.yml)
