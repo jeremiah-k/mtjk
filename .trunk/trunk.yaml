@@ -101,7 +101,7 @@ lint:
   enabled:
     - grype@0.120.1
     - black@26.10.1
-    - checkov@3.3.26
+    - checkov@3.3.27
     - git-diff-check
     - gitleaks@8.30.1
     - isort@9.0.2

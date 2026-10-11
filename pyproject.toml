@@ -2,7 +2,7 @@
 [project]
 # Keep this static install-time identity synchronized with meshtastic/_branding.py.
 name = "mtjk"
-version = "2.7.11.post9"
+version = "2.7.11.post10"
 description = "Python API & client shell for talking to Meshtastic devices"
 authors = [{ name = "Meshtastic Developers (upstream project authors)" }]
 maintainers = [{ name = "Jeremiah K.", email = "jeremiahk@gmx.com" }]
