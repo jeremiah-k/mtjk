@@ -6,7 +6,7 @@ import os
 import platform
 import struct
 import subprocess
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -15,16 +15,57 @@ from meshtastic.tunnel_device import (
     IFF_NO_PI,
     IFF_TUN,
     IFNAMSIZ,
+    TUN_CONTROL_DEVICE,
     TUNSETIFF,
     LinuxTunDevice,
 )
 
 _FAKE_FD = 42
+_PROBE_INTERFACE_NAME: Final[str] = "mtjkprobe%d"
 
 
 def _resolved_name_buffer(name: str) -> bytes:
     """Build the ioctl return buffer with the kernel-resolved interface name."""
     return name.encode("ascii").ljust(IFNAMSIZ, b"\x00") + b"\x00\x01"
+
+
+def _tun_device_available() -> bool:
+    """Report whether this process can attach a real TUN interface.
+
+    Replays the exact ``LinuxTunDevice`` construction sequence: open
+    ``/dev/net/tun`` read/write, then issue the ``TUNSETIFF`` ioctl with
+    ``IFF_TUN | IFF_NO_PI`` and a disposable test-scoped interface request.
+    Closing the descriptor destroys the transient interface, so a passing
+    probe leaves no kernel state behind.
+
+    Returns
+    -------
+    bool
+        ``True`` when the control device can be opened and the attach ioctl
+        is accepted (typically root or ``CAP_NET_ADMIN``). ``False`` on any
+        ``OSError``, covering the missing device node (``FileNotFoundError``)
+        and the denied open or ioctl (``PermissionError``) seen in containers,
+        agent sandboxes, and CI runners without TUN privileges.
+    """
+    fcntl_module = tunnel_device.fcntl
+    if fcntl_module is None:
+        return False
+    try:
+        fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        request = struct.pack(
+            "16sH22x",
+            _PROBE_INTERFACE_NAME.encode("ascii")[: IFNAMSIZ - 1],
+            IFF_TUN | IFF_NO_PI,
+        )
+        fcntl_module.ioctl(fd, TUNSETIFF, request)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    return True
 
 
 @pytest.fixture
@@ -299,3 +340,91 @@ def test_close_is_idempotent_and_guards_operations(
         device.up()
     with pytest.raises(OSError, match="closed"):
         device.ifconfig(address="10.115.1.2", netmask="255.255.0.0")
+
+
+@pytest.mark.unit
+def test_probe_reports_false_without_fcntl_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Platforms without fcntl must read as unavailable without opening anything."""
+    monkeypatch.setattr(tunnel_device, "fcntl", None)
+
+    assert _tun_device_available() is False
+
+
+@pytest.mark.unit
+def test_probe_reports_false_when_control_device_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing /dev/net/tun must read as unavailable and close nothing."""
+    closed_fds: list[int] = []
+    monkeypatch.setattr(os, "close", closed_fds.append)
+
+    def missing_device(*_args: Any, **_kwargs: Any) -> int:
+        raise FileNotFoundError(2, "No such file or directory", TUN_CONTROL_DEVICE)
+
+    monkeypatch.setattr(os, "open", missing_device)
+
+    assert _tun_device_available() is False
+    assert closed_fds == []
+
+
+@pytest.mark.unit
+def test_probe_reports_false_when_tunsetiff_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A denied TUNSETIFF (no CAP_NET_ADMIN) must read as unavailable."""
+    closed_fds: list[int] = []
+    monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: _FAKE_FD)
+    monkeypatch.setattr(os, "close", closed_fds.append)
+
+    def denied_ioctl(_fd: int, _request: int, _ifr: bytes) -> bytes:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(tunnel_device.fcntl, "ioctl", denied_ioctl)
+
+    assert _tun_device_available() is False
+    assert closed_fds == [_FAKE_FD]
+
+
+@pytest.mark.unit
+def test_probe_reports_true_when_tunsetiff_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An accepted TUNSETIFF must read as available and close the descriptor."""
+    closed_fds: list[int] = []
+    ioctl_requests: list[bytes] = []
+    monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: _FAKE_FD)
+
+    def resolving_ioctl(_fd: int, _request: int, ifr: bytes) -> bytes:
+        ioctl_requests.append(ifr)
+        return _resolved_name_buffer("mtjkprobe0")
+
+    monkeypatch.setattr(tunnel_device.fcntl, "ioctl", resolving_ioctl)
+    monkeypatch.setattr(os, "close", closed_fds.append)
+
+    assert _tun_device_available() is True
+    assert closed_fds == [_FAKE_FD]
+    assert len(ioctl_requests) == 1
+    name_bytes, flags = struct.unpack("16sH", ioctl_requests[0][:18])
+    assert name_bytes.rstrip(b"\x00") == b"mtjkprobe%d"
+    assert flags == IFF_TUN | IFF_NO_PI
+
+
+@pytest.mark.unit
+def test_real_kernel_attaches_and_releases_tun_interface() -> None:
+    """Attach and release a real TUN only when the test is executed.
+
+    Probe at execution time rather than at module import or collection, which
+    must remain side-effect-free even on privileged hosts.
+    """
+    if not _tun_device_available():
+        pytest.skip("requires a usable TUN device (/dev/net/tun with CAP_NET_ADMIN)")
+    device = LinuxTunDevice(name="mtjkprobe")
+    try:
+        assert device.name.startswith("mtjkprobe")
+    finally:
+        device.close()
+
+    with pytest.raises(OSError, match="closed"):
+        device.read()
