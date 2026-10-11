@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import inspect
 import logging
 from queue import Empty, Full
 from threading import Event, RLock
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,7 +60,7 @@ def test_call_factory_with_optional_kwarg_handles_signature_and_rejection(
         return "ok"
 
     monkeypatch.setattr(
-        ble_utils.inspect,
+        inspect,
         "signature",
         lambda _func: (_ for _ in ()).throw(TypeError("no-signature")),
         raising=True,
@@ -419,7 +420,7 @@ def test_publish_connection_status_legacy_resolves_default_publishing_thread(
     iface = SimpleNamespace(_get_publishing_thread=lambda: publishing_thread)
 
     BLECompatibilityEventService.publish_connection_status_legacy(
-        iface,
+        iface,  # type: ignore[arg-type]
         connected=True,
     )
 
@@ -599,20 +600,26 @@ def test_reconnection_error_types_and_hook_resolution() -> None:
     scheduler = ReconnectScheduler(
         state_manager=BLEStateManager(),
         state_lock=RLock(),
-        thread_coordinator=SimpleNamespace(
-            create_thread=lambda **_kwargs: SimpleNamespace(
-                ident=None, is_alive=lambda: False
+        thread_coordinator=cast(
+            Any,
+            SimpleNamespace(
+                create_thread=lambda **_kwargs: SimpleNamespace(
+                    ident=None, is_alive=lambda: False
+                ),
+                start_thread=lambda _thread: None,
             ),
-            start_thread=lambda _thread: None,
         ),
-        interface=SimpleNamespace(
-            _is_connection_closing=False, _can_initiate_connection=True
+        interface=cast(
+            Any,
+            SimpleNamespace(
+                _is_connection_closing=False, _can_initiate_connection=True
+            ),
         ),
     )
     hook = scheduler._resolve_thread_coordinator_hook("create_thread", "_create_thread")
     assert callable(hook)
 
-    scheduler.thread_coordinator = SimpleNamespace()
+    scheduler.thread_coordinator = cast(Any, SimpleNamespace())
     with pytest.raises(ThreadCoordinatorMissingMethodError):
         scheduler._resolve_thread_coordinator_hook("create_thread", "_create_thread")
 
@@ -622,14 +629,20 @@ def test_reconnection_schedule_thread_not_started_and_policy_missing_method() ->
     scheduler = ReconnectScheduler(
         state_manager=BLEStateManager(),
         state_lock=RLock(),
-        thread_coordinator=SimpleNamespace(
-            create_thread=lambda **_kwargs: SimpleNamespace(
-                ident=None, is_alive=lambda: False
+        thread_coordinator=cast(
+            Any,
+            SimpleNamespace(
+                create_thread=lambda **_kwargs: SimpleNamespace(
+                    ident=None, is_alive=lambda: False
+                ),
+                start_thread=lambda _thread: None,
             ),
-            start_thread=lambda _thread: None,
         ),
-        interface=SimpleNamespace(
-            _is_connection_closing=False, _can_initiate_connection=True
+        interface=cast(
+            Any,
+            SimpleNamespace(
+                _is_connection_closing=False, _can_initiate_connection=True
+            ),
         ),
     )
 
@@ -637,8 +650,8 @@ def test_reconnection_schedule_thread_not_started_and_policy_missing_method() ->
     assert scheduler._schedule_reconnect(should_reconnect, Event()) is False
 
     worker = ReconnectWorker(
-        interface=SimpleNamespace(auto_reconnect=True),
-        reconnect_policy=SimpleNamespace(),
+        interface=cast(Any, SimpleNamespace(auto_reconnect=True)),
+        reconnect_policy=cast(Any, SimpleNamespace()),
     )
     with pytest.raises(ReconnectPolicyMissingMethodError):
         worker._call_policy("next_attempt")
@@ -658,7 +671,7 @@ def test_management_helpers_cover_factory_and_target_edge_paths(
         client.address = address
         return client
 
-    client = _create_management_client(_reject_kwarg, "AA:BB:CC:DD:EE:FF")
+    client = _create_management_client(cast(Any, _reject_kwarg), "AA:BB:CC:DD:EE:FF")
     assert isinstance(client, DummyClient)
 
     with pytest.raises(TypeError, match="returned None"):
@@ -721,14 +734,16 @@ def test_management_shim_handler_resolution_preserves_minimal_iface_double(
         minimal_handler = SimpleNamespace(
             execute_management_command=lambda *_args, **_kwargs: "ok"
         )
-        iface._get_management_command_handler = lambda: minimal_handler
+        iface._get_management_command_handler = cast(  # type: ignore[method-assign]
+            Any, lambda: minimal_handler
+        )
         resolved = BLEManagementCommandsService._handler_for_shim(iface)
-        assert resolved is minimal_handler
+        assert resolved is cast(Any, minimal_handler)
         assert BLEManagementCommandsService._has_required_handler_entrypoint(
             minimal_handler
         )
 
-        iface._get_management_command_handler = MagicMock(
+        iface._get_management_command_handler = MagicMock(  # type: ignore[method-assign]
             side_effect=lambda: MagicMock()
         )
         fallback_handler = BLEManagementCommandsService._handler_for_shim(iface)
@@ -748,7 +763,7 @@ def _minimal_management_handler(
     iface = SimpleNamespace()
     return BLEManagementCommandHandler(
         iface,  # type: ignore[arg-type]
-        ble_client_factory=DummyClient,
+        ble_client_factory=cast(Any, DummyClient),
         connected_elsewhere=lambda *_args, **_kwargs: False,
         session_state=BLESessionState(RLock()),
         management_state=BLEManagementState(),
@@ -762,7 +777,7 @@ def test_management_handler_requires_client_cleanup_capability() -> None:
     handler = _minimal_management_handler()
 
     with pytest.raises(AttributeError, match="client cleanup capability"):
-        handler._close_client(DummyClient())
+        handler._close_client(cast(Any, DummyClient()))
 
 
 def test_management_handler_close_failure_does_not_mask_command_result() -> None:
@@ -774,8 +789,8 @@ def test_management_handler_close_failure_does_not_mask_command_result() -> None
     handler = _minimal_management_handler(client_closer=_failing_close)
 
     result = handler.execute_with_client(
-        client_to_use=DummyClient(),
-        temporary_client=DummyClient(),
+        client_to_use=cast(Any, DummyClient()),
+        temporary_client=cast(Any, DummyClient()),
         command=lambda _client: "ok",
     )
 
@@ -790,7 +805,7 @@ def test_management_handler_revalidates_refreshed_client_under_shared_locks(
     try:
         handler = BLEManagementCommandHandler(
             iface,
-            ble_client_factory=DummyClient,
+            ble_client_factory=cast(Any, DummyClient),
             connected_elsewhere=lambda *_args, **_kwargs: False,
             session_state=iface._session_state,
             management_state=iface._management_state,
@@ -826,7 +841,7 @@ def test_management_handler_revalidates_refreshed_client_under_shared_locks(
             lambda client: client,
         )
 
-        assert result is refreshed_client
+        assert result is cast(Any, refreshed_client)
         preconditions.assert_called_once_with()
     finally:
         iface.close()
@@ -840,7 +855,7 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
     try:
         handler = BLEManagementCommandHandler(
             iface,
-            ble_client_factory=DummyClient,
+            ble_client_factory=cast(Any, DummyClient),
             connected_elsewhere=lambda *_args, **_kwargs: False,
         )
         fallback_calls: list[str] = []
@@ -876,7 +891,7 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
         synthesizing_iface = _SynthesizingInterface()
         synthesizing_handler = BLEManagementCommandHandler(
             synthesizing_iface,  # type: ignore[arg-type]
-            ble_client_factory=DummyClient,
+            ble_client_factory=cast(Any, DummyClient),
             connected_elsewhere=lambda *_args, **_kwargs: False,
         )
         assert (
@@ -889,7 +904,7 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
         )
         assert synthesizing_iface.synthesized_override_calls == 0
 
-        iface._resolve_target_address_for_management = lambda address: (
+        iface._resolve_target_address_for_management = lambda address: (  # type: ignore[method-assign]
             f"override:{address}"
         )
         assert (
@@ -902,7 +917,7 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
         )
         assert fallback_calls == ["fallback", "fallback"]
 
-        class _OverrideInterface(type(iface)):
+        class _OverrideInterface(type(iface)):  # type: ignore[misc]
             def _resolve_target_address_for_management(
                 self, address: str | None
             ) -> str:
@@ -911,7 +926,7 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
         subclass_iface = object.__new__(_OverrideInterface)
         subclass_handler = BLEManagementCommandHandler(
             subclass_iface,
-            ble_client_factory=DummyClient,
+            ble_client_factory=cast(Any, DummyClient),
             connected_elsewhere=lambda *_args, **_kwargs: False,
         )
         assert (
@@ -968,35 +983,40 @@ def test_management_shim_default_connected_elsewhere_and_handler_like(
 
         connected_elsewhere_calls: list[tuple[str | None, object | None]] = []
         late_bound_calls: list[tuple[str | None, object | None]] = []
+
+        def _connected_elsewhere(key: str | None, owner: object | None = None) -> bool:
+            connected_elsewhere_calls.append((key, owner))
+            return True
+
+        def _late_bound(key: str | None, owner: object | None = None) -> bool:
+            late_bound_calls.append((key, owner))
+            return True
+
         monkeypatch.setattr(
             "meshtastic.interfaces.ble.management_compat_service._is_currently_connected_elsewhere",
-            lambda key, owner=None: (
-                connected_elsewhere_calls.append((key, owner)),
-                True,
-            )[1],
+            _connected_elsewhere,
         )
         monkeypatch.setattr(
             iface,
             "_connected_elsewhere_late_bound",
-            lambda key, owner=None: (
-                late_bound_calls.append((key, owner)),
-                True,
-            )[1],
+            _late_bound,
             raising=True,
         )
-        iface._get_management_command_handler = lambda: None
+        iface._get_management_command_handler = cast(  # type: ignore[method-assign]
+            Any, lambda: None
+        )
         resolved_direct_handler = BLEManagementCommandsService._handler_for_shim(iface)
         assert resolved_direct_handler is original_direct_handler
 
-        iface._management_command_handler = None
+        iface._management_command_handler = None  # type: ignore[assignment]
         resolved_handler = BLEManagementCommandsService._handler_for_shim(iface)
         assert isinstance(resolved_handler, BLEManagementCommandHandler)
         assert resolved_handler._connected_elsewhere("device-key", iface) is True
         assert late_bound_calls == [("device-key", iface)]
         assert connected_elsewhere_calls == []
     finally:
-        iface._get_management_command_handler = original_get_management_handler
-        iface._management_command_handler = original_direct_handler
+        iface._get_management_command_handler = original_get_management_handler  # type: ignore[method-assign]
+        iface._management_command_handler = cast(Any, original_direct_handler)
         iface.close()
 
 
@@ -1011,19 +1031,23 @@ def test_resolve_management_target_existing_client_explicit_address_paths(
             use_existing_client_without_resolved_address=True,
             expected_implicit_binding=None,
         )
-        iface._validate_management_preconditions = lambda: None
-        iface._get_management_client_if_available_locked = lambda _address: None
+        iface._validate_management_preconditions = lambda: None  # type: ignore[method-assign]
+        iface._get_management_client_if_available_locked = cast(  # type: ignore[method-assign]
+            Any, lambda _address: None
+        )
         resolved_addresses: list[str | None] = []
 
         def _resolve_target_address(address: str | None) -> str:
             resolved_addresses.append(address)
             return "AA:BB:CC:DD:EE:FF"
 
-        iface._resolve_target_address_for_management = _resolve_target_address
+        iface._resolve_target_address_for_management = (  # type: ignore[method-assign]
+            _resolve_target_address
+        )
 
         target_missing_client, active_client_missing_client = (
             BLEManagementCommandsService._resolve_management_target(
-                iface, "target-id", start_context
+                iface, "target-id", cast(Any, start_context)
             )
         )
         assert target_missing_client == "AA:BB:CC:DD:EE:FF"
@@ -1031,19 +1055,21 @@ def test_resolve_management_target_existing_client_explicit_address_paths(
         assert resolved_addresses == ["target-id"]
 
         refreshed_client = DummyClient()
-        refreshed_client.address = None
+        refreshed_client.address = None  # type: ignore[assignment]
         refreshed_client.bleak_client = SimpleNamespace(address=None)
         resolved_addresses.clear()
 
-        iface._get_management_client_if_available_locked = lambda _address: (
-            refreshed_client
+        iface._get_management_client_if_available_locked = cast(  # type: ignore[method-assign]
+            Any, lambda _address: refreshed_client
         )
-        iface._extract_client_address = lambda _client: None
+        iface._extract_client_address = cast(  # type: ignore[method-assign]
+            Any, lambda _client: None
+        )
 
         target, active_client = BLEManagementCommandsService._resolve_management_target(
             iface,
             "target-id",
-            start_context,
+            cast(Any, start_context),
         )
         assert target == "AA:BB:CC:DD:EE:FF"
         assert active_client is None
@@ -1058,14 +1084,14 @@ def test_management_execute_with_client_preserves_command_outcome_on_close_failu
     """Temporary-client close failures should not mask command result."""
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
-        iface._client_manager_safe_close_client = MagicMock(
+        iface._client_manager_safe_close_client = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("close failed")
         )
 
         result = BLEManagementCommandsService._execute_with_client(
             iface,
-            client_to_use=DummyClient(),
-            temporary_client=DummyClient(),
+            client_to_use=cast(Any, DummyClient()),
+            temporary_client=cast(Any, DummyClient()),
             command=lambda _client: "ok",
         )
         assert result == "ok"
@@ -1104,20 +1130,19 @@ def test_management_execute_management_command_existing_client_and_trust_edges(
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()),
         )
 
-        assert (
-            BLEManagementCommandsService._execute_management_command(
-                iface,
-                None,
-                lambda client: client,
-                ble_client_factory=DummyClient,
-                connected_elsewhere=lambda *_args: False,
-            )
-            is refreshed_client
-        )
+        assert BLEManagementCommandsService._execute_management_command(
+            iface,
+            None,
+            lambda client: client,
+            ble_client_factory=cast(Any, DummyClient),
+            connected_elsewhere=lambda *_args: False,
+        ) is cast(Any, refreshed_client)
 
-        bluetooth_iface._format_bluetoothctl_address = lambda address: address
-        bluetooth_iface._management_target_gate = (
-            lambda _address: contextlib.nullcontext()
+        bluetooth_iface._format_bluetoothctl_address = (  # type: ignore[method-assign]
+            lambda address: address
+        )
+        bluetooth_iface._management_target_gate = (  # type: ignore[method-assign]
+            cast(Any, lambda _address: contextlib.nullcontext())
         )
 
         class _SubprocessModule:
@@ -1263,7 +1288,7 @@ def test_compatibility_resolve_safe_execute_wrapper() -> None:
     iface = SimpleNamespace(
         error_handler=SimpleNamespace(safe_execute=lambda func, **_kwargs: func())
     )
-    resolved = BLECompatibilityEventService._resolve_safe_execute(iface)
+    resolved = BLECompatibilityEventService._resolve_safe_execute(cast(Any, iface))
     assert callable(resolved)
     assert resolved(lambda: "ok") == "ok"
 
@@ -1328,7 +1353,7 @@ def test_compatibility_publisher_swallows_provider_failures(
         publisher.publish_connection_status(connected=True)
         publisher.publish_connection_status_legacy(True)
 
-        expected_thread = mesh_iface_module.publishingThread
+        expected_thread = vars(mesh_iface_module)["publishingThread"]
         assert wait_threads == [expected_thread]
         assert drain_threads == [expected_thread]
         assert publish_threads == [expected_thread, expected_thread]
@@ -1540,16 +1565,22 @@ def test_reconnect_scheduler_start_exception_and_management_trust_truncation(
     scheduler = ReconnectScheduler(
         state_manager=BLEStateManager(),
         state_lock=RLock(),
-        thread_coordinator=SimpleNamespace(
-            create_thread=lambda **_kwargs: SimpleNamespace(
-                ident=1, is_alive=lambda: True
-            ),
-            start_thread=lambda _thread: (_ for _ in ()).throw(
-                RuntimeError("start failed")
+        thread_coordinator=cast(
+            Any,
+            SimpleNamespace(
+                create_thread=lambda **_kwargs: SimpleNamespace(
+                    ident=1, is_alive=lambda: True
+                ),
+                start_thread=lambda _thread: (_ for _ in ()).throw(
+                    RuntimeError("start failed")
+                ),
             ),
         ),
-        interface=SimpleNamespace(
-            _is_connection_closing=False, _can_initiate_connection=True
+        interface=cast(
+            Any,
+            SimpleNamespace(
+                _is_connection_closing=False, _can_initiate_connection=True
+            ),
         ),
     )
     should_reconnect = True
