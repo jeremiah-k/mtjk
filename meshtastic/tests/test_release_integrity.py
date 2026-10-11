@@ -571,7 +571,7 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     assert "environment: pypi-release" in pypi
     assert "ref: ${{ github.event.release.tag_name }}" in pypi
     assert "persist-credentials: false" in pypi
-    assert 'python-version: "3.14"' in pypi
+    assert 'python-version: "3.15"' in pypi
     assert "package_version=" in pypi
     assert "tomllib.load(open(" in pypi
     assert 'test "${RELEASE_TAG#v}" = "${package_version}"' in pypi
