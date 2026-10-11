@@ -453,4 +453,4 @@ def _is_canonical_state_manager(
     """
     if type(candidate) is not BLEStateManager:  # pylint: disable=unidiomatic-typecheck
         return False
-    return cast(BLEStateManager, candidate).lock is lock
+    return candidate.lock is lock

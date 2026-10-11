@@ -130,7 +130,8 @@ def _notification_nonce(notification: mesh_pb2.ClientNotification) -> int | None
     """Return the handshake nonce carried by a key-verification notification."""
     for field in _NOTIFICATION_PAYLOAD_FIELDS:
         if notification.HasField(field):
-            return getattr(notification, field).nonce
+            nonce: int | None = getattr(notification, field).nonce
+            return nonce
     return None
 
 
