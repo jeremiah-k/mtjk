@@ -4,8 +4,9 @@ import importlib
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -13,7 +14,7 @@ import pytest
 from meshtastic import mt_config
 from meshtastic._command_scope import _CommandScope
 from meshtastic._core_constants import DECODE_ERROR_KEY
-from meshtastic.commands import executeCommand, getCommandCapabilities
+from meshtastic.commands import CommandResult, executeCommand, getCommandCapabilities
 from meshtastic.errors import RequestRejectedError, RequestTimeoutError
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2, portnums_pb2
@@ -22,7 +23,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[MeshInterface]:
     importlib.import_module("meshtastic.__main__")
     with MeshInterface(noProto=True) as interface:
         interface.localNode.nodeNum = 1
@@ -53,7 +54,7 @@ def client(monkeypatch):
         interface.noProto = True
 
 
-def deliver(client, packet):
+def deliver(client: MeshInterface, packet: dict[str, Any]) -> None:
     client._request_wait_runtime.correlate_inbound_response(
         packet_dict=packet,
         skip_response_callback_for_decode_failure=False,
@@ -61,7 +62,9 @@ def deliver(client, packet):
     )
 
 
-def config_response(packet, *, hop_limit=3):
+def config_response(
+    packet: mesh_pb2.MeshPacket, *, hop_limit: int = 3
+) -> dict[str, Any]:
     raw = admin_pb2.AdminMessage()
     raw.get_config_response.lora.hop_limit = hop_limit
     return {
@@ -70,7 +73,9 @@ def config_response(packet, *, hop_limit=3):
     }
 
 
-def test_nodes_capture_preserves_streams_globals_and_transport(client, capsys):
+def test_nodes_capture_preserves_streams_globals_and_transport(
+    client: MeshInterface, capsys: pytest.CaptureFixture[str]
+) -> None:
     stdout, stderr = sys.stdout, sys.stderr
     global_state = (
         mt_config.args,
@@ -79,7 +84,7 @@ def test_nodes_capture_preserves_streams_globals_and_transport(client, capsys):
         mt_config.camel_case,
         mt_config.logfile,
     )
-    chunks = []
+    chunks: list[str] = []
     result = executeCommand(client, ["--nodes", "--quiet"], output=chunks.append)
     assert result.succeeded and result.error is None
     assert "Local" in result.output and "Remote" in result.output
@@ -93,7 +98,7 @@ def test_nodes_capture_preserves_streams_globals_and_transport(client, capsys):
         mt_config.camel_case,
         mt_config.logfile,
     )
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert capsys.readouterr() == ("", "")
 
 
@@ -113,8 +118,11 @@ def test_nodes_capture_preserves_streams_globals_and_transport(client, capsys):
     ],
 )
 def test_argument_failures_precede_actions_and_do_not_exit_process(
-    client, monkeypatch, capsys, argv
-):
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: Any,
+) -> None:
     monkeypatch.setattr(
         client,
         "_send_to_radio_impl",
@@ -123,11 +131,13 @@ def test_argument_failures_precede_actions_and_do_not_exit_process(
     result = executeCommand(client, argv)
     assert result.exitCode == 2 and isinstance(result.error, ValueError)
     assert result.output
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert capsys.readouterr() == ("", "")
 
 
-def test_capabilities_help_and_version_have_the_same_supported_options(client, capsys):
+def test_capabilities_help_and_version_have_the_same_supported_options(
+    client: MeshInterface, capsys: pytest.CaptureFixture[str]
+) -> None:
     capabilities = getCommandCapabilities()
     assert capabilities.apiVersion == 1
     assert (
@@ -149,12 +159,12 @@ def test_capabilities_help_and_version_have_the_same_supported_options(client, c
 
 
 def test_get_uses_fresh_response_and_captures_quiet_preference_output(
-    client, monkeypatch, capsys
-):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     client.localNode.localConfig.lora.hop_limit = 7
-    packets = []
+    packets: list[mesh_pb2.MeshPacket] = []
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         packets.append(envelope.packet)
         deliver(client, config_response(envelope.packet))
 
@@ -164,18 +174,18 @@ def test_get_uses_fresh_response_and_captures_quiet_preference_output(
     assert "lora.hop_limit: 3" in result.output
     assert client.localNode.localConfig.lora.hop_limit == 7
     assert packets and client.responseHandlers == {}
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize("reject", [True, False])
 def test_get_returns_typed_failure_and_retains_other_response_state(
-    client, monkeypatch, reject
-):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, reject: bool
+) -> None:
     sentinel = Mock()
     client.responseHandlers[1234] = sentinel
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         if reject:
             deliver(
                 client,
@@ -198,7 +208,7 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
     )
     assert client.responseHandlers == {1234: sentinel}
     assert client._response_wait_errors == {}
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -370,10 +380,15 @@ def test_remote_get_does_not_replace_timeout_with_a_late_routing_nak(
 
 
 @pytest.mark.parametrize("destination", [None, "^local", "!00000002"])
-def test_text_ack_uses_resolved_destination(client, monkeypatch, destination, capsys):
-    sent = []
+def test_text_ack_uses_resolved_destination(
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    destination: str | None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sent: list[mesh_pb2.MeshPacket] = []
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         packet = envelope.packet
         sent.append(packet)
         deliver(
@@ -395,15 +410,17 @@ def test_text_ack_uses_resolved_destination(client, monkeypatch, destination, ca
         0xFFFFFFFF if destination is None else 1 if destination == "^local" else 2
     )
     assert client.responseHandlers == {}
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert capsys.readouterr() == ("", "")
 
 
-def test_ack_wait_ignores_shared_ack_and_wrong_source(client, monkeypatch):
+def test_ack_wait_ignores_shared_ack_and_wrong_source(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client._acknowledgment.receivedAck = True
-    packets = []
+    packets: list[mesh_pb2.MeshPacket] = []
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         packet = envelope.packet
         packets.append(packet)
         deliver(
@@ -434,7 +451,9 @@ def test_ack_wait_ignores_shared_ack_and_wrong_source(client, monkeypatch):
     assert client._acknowledgment.receivedNak is False
 
 
-def test_ack_wait_cannot_be_completed_by_unrelated_shared_state(client, monkeypatch):
+def test_ack_wait_cannot_be_completed_by_unrelated_shared_state(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client._acknowledgment.receivedAck = True
     monkeypatch.setattr(client, "_send_to_radio_impl", lambda envelope: None)
     start = time.monotonic()
@@ -448,11 +467,13 @@ def test_ack_wait_cannot_be_completed_by_unrelated_shared_state(client, monkeypa
     assert client._acknowledgment.receivedAck is True
 
 
-def test_command_serialization_includes_lock_wait_in_budget(client, monkeypatch):
+def test_command_serialization_includes_lock_wait_in_budget(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     started, release = threading.Event(), threading.Event()
     original = client._node_view._format_nodes
 
-    def slow(*args, **kwargs):
+    def slow(*args: Any, **kwargs: Any) -> str:
         started.set()
         assert release.wait(2)
         return original(*args, **kwargs)
@@ -469,13 +490,15 @@ def test_command_serialization_includes_lock_wait_in_budget(client, monkeypatch)
     assert executeCommand(client, ["--nodes"]).succeeded
 
 
-def test_independent_interfaces_can_execute_concurrently(client, monkeypatch):
+def test_independent_interfaces_can_execute_concurrently(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     barrier = threading.Barrier(2)
     with MeshInterface(noProto=True) as other:
         other.nodesByNum = {}
         original = type(client._node_view)._format_nodes
 
-        def concurrent(view, *args, **kwargs):
+        def concurrent(view: Any, *args: Any, **kwargs: Any) -> str:
             barrier.wait(timeout=2)
             return original(view, *args, **kwargs)
 
@@ -488,21 +511,23 @@ def test_independent_interfaces_can_execute_concurrently(client, monkeypatch):
 
 
 def test_control_flow_cleanup_propagates_and_releases_serialization(
-    client, monkeypatch
-):
-    def interrupt(envelope):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupt(envelope: mesh_pb2.ToRadio) -> None:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(client, "_send_to_radio_impl", interrupt)
     with pytest.raises(KeyboardInterrupt):
         executeCommand(client, ["--get", "lora.hopLimit"])
     assert client.responseHandlers == {}
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert executeCommand(client, ["--nodes"]).succeeded
 
 
-def test_stream_callback_error_returns_failure_and_releases_lock(client):
-    def broken_output(chunk):
+def test_stream_callback_error_returns_failure_and_releases_lock(
+    client: MeshInterface,
+) -> None:
+    def broken_output(chunk: str) -> None:
         raise LookupError("consumer failed")
 
     result = executeCommand(client, ["--nodes"], output=broken_output)
@@ -510,8 +535,11 @@ def test_stream_callback_error_returns_failure_and_releases_lock(client):
     assert executeCommand(client, ["--nodes"]).succeeded
 
 
-def test_output_byte_limit_is_utf8_safe_and_stops_streaming(client):
-    chunks = []
+def test_output_byte_limit_is_utf8_safe_and_stops_streaming(
+    client: MeshInterface,
+) -> None:
+    chunks: list[str] = []
+    assert client.nodesByNum is not None
     client.nodesByNum[1]["user"]["longName"] = "🌍" * 20
     result = executeCommand(
         client, ["--nodes"], maxOutputBytes=80, output=chunks.append
@@ -522,20 +550,26 @@ def test_output_byte_limit_is_utf8_safe_and_stops_streaming(client):
     assert "�" not in result.output
 
 
-def test_invalid_set_value_returns_failure_without_mutating_cache(client, capsys):
-    client.localNode.localConfig.lora.region = 1
+def test_invalid_set_value_returns_failure_without_mutating_cache(
+    client: MeshInterface, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client.localNode.localConfig.lora.region = cast(
+        "config_pb2.Config.LoRaConfig.RegionCode.ValueType", 1
+    )
     result = executeCommand(client, ["--set", "lora.region", "nonsense"])
     assert result.exitCode == 2
     assert client.localNode.localConfig.lora.region == 1
     assert capsys.readouterr() == ("", "")
 
 
-def test_scoped_write_preserves_unscoped_error_and_ack_state(client, monkeypatch):
+def test_scoped_write_preserves_unscoped_error_and_ack_state(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     key = ("receivedNak", -1)
     client._response_wait_errors[key] = "unrelated legacy failure"
     client._response_wait_acks.add(key)
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         deliver(
             client,
             {
@@ -558,12 +592,16 @@ def test_scoped_write_preserves_unscoped_error_and_ack_state(client, monkeypatch
     assert client._acknowledgment.receivedNak is False
 
 
-def test_reader_thread_telemetry_summary_is_captured(client, monkeypatch, capsys):
+def test_reader_thread_telemetry_summary_is_captured(
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from meshtastic.protobuf import telemetry_pb2
 
-    workers = []
+    workers: list[threading.Thread] = []
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         payload = telemetry_pb2.Telemetry()
         payload.device_metrics.battery_level = 73
         packet = {
@@ -593,21 +631,23 @@ def test_reader_thread_telemetry_summary_is_captured(client, monkeypatch, capsys
 
 
 def test_reader_thread_output_callback_failure_reports_error_and_cleans_up(
-    client, monkeypatch, capsys
-):
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Reader callback failures are returned without leaking a response handler."""
     from meshtastic.protobuf import telemetry_pb2
 
     completed = threading.Event()
-    failure_threads = []
-    workers = []
+    failure_threads: list[threading.Thread] = []
+    workers: list[threading.Thread] = []
 
-    def fail_output(chunk):
+    def fail_output(chunk: str) -> None:
         if "Battery level:" in chunk:
             failure_threads.append(threading.current_thread())
             raise RuntimeError("reader output sink failed")
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         payload = telemetry_pb2.Telemetry()
         payload.device_metrics.battery_level = 73
         packet = {
@@ -619,7 +659,7 @@ def test_reader_thread_output_callback_failure_reports_error_and_cleans_up(
             },
         }
 
-        def receive():
+        def receive() -> None:
             try:
                 deliver(client, packet)
             finally:
@@ -652,7 +692,9 @@ def test_reader_thread_output_callback_failure_reports_error_and_cleans_up(
     assert capsys.readouterr() == ("", "")
 
 
-def test_ui_query_inherits_operation_deadline(client, monkeypatch):
+def test_ui_query_inherits_operation_deadline(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(client, "_send_to_radio_impl", lambda envelope: None)
     start = time.monotonic()
     result = executeCommand(client, ["--get-ui-config"], timeout=0.03)
@@ -661,18 +703,20 @@ def test_ui_query_inherits_operation_deadline(client, monkeypatch):
     assert client.responseHandlers == {}
 
 
-def test_reader_rearm_cannot_restore_handler_after_command_timeout(client, monkeypatch):
+def test_reader_rearm_cannot_restore_handler_after_command_timeout(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rearming, release = threading.Event(), threading.Event()
-    workers = []
+    workers: list[threading.Thread] = []
     original = client._add_response_handler
 
-    def register(*args, **kwargs):
+    def register(*args: Any, **kwargs: Any) -> None:
         if threading.current_thread() in workers:
             rearming.set()
             assert release.wait(2)
         return original(*args, **kwargs)
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         packet = envelope.packet
         worker = threading.Thread(
             target=deliver,
@@ -709,23 +753,29 @@ def test_reader_rearm_cannot_restore_handler_after_command_timeout(client, monke
 
 
 @pytest.mark.parametrize("timeout", [0, -1, True, float("nan"), float("inf")])
-def test_invalid_programmatic_timeout_is_rejected(client, timeout):
+def test_invalid_programmatic_timeout_is_rejected(
+    client: MeshInterface, timeout: float
+) -> None:
     with pytest.raises(ValueError, match="timeout"):
         executeCommand(client, ["--nodes"], timeout=timeout)
 
 
-def test_nested_execution_refuses_without_deadlock(client):
-    nested = []
+def test_nested_execution_refuses_without_deadlock(client: MeshInterface) -> None:
+    nested: list[CommandResult] = []
 
-    def stream(chunk):
+    def stream(chunk: str) -> None:
         nested.append(executeCommand(client, ["--nodes"]))
 
     assert executeCommand(client, ["--nodes"], output=stream).succeeded
     assert nested and all(isinstance(result.error, RuntimeError) for result in nested)
 
 
-def test_quiet_invalid_set_retains_error_detail(client, capsys):
-    client.localNode.localConfig.lora.region = 1
+def test_quiet_invalid_set_retains_error_detail(
+    client: MeshInterface, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client.localNode.localConfig.lora.region = cast(
+        "config_pb2.Config.LoRaConfig.RegionCode.ValueType", 1
+    )
     result = executeCommand(client, ["--set", "lora.region", "nonsense", "--quiet"])
     assert result.exitCode == 2 and isinstance(result.error, ValueError)
     assert "nonsense" in result.output
@@ -733,24 +783,26 @@ def test_quiet_invalid_set_retains_error_detail(client, capsys):
     assert capsys.readouterr() == ("", "")
 
 
-def test_output_callback_system_exit_propagates_and_releases_lock(client):
-    def stop(chunk):
+def test_output_callback_system_exit_propagates_and_releases_lock(
+    client: MeshInterface,
+) -> None:
+    def stop(chunk: str) -> None:
         raise SystemExit(7)
 
     with pytest.raises(SystemExit) as stopped:
         executeCommand(client, ["--nodes"], output=stop)
     assert stopped.value.code == 7
-    client.close.assert_not_called()
+    cast(Mock, client.close).assert_not_called()
     assert executeCommand(client, ["--nodes"]).succeeded
 
 
-def test_max_output_bytes_must_be_positive(client):
+def test_max_output_bytes_must_be_positive(client: MeshInterface) -> None:
     for bad in (0, True):
         with pytest.raises(ValueError, match="maxOutputBytes must be a positive"):
             executeCommand(client, ["--nodes"], maxOutputBytes=bad)
 
 
-def test_output_budget_exhaustion_stops_retaining_text(client):
+def test_output_budget_exhaustion_stops_retaining_text(client: MeshInterface) -> None:
     result = executeCommand(client, ["--nodes"], maxOutputBytes=1)
 
     assert result.succeeded
@@ -758,8 +810,8 @@ def test_output_budget_exhaustion_stops_retaining_text(client):
     assert len(result.output) <= 1
 
 
-def test_argparse_error_write_failure_returns_sink_error(client):
-    def failing_sink(chunk):
+def test_argparse_error_write_failure_returns_sink_error(client: MeshInterface) -> None:
+    def failing_sink(chunk: str) -> None:
         raise RuntimeError("sink down")
 
     result = executeCommand(client, ["--definitely-not-an-option"], output=failing_sink)
@@ -770,7 +822,9 @@ def test_argparse_error_write_failure_returns_sink_error(client):
     assert "--definitely-not-an-option" in result.output
 
 
-def test_get_with_unknown_section_returns_argument_error(client):
+def test_get_with_unknown_section_returns_argument_error(
+    client: MeshInterface,
+) -> None:
     result = executeCommand(client, ["--get", "bogus.section"])
 
     assert result.exitCode == 2
@@ -778,10 +832,12 @@ def test_get_with_unknown_section_returns_argument_error(client):
     assert "Unknown" in result.output
 
 
-def test_get_reads_fresh_module_section(client, monkeypatch):
+def test_get_reads_fresh_module_section(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client.localNode.moduleConfig.mqtt.enabled = False
 
-    def send(envelope):
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         raw = admin_pb2.AdminMessage()
         raw.get_module_config_response.mqtt.enabled = True
         deliver(
@@ -800,8 +856,10 @@ def test_get_reads_fresh_module_section(client, monkeypatch):
     assert client.localNode.moduleConfig.mqtt.enabled is False
 
 
-def test_get_reads_fresh_deep_preference_path(client, monkeypatch):
-    def send(envelope):
+def test_get_reads_fresh_deep_preference_path(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         raw = admin_pb2.AdminMessage()
         raw.get_module_config_response.mqtt.map_report_settings.should_report_location = (
             True
@@ -823,8 +881,10 @@ def test_get_reads_fresh_deep_preference_path(client, monkeypatch):
     assert "should_report_location: True" in result.output
 
 
-def test_text_ack_ignores_data_feedback_packets(client, monkeypatch):
-    def send(envelope):
+def test_text_ack_ignores_data_feedback_packets(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def send(envelope: mesh_pb2.ToRadio) -> None:
         packet = envelope.packet
         deliver(
             client,
@@ -854,7 +914,7 @@ def test_text_ack_ignores_data_feedback_packets(client, monkeypatch):
     assert client.responseHandlers == {}
 
 
-def test_command_scope_ack_decode_error_records_nak():
+def test_command_scope_ack_decode_error_records_nak() -> None:
     interface = Mock()
     scope = _CommandScope(interface, print)
 
@@ -870,7 +930,7 @@ def test_command_scope_ack_decode_error_records_nak():
     interface._mark_wait_acknowledged.assert_not_called()
 
 
-def test_command_scope_routing_nak_records_error_before_ack_mark():
+def test_command_scope_routing_nak_records_error_before_ack_mark() -> None:
     interface = Mock()
     scope = _CommandScope(interface, print)
 
@@ -888,7 +948,7 @@ def test_command_scope_routing_nak_records_error_before_ack_mark():
     )
 
 
-def test_command_scope_ack_wait_timeout_raises():
+def test_command_scope_ack_wait_timeout_raises() -> None:
     interface = Mock()
     interface._has_active_wait_request.return_value = True
     interface._wait_for_request_ack.return_value = False
@@ -901,7 +961,7 @@ def test_command_scope_ack_wait_timeout_raises():
         scope._wait_for_acks()
 
 
-def test_command_scope_track_after_cleanup_raises():
+def test_command_scope_track_after_cleanup_raises() -> None:
     scope = _CommandScope(Mock(), print)
     scope._cleanup()
 
@@ -909,7 +969,7 @@ def test_command_scope_track_after_cleanup_raises():
         scope._track(10, "receivedNak")
 
 
-def test_command_scope_callback_after_cleanup_is_noop():
+def test_command_scope_callback_after_cleanup_is_noop() -> None:
     callback = Mock()
     scope = _CommandScope(Mock(), print)
     invoke = scope._bind_callback(callback)
