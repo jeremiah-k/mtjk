@@ -412,12 +412,14 @@ def test_probe_reports_true_when_tunsetiff_succeeds(
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(
-    not _tun_device_available(),
-    reason="requires a usable TUN device (/dev/net/tun with CAP_NET_ADMIN)",
-)
 def test_real_kernel_attaches_and_releases_tun_interface() -> None:
-    """Attach LinuxTunDevice to the real kernel and release it cleanly."""
+    """Attach and release a real TUN only when the test is executed.
+
+    Probe at execution time rather than at module import or collection, which
+    must remain side-effect-free even on privileged hosts.
+    """
+    if not _tun_device_available():
+        pytest.skip("requires a usable TUN device (/dev/net/tun with CAP_NET_ADMIN)")
     device = LinuxTunDevice(name="mtjkprobe")
     try:
         assert device.name.startswith("mtjkprobe")
