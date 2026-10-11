@@ -768,7 +768,7 @@ class TestThreadCoordinatorAssertLockOwned:
         # Replace lock with mock that lacks _is_owned
         mock_lock = MagicMock()
         del mock_lock._is_owned  # Ensure attribute is missing
-        coord._lock = mock_lock  # type: ignore[assignment]
+        coord._lock = mock_lock
         # Should not raise even without lock held
         coord._assert_lock_owned()
 

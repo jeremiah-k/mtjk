@@ -116,7 +116,7 @@ class TestWriteBytesInconsistency:
 
             call_count = [0]
 
-            def fake_monotonic():
+            def fake_monotonic() -> float:
                 call_count[0] += 1
                 if call_count[0] == 1:
                     return 0.0  # Start time

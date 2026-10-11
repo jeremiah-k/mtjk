@@ -5,6 +5,7 @@ in the BLE errors module to achieve comprehensive coverage.
 """
 
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from typing import Any, NoReturn
 from unittest.mock import Mock, patch
 
 import pytest
@@ -89,11 +90,11 @@ class TestBLEDBusTransportErrorFlattening:
 class TestDecodeErrorImport:
     """Test DecodeError import fallback behavior."""
 
-    def test_decodeerror_is_protobuf_by_default(self):
+    def test_decodeerror_is_protobuf_by_default(self) -> None:
         """DecodeError should be protobuf's DecodeError when available."""
         assert DecodeError is ProtobufDecodeError
 
-    def test_fallback_decodeerror_when_protobuf_unavailable(self):
+    def test_fallback_decodeerror_when_protobuf_unavailable(self) -> None:
         """Test that fallback DecodeError class behaves correctly.
 
         Note: Testing the actual import-time fallback path requires an isolated
@@ -114,7 +115,7 @@ class TestDecodeErrorImport:
         err2 = ble_errors_module.DecodeError("arg1", "arg2")
         assert err2.args == ("arg1", "arg2")
 
-    def test_non_google_import_error_raises_other_modules(self):
+    def test_non_google_import_error_raises_other_modules(self) -> None:
         """Non-google ImportError should propagate for non-google modules."""
         # Test the logic path used in the actual import error handling
         exc = ImportError("Some other error")
@@ -132,12 +133,12 @@ class TestDecodeErrorImport:
 class TestBLEErrorHandlerSafeExecute:
     """Test BLEErrorHandler._safe_execute and safe_execute methods."""
 
-    def test_safe_execute_success(self):
+    def test_safe_execute_success(self) -> None:
         """Test successful execution returns func result."""
         result = BLEErrorHandler._safe_execute(lambda: "success")
         assert result == "success"
 
-    def test_safe_execute_with_default_return(self):
+    def test_safe_execute_with_default_return(self) -> None:
         """Test default_return used when exception caught."""
         result = BLEErrorHandler._safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("BLE error")),
@@ -145,7 +146,7 @@ class TestBLEErrorHandlerSafeExecute:
         )
         assert result == "default"
 
-    def test_safe_execute_with_custom_default_return(self):
+    def test_safe_execute_with_custom_default_return(self) -> None:
         """Test custom default_return value."""
         custom_return = {"key": "value"}
         result = BLEErrorHandler._safe_execute(
@@ -154,7 +155,7 @@ class TestBLEErrorHandlerSafeExecute:
         )
         assert result is custom_return
 
-    def test_safe_execute_bleak_error_logging(self):
+    def test_safe_execute_bleak_error_logging(self) -> None:
         """Test BleakError is logged correctly."""
         with patch.object(logger, "debug") as mock_debug:
             BLEErrorHandler._safe_execute(
@@ -169,7 +170,7 @@ class TestBLEErrorHandlerSafeExecute:
             assert "BLE operation failed" in str(args)
             assert "connection failed" in str(args)
 
-    def test_safe_execute_decode_error_logging(self):
+    def test_safe_execute_decode_error_logging(self) -> None:
         """Test DecodeError is logged correctly."""
         with patch.object(logger, "debug") as mock_debug:
             BLEErrorHandler._safe_execute(
@@ -183,7 +184,7 @@ class TestBLEErrorHandlerSafeExecute:
             assert "Parse error" in str(args)
             assert "protobuf parse failed" in str(args)
 
-    def test_safe_execute_future_timeout_error_logging(self):
+    def test_safe_execute_future_timeout_error_logging(self) -> None:
         """Test FutureTimeoutError is logged correctly."""
         with patch.object(logger, "debug") as mock_debug:
             BLEErrorHandler._safe_execute(
@@ -199,7 +200,7 @@ class TestBLEErrorHandlerSafeExecute:
             assert "Timeout occurred" in str(args)
             assert "operation timed out" in str(args)
 
-    def test_safe_execute_no_logging_when_log_error_false(self):
+    def test_safe_execute_no_logging_when_log_error_false(self) -> None:
         """Test that no logging occurs when log_error=False."""
         with patch.object(logger, "debug") as mock_debug:
             result = BLEErrorHandler._safe_execute(
@@ -210,7 +211,7 @@ class TestBLEErrorHandlerSafeExecute:
             assert result == "fallback"
             mock_debug.assert_not_called()
 
-    def test_safe_execute_reraise_bleak_error(self):
+    def test_safe_execute_reraise_bleak_error(self) -> None:
         """Test BleakError is re-raised when reraise=True."""
         with pytest.raises(BleakError, match="test bleak error"):
             BLEErrorHandler._safe_execute(
@@ -218,7 +219,7 @@ class TestBLEErrorHandlerSafeExecute:
                 reraise=True,
             )
 
-    def test_safe_execute_reraise_decode_error(self):
+    def test_safe_execute_reraise_decode_error(self) -> None:
         """Test DecodeError is re-raised when reraise=True."""
         with pytest.raises(DecodeError, match="test decode error"):
             BLEErrorHandler._safe_execute(
@@ -226,7 +227,7 @@ class TestBLEErrorHandlerSafeExecute:
                 reraise=True,
             )
 
-    def test_safe_execute_reraise_future_timeout_error(self):
+    def test_safe_execute_reraise_future_timeout_error(self) -> None:
         """Test FutureTimeoutError is re-raised when reraise=True."""
         with pytest.raises(FutureTimeoutError, match="test timeout"):
             BLEErrorHandler._safe_execute(
@@ -234,7 +235,7 @@ class TestBLEErrorHandlerSafeExecute:
                 reraise=True,
             )
 
-    def test_safe_execute_generic_exception_logging(self):
+    def test_safe_execute_generic_exception_logging(self) -> None:
         """Test generic Exception is logged with exception() method."""
         with patch.object(logger, "exception") as mock_exception:
             result = BLEErrorHandler._safe_execute(
@@ -249,7 +250,7 @@ class TestBLEErrorHandlerSafeExecute:
             assert args[0] == "%s"
             assert "Generic error occurred" in str(args)
 
-    def test_safe_execute_generic_exception_reraise(self):
+    def test_safe_execute_generic_exception_reraise(self) -> None:
         """Test generic Exception is re-raised when reraise=True."""
         with pytest.raises(ValueError, match="generic exception"):
             BLEErrorHandler._safe_execute(
@@ -257,32 +258,32 @@ class TestBLEErrorHandlerSafeExecute:
                 reraise=True,
             )
 
-    def test_safe_execute_system_exit_reraised(self):
+    def test_safe_execute_system_exit_reraised(self) -> None:
         """Test SystemExit is always re-raised."""
         with pytest.raises(SystemExit, match="exit code 1"):
             BLEErrorHandler._safe_execute(
                 lambda: (_ for _ in ()).throw(SystemExit("exit code 1"))
             )
 
-    def test_safe_execute_system_exit_with_code(self):
+    def test_safe_execute_system_exit_with_code(self) -> None:
         """Test SystemExit with numeric code is re-raised."""
         with pytest.raises(SystemExit) as exc_info:
             BLEErrorHandler._safe_execute(lambda: (_ for _ in ()).throw(SystemExit(42)))
         assert exc_info.value.code == 42
 
-    def test_safe_execute_keyboard_interrupt_reraised(self):
+    def test_safe_execute_keyboard_interrupt_reraised(self) -> None:
         """Test KeyboardInterrupt is always re-raised."""
         with pytest.raises(KeyboardInterrupt):
             BLEErrorHandler._safe_execute(
                 lambda: (_ for _ in ()).throw(KeyboardInterrupt("user interrupt"))
             )
 
-    def test_safe_execute_class_method_wrapper(self):
+    def test_safe_execute_class_method_wrapper(self) -> None:
         """Test safe_execute class method delegates to _safe_execute."""
         result = BLEErrorHandler.safe_execute(lambda: "class method works")
         assert result == "class method works"
 
-    def test_safe_execute_class_method_with_exception(self):
+    def test_safe_execute_class_method_with_exception(self) -> None:
         """Test safe_execute handles exceptions."""
         result = BLEErrorHandler.safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("error")),
@@ -290,11 +291,11 @@ class TestBLEErrorHandlerSafeExecute:
         )
         assert result == "handled"
 
-    def test_safe_execute_all_parameters(self):
+    def test_safe_execute_all_parameters(self) -> None:
         """Test safe_execute with all parameter combinations."""
         call_count = 0
 
-        def counting_func():
+        def counting_func() -> str:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -311,20 +312,20 @@ class TestBLEErrorHandlerSafeExecute:
 class TestBLEErrorHandlerSafeCleanup:
     """Test BLEErrorHandler._safe_cleanup and safe_cleanup methods."""
 
-    def test_safe_cleanup_success(self):
+    def test_safe_cleanup_success(self) -> None:
         """Test successful cleanup returns True."""
         mock_cleanup = Mock(return_value=None)
         result = BLEErrorHandler._safe_cleanup(mock_cleanup, "test cleanup")
         assert result is True
         mock_cleanup.assert_called_once()
 
-    def test_safe_cleanup_success_with_return_value(self):
+    def test_safe_cleanup_success_with_return_value(self) -> None:
         """Test cleanup that returns a value."""
         mock_cleanup = Mock(return_value="some value")
         result = BLEErrorHandler._safe_cleanup(mock_cleanup)
         assert result is True
 
-    def test_safe_cleanup_exception_returns_false(self):
+    def test_safe_cleanup_exception_returns_false(self) -> None:
         """Test cleanup with exception returns False."""
         with patch.object(logger, "debug") as mock_debug:
             mock_cleanup = Mock(side_effect=ValueError("cleanup failed"))
@@ -337,7 +338,7 @@ class TestBLEErrorHandlerSafeCleanup:
             assert "custom cleanup" in str(args)
             assert "cleanup failed" in str(args)
 
-    def test_safe_cleanup_exception_no_cleanup_name(self):
+    def test_safe_cleanup_exception_no_cleanup_name(self) -> None:
         """Test cleanup with default cleanup_name."""
         with patch.object(logger, "debug") as mock_debug:
             mock_cleanup = Mock(side_effect=RuntimeError("runtime error"))
@@ -346,34 +347,34 @@ class TestBLEErrorHandlerSafeCleanup:
             args, _kwargs = mock_debug.call_args
             assert "cleanup operation" in str(args)
 
-    def test_safe_cleanup_system_exit_reraised(self):
+    def test_safe_cleanup_system_exit_reraised(self) -> None:
         """Test SystemExit is always re-raised in cleanup."""
         with pytest.raises(SystemExit, match="system exit"):
             BLEErrorHandler._safe_cleanup(
                 lambda: (_ for _ in ()).throw(SystemExit("system exit"))
             )
 
-    def test_safe_cleanup_system_exit_with_code(self):
+    def test_safe_cleanup_system_exit_with_code(self) -> None:
         """Test SystemExit with code is re-raised."""
         with pytest.raises(SystemExit) as exc_info:
             BLEErrorHandler._safe_cleanup(lambda: (_ for _ in ()).throw(SystemExit(1)))
         assert exc_info.value.code == 1
 
-    def test_safe_cleanup_keyboard_interrupt_reraised(self):
+    def test_safe_cleanup_keyboard_interrupt_reraised(self) -> None:
         """Test KeyboardInterrupt is always re-raised in cleanup."""
         with pytest.raises(KeyboardInterrupt):
             BLEErrorHandler._safe_cleanup(
                 lambda: (_ for _ in ()).throw(KeyboardInterrupt("ctrl+c"))
             )
 
-    def test_safe_cleanup_class_method_wrapper(self):
+    def test_safe_cleanup_class_method_wrapper(self) -> None:
         """Test safe_cleanup class method delegates to _safe_cleanup."""
         mock_cleanup = Mock(return_value=None)
         result = BLEErrorHandler.safe_cleanup(mock_cleanup, "wrapped cleanup")
         assert result is True
         mock_cleanup.assert_called_once()
 
-    def test_safe_cleanup_class_method_with_exception(self):
+    def test_safe_cleanup_class_method_with_exception(self) -> None:
         """Test safe_cleanup handles exceptions."""
         mock_cleanup = Mock(side_effect=Exception("error"))
         result = BLEErrorHandler.safe_cleanup(mock_cleanup)
@@ -383,7 +384,7 @@ class TestBLEErrorHandlerSafeCleanup:
 class TestErrorMessageFormatting:
     """Test error message formatting edge cases."""
 
-    def test_empty_error_message(self):
+    def test_empty_error_message(self) -> None:
         """Test handling of empty error message."""
         with patch.object(logger, "debug") as mock_debug:
             BLEErrorHandler._safe_execute(
@@ -397,7 +398,7 @@ class TestErrorMessageFormatting:
             # Empty error message results in format args being empty strings
             assert any(str(arg) == "" for arg in args[1:])
 
-    def test_long_error_message(self):
+    def test_long_error_message(self) -> None:
         """Test handling of long error message."""
         long_msg = "x" * 1000
         with patch.object(logger, "debug") as mock_debug:
@@ -411,7 +412,7 @@ class TestErrorMessageFormatting:
             assert "Long error" in str(args)
             assert long_msg in str(args)
 
-    def test_error_message_with_formatting_chars(self):
+    def test_error_message_with_formatting_chars(self) -> None:
         """Test error messages with special formatting characters."""
         special_msg = "Error with %s and %d and {}"
         with patch.object(logger, "debug") as mock_debug:
@@ -424,7 +425,7 @@ class TestErrorMessageFormatting:
             # Format string is first arg, actual args follow
             assert args[0] == "%s: %s"
 
-    def test_error_message_with_unicode(self):
+    def test_error_message_with_unicode(self) -> None:
         """Test error messages with unicode characters."""
         unicode_msg = "错误信息 💥 émoji"
         with patch.object(logger, "debug") as mock_debug:
@@ -438,7 +439,7 @@ class TestErrorMessageFormatting:
             assert "Unicode test" in str(args)
             assert unicode_msg in str(args)
 
-    def test_multiline_error_message(self):
+    def test_multiline_error_message(self) -> None:
         """Test error messages with newlines."""
         multiline_msg = "Line 1\nLine 2\nLine 3"
         with patch.object(logger, "debug") as mock_debug:
@@ -461,7 +462,7 @@ class TestErrorMessageFormatting:
 class TestExceptionInheritance:
     """Test exception class inheritance and properties."""
 
-    def test_bleak_error_inheritance(self):
+    def test_bleak_error_inheritance(self) -> None:
         """Test BleakError is caught by exception handler."""
         caught = False
         try:
@@ -473,11 +474,11 @@ class TestExceptionInheritance:
             pass
         assert caught, "BleakError should be caught, not re-raised with reraise=False"
 
-    def test_decode_error_is_exception(self):
+    def test_decode_error_is_exception(self) -> None:
         """Test DecodeError inherits from Exception."""
         assert issubclass(DecodeError, Exception)
 
-    def test_future_timeout_error_inheritance(self):
+    def test_future_timeout_error_inheritance(self) -> None:
         """Test FutureTimeoutError is caught appropriately."""
         assert issubclass(FutureTimeoutError, Exception)
         # Test it's caught by the handler
@@ -487,7 +488,7 @@ class TestExceptionInheritance:
         )
         assert result == "caught"
 
-    def test_exception_chaining(self):
+    def test_exception_chaining(self) -> None:
         """Test exception context is preserved."""
         try:
             try:
@@ -502,7 +503,7 @@ class TestExceptionInheritance:
 class TestEdgeCases:
     """Test various edge cases and boundary conditions."""
 
-    def test_safe_execute_with_none_default_return(self):
+    def test_safe_execute_with_none_default_return(self) -> None:
         """Test that None default_return works correctly."""
         result = BLEErrorHandler._safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("error")),
@@ -510,7 +511,7 @@ class TestEdgeCases:
         )
         assert result is None
 
-    def test_safe_execute_with_falsy_default_return(self):
+    def test_safe_execute_with_falsy_default_return(self) -> None:
         """Test falsy default_return values."""
         # Test empty string
         result = BLEErrorHandler._safe_execute(
@@ -520,36 +521,36 @@ class TestEdgeCases:
         assert result == ""
 
         # Test zero
-        result = BLEErrorHandler._safe_execute(
+        zero_result = BLEErrorHandler._safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("error")),
             default_return=0,
         )
-        assert result == 0
+        assert zero_result == 0
 
         # Test False
-        result = BLEErrorHandler._safe_execute(
+        false_result = BLEErrorHandler._safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("error")),
             default_return=False,
         )
-        assert result is False
+        assert false_result is False
 
         # Test empty list
-        result = BLEErrorHandler._safe_execute(
+        empty_list_result: list[Any] | None = BLEErrorHandler._safe_execute(
             lambda: (_ for _ in ()).throw(BleakError("error")),
             default_return=[],
         )
-        assert result == []
+        assert empty_list_result == []
 
-    def test_safe_cleanup_with_none_result(self):
+    def test_safe_cleanup_with_none_result(self) -> None:
         """Test cleanup returning None is still success."""
         result = BLEErrorHandler._safe_cleanup(lambda: None)
         assert result is True
 
-    def test_safe_execute_func_with_side_effects(self):
+    def test_safe_execute_func_with_side_effects(self) -> None:
         """Test that func side effects happen before exception."""
         side_effect_called = False
 
-        def func_with_side_effects():
+        def func_with_side_effects() -> None:
             nonlocal side_effect_called
             side_effect_called = True
             raise BleakError("after side effect")
@@ -557,11 +558,11 @@ class TestEdgeCases:
         BLEErrorHandler._safe_execute(func_with_side_effects, reraise=False)
         assert side_effect_called is True
 
-    def test_nested_exceptions(self):
+    def test_nested_exceptions(self) -> None:
         """Test handling of nested exception scenarios."""
         call_order = []
 
-        def outer_func():
+        def outer_func() -> NoReturn:
             call_order.append("outer")
             raise BleakError("outer error")
 
@@ -573,23 +574,23 @@ class TestEdgeCases:
 class TestModuleExports:
     """Test module exports and public API."""
 
-    def test_all_exports_defined(self):
+    def test_all_exports_defined(self) -> None:
         """Test __all__ is properly defined."""
         assert hasattr(ble_errors_module, "__all__")
         assert "BLEErrorHandler" in ble_errors_module.__all__
         assert "DecodeError" in ble_errors_module.__all__
 
-    def test_ble_error_handler_callable(self):
+    def test_ble_error_handler_callable(self) -> None:
         """Test BLEErrorHandler class is accessible."""
         assert callable(BLEErrorHandler)
         handler = BLEErrorHandler()
         assert handler is not None
 
-    def test_safe_execute_staticmethod(self):
+    def test_safe_execute_staticmethod(self) -> None:
         """Test _safe_execute is a static method."""
         assert isinstance(BLEErrorHandler._safe_execute, type(lambda: None))
 
-    def test_safe_cleanup_staticmethod(self):
+    def test_safe_cleanup_staticmethod(self) -> None:
         """Test _safe_cleanup is a static method."""
         assert isinstance(BLEErrorHandler._safe_cleanup, type(lambda: None))
 

@@ -35,7 +35,7 @@ def test_ruff_version_reader_accepts_surrounding_whitespace(
     )
     monkeypatch.setattr(module, "TRUNK_CONFIG", trunk_file)
 
-    assert module._ruff_version_from_trunk() == "0.16.2"  # type: ignore[attr-defined]
+    assert module._ruff_version_from_trunk() == "0.16.2"
 
 
 @pytest.mark.unit
@@ -67,7 +67,7 @@ def test_ruff_version_reader_rejects_missing_malformed_or_duplicate_pins(
         RuntimeError,
         match=rf"Expected exactly one Ruff pin .*; found {found_count}",
     ):
-        module._ruff_version_from_trunk()  # type: ignore[attr-defined]
+        module._ruff_version_from_trunk()
 
 
 @pytest.mark.unit
@@ -95,7 +95,7 @@ def test_ruff_version_reader_requires_the_lint_enabled_section(
     monkeypatch.setattr(module, "TRUNK_CONFIG", trunk_file)
 
     with pytest.raises(RuntimeError, match=expected_message):
-        module._ruff_version_from_trunk()  # type: ignore[attr-defined]
+        module._ruff_version_from_trunk()
 
 
 @pytest.mark.unit
@@ -108,7 +108,7 @@ def test_ruff_version_reader_reports_unreadable_config(
     monkeypatch.setattr(module, "TRUNK_CONFIG", trunk_file)
 
     with pytest.raises(RuntimeError, match="Unable to read Trunk configuration"):
-        module._ruff_version_from_trunk()  # type: ignore[attr-defined]
+        module._ruff_version_from_trunk()
 
 
 @pytest.mark.unit
@@ -122,7 +122,7 @@ def test_quality_version_checker_writes_sanitized_github_env(
     github_env = tmp_path / "github-env"
     monkeypatch.setattr(module, "TRUNK_CONFIG", trunk_file)
 
-    assert module.main(["--github-env", str(github_env)]) == 0  # type: ignore[attr-defined]
+    assert module.main(["--github-env", str(github_env)]) == 0
     assert github_env.read_text(encoding="utf-8") == "RUFF_VERSION=0.16.1\n"
 
 
@@ -138,5 +138,5 @@ def test_quality_version_checker_prints_only_the_requested_version(
     trunk_file.write_text("lint:\n  enabled:\n    - ruff@0.16.2\n", encoding="utf-8")
     monkeypatch.setattr(module, "TRUNK_CONFIG", trunk_file)
 
-    assert module.main(["--print-ruff-version"]) == 0  # type: ignore[attr-defined]
+    assert module.main(["--print-ruff-version"]) == 0
     assert capsys.readouterr().out == "0.16.2\n"

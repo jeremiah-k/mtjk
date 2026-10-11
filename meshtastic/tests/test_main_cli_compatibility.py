@@ -9,6 +9,10 @@ from unittest.mock import MagicMock
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.configure_actions as cli_configure_actions
+import meshtastic.cli.device_actions as cli_device_actions
+from meshtastic.cli.values import is_local_destination as _is_local_destination
+from meshtastic.configure_verify import _verify_channel_url_against_state
 from meshtastic.protobuf import localonly_pb2
 
 
@@ -41,7 +45,7 @@ def test_void_configure_compat_wrappers_delegate(
     """Retained ``__main__`` seams must delegate to the internal runtime."""
     delegate = MagicMock()
     hooks = object()
-    monkeypatch.setattr(main_module.cli_configure_actions, wrapper_name, delegate)
+    monkeypatch.setattr(cli_configure_actions, wrapper_name, delegate)
     monkeypatch.setattr(main_module, "_configure_hooks", MagicMock(return_value=hooks))
     target = object()
 
@@ -60,7 +64,7 @@ def test_verify_config_sections_compat_wrapper_delegates(
     """The verification wrapper should preserve verified-fields forwarding."""
     delegate = MagicMock(return_value=True)
     monkeypatch.setattr(
-        main_module.cli_configure_actions, "_verify_config_sections", delegate
+        cli_configure_actions, "_verify_config_sections", delegate
     )
     verified: list[str] = []
     proto_config = object()
@@ -81,7 +85,7 @@ def test_verify_post_reconnect_compat_wrapper_injects_url_comparator(
     expected = main_module._ConfigureReconnectResult.VERIFIED
     delegate = MagicMock(return_value=expected)
     monkeypatch.setattr(
-        main_module.cli_configure_actions, "_verify_post_reconnect_config", delegate
+        cli_configure_actions, "_verify_post_reconnect_config", delegate
     )
     interface = MagicMock()
 
@@ -96,7 +100,7 @@ def test_verify_post_reconnect_compat_wrapper_injects_url_comparator(
     assert result is expected
     assert (
         delegate.call_args.kwargs["verify_channel_url_against_state"]
-        is main_module._verify_channel_url_against_state
+        is _verify_channel_url_against_state
     )
 
 
@@ -160,7 +164,7 @@ def test_ota_compat_wrapper_delegates_to_private_device_runtime(
 ) -> None:
     """The retained ``__main__`` OTA seam must delegate with historical hooks."""
     delegate = MagicMock()
-    monkeypatch.setattr(main_module.cli_device_actions, "_handle_ota_update", delegate)
+    monkeypatch.setattr(cli_device_actions, "_handle_ota_update", delegate)
     interface = MagicMock()
     args = SimpleNamespace(ota_update="firmware.bin", dest="^local")
     get_node_kwargs = {"timeout": 10}
@@ -173,5 +177,5 @@ def test_ota_compat_wrapper_delegates_to_private_device_runtime(
         get_node_kwargs,
         cli_exit=main_module._cli_exit,
         cli_print=main_module._cli_print,
-        is_local_destination=main_module._is_local_destination,
+        is_local_destination=_is_local_destination,
     )

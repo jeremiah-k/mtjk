@@ -62,7 +62,7 @@ class _ImmediateThread:
 class TestShutdownClientUnsubscribeFallback:
     """Test legacy unsubscribe_all fallback in _shutdown_client."""
 
-    def test_legacy_unsubscribe_all_with_finite_timeout_is_skipped(self):
+    def test_legacy_unsubscribe_all_with_finite_timeout_is_skipped(self) -> None:
         """When timeout is finite, do not retry legacy unsubscribe inline."""
         iface = MagicMock()
         iface.client = None
@@ -99,7 +99,7 @@ class TestShutdownClientUnsubscribeFallback:
 
         assert called_with == []
 
-    def test_legacy_unsubscribe_all_without_timeout_is_called(self):
+    def test_legacy_unsubscribe_all_without_timeout_is_called(self) -> None:
         """When no timeout is active, retry legacy unsubscribe without it."""
         iface = MagicMock()
         iface.client = None
@@ -138,7 +138,7 @@ class TestShutdownClientUnsubscribeFallback:
         assert len(called_with) == 1
         assert len(called_with[0]) == 1
 
-    def test_unsubscribe_all_unrelated_typeerror_propagates(self):
+    def test_unsubscribe_all_unrelated_typeerror_propagates(self) -> None:
         """Unrelated TypeError from unsubscribe_all should propagate through safe-cleanup."""
         iface = MagicMock()
         iface.client = None
@@ -176,7 +176,7 @@ class TestShutdownClientUnsubscribeFallback:
 class TestBoundedThreadTOCTOU:
     """Test bounded cleanup thread TOCTOU race fixes."""
 
-    def test_concurrent_cleanup_cannot_spawn_duplicate_threads(self):
+    def test_concurrent_cleanup_cannot_spawn_duplicate_threads(self) -> None:
         """Two concurrent close calls must not both start cleanup threads."""
         iface = MagicMock()
         iface._closed = True
@@ -218,7 +218,7 @@ class TestBoundedThreadTOCTOU:
 
         coordinator._cleanup_thread_coordinator()
 
-    def test_start_failure_clears_stored_ref(self):
+    def test_start_failure_clears_stored_ref(self) -> None:
         """If thread.start() fails, the stored ref must be cleared under lock."""
         iface = MagicMock()
         iface._closed = True
@@ -242,7 +242,7 @@ class TestBoundedThreadTOCTOU:
         # The ref should be cleared
         assert coordinator._bounded_cleanup_thread is None
 
-    def test_existing_skip_warning_behavior_intact(self):
+    def test_existing_skip_warning_behavior_intact(self) -> None:
         """When a previous bounded thread is alive, warn and skip without starting."""
         iface = MagicMock()
         iface._closed = True
@@ -267,7 +267,7 @@ class TestBoundedThreadTOCTOU:
         # but the warning behavior is preserved (skip + warn).
         previous.join.assert_not_called()
 
-    def test_mesh_close_start_failure_clears_ref(self):
+    def test_mesh_close_start_failure_clears_ref(self) -> None:
         """MeshInterface.close thread start failure clears the stored ref."""
         iface = MagicMock()
         iface._closed = True
@@ -285,7 +285,7 @@ class TestBoundedThreadTOCTOU:
 
         assert coordinator._bounded_mesh_close_thread is None
 
-    def test_mesh_close_skip_when_previous_alive(self):
+    def test_mesh_close_skip_when_previous_alive(self) -> None:
         """MeshInterface.close should skip when a previous bounded thread is alive."""
         iface = MagicMock()
         iface._closed = True
@@ -323,7 +323,7 @@ class TestShutdownStateProbeLocking:
             return ConnectionState.DISCONNECTED
 
         coordinator = BLEShutdownLifecycleCoordinator(
-            iface, session_state=session  # type: ignore[arg-type]
+            iface, session_state=session
         )
 
         result = coordinator._await_management_shutdown(  # noqa: SLF001

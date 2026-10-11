@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.device_actions as cli_device_actions
+import meshtastic.cli.config_io as cli_config_io
 from meshtastic import mt_config
 from meshtastic.__main__ import (
     _display_pref_name,
@@ -851,7 +853,7 @@ def test_client_notification_render_failure_is_contained(
     monkeypatch.setattr(main_module, "_current_invocation_args", lambda: None)
     monkeypatch.setattr(main_module, "_cli_print", prints.append)
     monkeypatch.setattr(
-        main_module.cli_device_actions,
+        cli_device_actions,
         "_render_key_verification_notification",
         MagicMock(side_effect=RuntimeError("renderer blew up")),
     )
@@ -870,7 +872,7 @@ def test_export_profile_compatibility_wrapper_delegates(
     """The historical __main__ profile-export seam delegates to config I/O runtime."""
     interface = MagicMock()
     exporter = MagicMock(return_value=b"profile")
-    monkeypatch.setattr(main_module.cli_config_io, "_export_profile", exporter)
+    monkeypatch.setattr(cli_config_io, "_export_profile", exporter)
 
     assert main_module.exportProfile(interface) == b"profile"
     exporter.assert_called_once_with(interface)

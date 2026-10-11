@@ -145,5 +145,5 @@ def test_declared_lock_rejects_instance_only_context_methods() -> None:
     # 3.10 raises the raw AttributeError from the type-level special-method
     # lookup; 3.11+ wraps it into a TypeError.
     with pytest.raises((TypeError, AttributeError)):
-        with candidate:  # type: ignore[attr-defined]
+        with candidate:
             pass

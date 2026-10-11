@@ -15,6 +15,7 @@ import pytest
 
 import meshtastic.__main__ as main_module
 from meshtastic import mt_config
+from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.__main__ import (
     _normalize_pref_name,
     _parse_host_port,
@@ -23,6 +24,11 @@ from meshtastic.__main__ import (
     support_info,
 )
 from meshtastic._branding import PRIMARY_CLI_NAME, UPSTREAM_PRODUCT_NAME
+from meshtastic.cli.values import (
+    is_local_destination as _is_local_destination,
+    parse_modem_preset_name,
+)
+from meshtastic.version import get_active_version
 
 # from ..radioconfig_pb2 import UserPreferences
 # import meshtastic.config_pb2
@@ -75,7 +81,7 @@ def test_main_init_parser_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert pytest_wrapped_e.type is SystemExit
     assert pytest_wrapped_e.value.code == 0
     out, err = capsys.readouterr()
-    assert out == f"{PRIMARY_CLI_NAME} {main_module.get_active_version()}\n"
+    assert out == f"{PRIMARY_CLI_NAME} {get_active_version()}\n"
     assert err == ""
 
 
@@ -170,14 +176,14 @@ def test_parse_modem_preset_name_uses_active_protobuf_schema(
     expected: str,
 ) -> None:
     """The generic preset parser should normalize every active enum value."""
-    assert main_module._parse_modem_preset_name(raw_value) == expected
+    assert parse_modem_preset_name(raw_value) == expected
 
 
 @pytest.mark.unit
 def test_parse_modem_preset_name_rejects_unknown_value() -> None:
     """Unknown generic presets should fail with schema-derived choices."""
     with pytest.raises(argparse.ArgumentTypeError, match="Unknown modem preset"):
-        main_module._parse_modem_preset_name("future-but-not-yet-in-schema")
+        parse_modem_preset_name("future-but-not-yet-in-schema")
 
 
 @pytest.mark.unit
@@ -192,7 +198,7 @@ def test_main_main_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert pytest_wrapped_e.type is SystemExit
     assert pytest_wrapped_e.value.code == 0
     out, err = capsys.readouterr()
-    assert out == f"{PRIMARY_CLI_NAME} {main_module.get_active_version()}\n"
+    assert out == f"{PRIMARY_CLI_NAME} {get_active_version()}\n"
     assert err == ""
 
 
@@ -343,12 +349,12 @@ def test_is_local_destination_accepts_hex_node_id_forms() -> None:
     iface = MagicMock()
     iface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
 
-    assert main_module._is_local_destination(iface, main_module.BROADCAST_ADDR) is True
-    assert main_module._is_local_destination(iface, MAIN_LOCAL_ADDR) is True
-    assert main_module._is_local_destination(iface, "!25d6e474") is True
-    assert main_module._is_local_destination(iface, "0x25D6E474") is True
-    assert main_module._is_local_destination(iface, str(int("25d6e474", 16))) is True
-    assert main_module._is_local_destination(iface, "!ffffffff") is False
+    assert _is_local_destination(iface, BROADCAST_ADDR) is True
+    assert _is_local_destination(iface, MAIN_LOCAL_ADDR) is True
+    assert _is_local_destination(iface, "!25d6e474") is True
+    assert _is_local_destination(iface, "0x25D6E474") is True
+    assert _is_local_destination(iface, str(int("25d6e474", 16))) is True
+    assert _is_local_destination(iface, "!ffffffff") is False
 
 
 @pytest.mark.unit

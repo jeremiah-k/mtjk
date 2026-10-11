@@ -18,7 +18,7 @@ def test_management_state_tracks_and_notifies_idle_waiters() -> None:
     state = BLEManagementState()
     notify_all = MagicMock(wraps=state.condition.notify_all)
     condition = SimpleNamespace(wait=state.condition.wait, notify_all=notify_all)
-    state._replace_condition(condition)  # type: ignore[arg-type]
+    state._replace_condition(condition)
 
     with state.lock:
         state._begin_locked()
@@ -43,7 +43,7 @@ def test_management_state_normalizes_underflow_and_notifies() -> None:
         wait=lambda *_args, **_kwargs: True,
         notify_all=notify_all,
     )
-    state._replace_condition(condition)  # type: ignore[arg-type]
+    state._replace_condition(condition)
     state.inflight = -3
 
     assert state.finish() is False
@@ -57,7 +57,7 @@ def test_management_state_lock_replacement_rebuilds_default_condition() -> None:
     state = BLEManagementState()
     replacement = threading.RLock()
 
-    state._replace_lock(replacement)  # type: ignore[arg-type]
+    state._replace_lock(replacement)
 
     assert state.lock is replacement
     with state.lock:
@@ -120,7 +120,7 @@ def test_management_state_condition_supports_context_only_lock() -> None:
             wait=_tracked_wait,
             notify_all=original_condition.notify_all,
         )
-    )  # type: ignore[arg-type]
+    )
 
     with state.lock:
         state._begin_locked()

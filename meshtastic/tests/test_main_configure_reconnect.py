@@ -4,6 +4,7 @@
 
 import base64
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+from meshtastic._core_constants import LOCAL_ADDR
 import meshtastic.__main__ as main_module
 from meshtastic.tests._main_legacy_support import (
     _build_configure_interface,
@@ -383,7 +385,7 @@ def test_post_seturl_stability_check_triggers_reconnect_when_disconnected(
         monotonic_value[0] += 0.1
         return monotonic_value[0]
 
-    monkeypatch.setattr(main_module.time, "monotonic", _monotonic)
+    monkeypatch.setattr(time, "monotonic", _monotonic)
     monkeypatch.setattr("time.sleep", lambda _: None)
 
     assert (
@@ -411,8 +413,8 @@ def test_configure_redacts_channel_url_progress_output(
     iface = MagicMock()
     iface.getNode.return_value = target_node
     iface.localNode = target_node
-    args = SimpleNamespace(configure=[str(config_path)], dest=main_module.LOCAL_ADDR)
-    monkeypatch.setattr(main_module.time, "sleep", lambda _seconds: None)
+    args = SimpleNamespace(configure=[str(config_path)], dest=LOCAL_ADDR)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     main_module._handle_configure_command(iface, args, {})
 

@@ -118,8 +118,8 @@ def test_request_wait_uses_shared_decode_error_key_primitive() -> None:
     """Request waits must share the single leaf-owned decode error key."""
     from meshtastic.mesh_interface_runtime import request_wait
 
-    assert request_wait.DECODE_ERROR_KEY is _core_constants.DECODE_ERROR_KEY
-    assert request_wait.DECODE_ERROR_KEY is meshtastic.DECODE_ERROR_KEY
+    assert getattr(request_wait, "DECODE_ERROR_KEY") is _core_constants.DECODE_ERROR_KEY
+    assert getattr(request_wait, "DECODE_ERROR_KEY") is meshtastic.DECODE_ERROR_KEY
 
 
 def test_core_owner_modules_do_not_import_package_root() -> None:

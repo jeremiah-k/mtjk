@@ -9,7 +9,7 @@ maximum retry limits, and concurrent reconnection attempt handling.
 import logging
 from threading import TIMEOUT_MAX, Event, RLock
 from types import SimpleNamespace
-from typing import Any, Generator
+from typing import Any, Generator, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -129,7 +129,7 @@ class TestReconnectSchedulerHookResolution:
     def test_resolve_legacy_hook_when_public_missing(self) -> None:
         """Legacy hook used when public missing."""
         legacy_hook = MagicMock(return_value="legacy")
-        coordinator = SimpleNamespace(_create_thread=legacy_hook)  # type: ignore[arg-type]
+        coordinator = SimpleNamespace(_create_thread=legacy_hook)
         interface = SimpleNamespace(
             _is_connection_closing=False,
             _can_initiate_connection=True,
@@ -206,7 +206,7 @@ class TestReconnectSchedulerThreadCreation:
         """Thread creation via coordinator succeeds."""
         mock_thread = SimpleNamespace(ident=12345, is_alive=lambda: True)
         create_hook = MagicMock(return_value=mock_thread)
-        coordinator = SimpleNamespace(create_thread=create_hook)  # type: ignore[arg-type]
+        coordinator = SimpleNamespace(create_thread=create_hook)
         interface = SimpleNamespace(
             _is_connection_closing=False,
             _can_initiate_connection=True,
@@ -224,7 +224,7 @@ class TestReconnectSchedulerThreadCreation:
             name="TestThread",
             daemon=True,
         )
-        assert thread is mock_thread
+        assert thread is cast(Any, mock_thread)
         create_hook.assert_called_once()
 
     @pytest.mark.unit
@@ -235,14 +235,14 @@ class TestReconnectSchedulerThreadCreation:
         def start_hook(thread: Any) -> None:
             calls.append(thread)
 
-        coordinator = SimpleNamespace(start_thread=start_hook)  # type: ignore[arg-type]
+        coordinator = SimpleNamespace(start_thread=start_hook)
         interface = SimpleNamespace(
             _is_connection_closing=False,
             _can_initiate_connection=True,
         )
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
-            state_lock=RLock(),  # type: ignore[arg-type]
+            state_lock=RLock(),
             thread_coordinator=coordinator,  # type: ignore[arg-type]
             interface=interface,  # type: ignore[arg-type]
         )
@@ -256,7 +256,7 @@ class TestReconnectSchedulerScheduleReconnect:
     """Tests for reconnect scheduling logic."""
 
     @pytest.mark.unit
-    def test_schedule_reconnect_disabled(self) -> None:  # type: ignore[arg-type]
+    def test_schedule_reconnect_disabled(self) -> None:
         """Scheduling skipped when auto_reconnect is False."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -271,7 +271,7 @@ class TestReconnectSchedulerScheduleReconnect:
         assert result is False
 
     @pytest.mark.unit
-    def test_schedule_reconnect_interface_closing(self) -> None:  # type: ignore[arg-type]
+    def test_schedule_reconnect_interface_closing(self) -> None:
         """Scheduling skipped when interface is closing."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -286,19 +286,19 @@ class TestReconnectSchedulerScheduleReconnect:
         assert result is False
 
     @pytest.mark.unit
-    def test_schedule_reconnect_already_in_progress(self) -> None:  # type: ignore[arg-type]
+    def test_schedule_reconnect_already_in_progress(self) -> None:
         """Scheduling skipped when reconnect already in progress."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
             state_lock=RLock(),
             thread_coordinator=SimpleNamespace(),  # type: ignore[arg-type]
             interface=SimpleNamespace(  # type: ignore[arg-type]
-                _is_connection_closing=False,  # type: ignore[arg-type]
+                _is_connection_closing=False,
                 _can_initiate_connection=True,
             ),
         )
         # Simulate existing thread
-        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[arg-type,assignment]
+        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[assignment]
         result = scheduler._schedule_reconnect(True, Event())
         assert result is False
 
@@ -308,7 +308,7 @@ class TestReconnectSchedulerScheduleReconnect:
         mock_thread = SimpleNamespace(ident=None, is_alive=lambda: False)
         coordinator = SimpleNamespace(
             create_thread=lambda **_: mock_thread,
-            start_thread=lambda _: None,  # type: ignore[arg-type]
+            start_thread=lambda _: None,
         )
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -329,7 +329,7 @@ class TestReconnectSchedulerScheduleReconnect:
         mock_thread = SimpleNamespace(ident=12345, is_alive=lambda: True)
         coordinator = SimpleNamespace(
             create_thread=lambda **_: mock_thread,
-            start_thread=lambda _: None,  # type: ignore[arg-type]
+            start_thread=lambda _: None,
         )
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -342,14 +342,14 @@ class TestReconnectSchedulerScheduleReconnect:
         )
         result = scheduler._schedule_reconnect(True, Event())
         assert result is True
-        assert scheduler._reconnect_thread is mock_thread
+        assert scheduler._reconnect_thread is cast(Any, mock_thread)
 
 
 class TestReconnectSchedulerClearReference:
     """Tests for clearing thread reference."""
 
     @pytest.mark.unit
-    def test_clear_thread_reference(self) -> None:  # type: ignore[arg-type]
+    def test_clear_thread_reference(self) -> None:
         """Clear reference sets thread to None."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -360,7 +360,7 @@ class TestReconnectSchedulerClearReference:
                 _can_initiate_connection=True,
             ),
         )
-        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[arg-type,assignment]
+        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[assignment]
         scheduler._clear_thread_reference()
         assert scheduler._reconnect_thread is None
 
@@ -418,7 +418,7 @@ class TestReconnectWorkerCallPolicy:
             worker._call_policy("next_attempt")
         assert policy.synthesized_calls == 0
 
-    @pytest.mark.unit  # type: ignore[arg-type]
+    @pytest.mark.unit
     def test_call_policy_missing_raises(self) -> None:
         """Missing policy method raises ReconnectPolicyMissingMethodError."""
         policy = SimpleNamespace()
@@ -436,7 +436,7 @@ class TestReconnectWorkerShouldAbortReconnect:
     @pytest.mark.unit
     def test_should_abort_when_closing(self) -> None:
         """Abort when interface is closing."""
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=True,
             auto_reconnect=True,
         )
@@ -449,7 +449,7 @@ class TestReconnectWorkerShouldAbortReconnect:
     @pytest.mark.unit
     def test_should_abort_when_auto_reconnect_disabled(self) -> None:
         """Abort when auto_reconnect is disabled."""
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=False,
         )
@@ -462,7 +462,7 @@ class TestReconnectWorkerShouldAbortReconnect:
     @pytest.mark.unit
     def test_should_not_abort_when_enabled_and_open(self) -> None:
         """Don't abort when enabled and not closing."""
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=True,
         )
@@ -475,7 +475,7 @@ class TestReconnectWorkerShouldAbortReconnect:
     @pytest.mark.unit
     def test_should_abort_with_context(self) -> None:
         """Context string included in debug output."""
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=True,
             auto_reconnect=True,
         )
@@ -490,7 +490,7 @@ class TestReconnectWorkerShouldAbortReconnect:
 class TestReconnectWorkerValidateNextAttempt:
     """Tests for next_attempt validation."""
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_valid_tuple(self) -> None:
         """Valid tuple returns NextAttempt."""
@@ -503,7 +503,7 @@ class TestReconnectWorkerValidateNextAttempt:
         assert result.delay == 1.5
         assert result.should_retry is True
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_invalid_not_tuple(self) -> None:
         """Non-tuple returns None."""
@@ -513,7 +513,7 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt("invalid") is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_invalid_wrong_length(self) -> None:
         """Tuple with wrong length returns None."""
@@ -524,7 +524,7 @@ class TestReconnectWorkerValidateNextAttempt:
         assert worker._validate_next_attempt((1.0,)) is None
         assert worker._validate_next_attempt((1.0, True, "extra")) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_invalid_delay_type(self) -> None:
         """Invalid delay type returns None."""
@@ -534,7 +534,7 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt(("delay", True)) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_invalid_delay_bool(self) -> None:
         """Boolean delay treated as invalid."""
@@ -544,7 +544,7 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt((True, True)) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_invalid_retry_type(self) -> None:
         """Invalid should_retry type returns None."""
@@ -554,7 +554,7 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt((1.0, "yes")) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_non_finite_delay(self) -> None:
         """Non-finite delay returns None."""
@@ -565,7 +565,7 @@ class TestReconnectWorkerValidateNextAttempt:
         assert worker._validate_next_attempt((float("inf"), True)) is None
         assert worker._validate_next_attempt((float("nan"), True)) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_negative_delay(self) -> None:
         """Negative delay returns None."""
@@ -575,7 +575,7 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt((-1.0, True)) is None
 
-    # type: ignore[arg-type]
+
     @pytest.mark.unit
     def test_validate_delay_exceeds_timeout_max(self) -> None:
         """Delay exceeding TIMEOUT_MAX is capped."""
@@ -591,7 +591,7 @@ class TestReconnectWorkerValidateNextAttempt:
 class TestReconnectWorkerGetValidatedNextAttempt:
     """Tests for get_validated_next_attempt method."""
 
-    @pytest.mark.unit  # type: ignore[arg-type]
+    @pytest.mark.unit
     def test_get_validated_success(self) -> None:
         """Successful policy call returns validated result."""
         policy = ReconnectPolicy(max_retries=3)
@@ -604,7 +604,7 @@ class TestReconnectWorkerGetValidatedNextAttempt:
         assert result.delay > 0
         assert isinstance(result.should_retry, bool)
 
-    @pytest.mark.unit  # type: ignore[arg-type]
+    @pytest.mark.unit
     def test_get_validated_policy_missing_method(self) -> None:
         """Missing policy method returns None."""
         policy = SimpleNamespace()
@@ -618,7 +618,7 @@ class TestReconnectWorkerGetValidatedNextAttempt:
 class TestReconnectWorkerConnectedElsewhereGate:
     """Tests for connected elsewhere gate handling."""
 
-    @pytest.mark.unit  # type: ignore[arg-type]
+    @pytest.mark.unit
     def test_gate_no_address(self) -> None:
         """Gate returns None when no address."""
         interface = SimpleNamespace(address=None)
@@ -629,7 +629,7 @@ class TestReconnectWorkerConnectedElsewhereGate:
         result = worker._handle_connected_elsewhere_gate(interface, 1, Event())  # type: ignore[arg-type]
         assert result is None
 
-    @pytest.mark.unit  # type: ignore[arg-type]
+    @pytest.mark.unit
     def test_gate_not_connected_elsewhere(self) -> None:
         """Gate returns None when not connected elsewhere."""
         interface = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
@@ -648,7 +648,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
     def test_loop_aborts_when_interface_closing(self) -> None:
         """Loop aborts immediately when interface is closing."""
         shutdown_event = Event()
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=True,
             auto_reconnect=True,
         )
@@ -664,7 +664,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
     def test_loop_aborts_when_auto_reconnect_disabled(self) -> None:
         """Loop aborts immediately when auto_reconnect disabled."""
         shutdown_event = Event()
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=False,
         )
@@ -683,7 +683,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
         policy._attempt_count = 5  # Set non-zero
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -703,7 +703,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
         policy = ReconnectPolicy(max_retries=1)
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -722,7 +722,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
         policy = ReconnectPolicy(max_retries=1)
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -742,7 +742,7 @@ class TestReconnectWorkerAttemptReconnectLoop:
         policy = ReconnectPolicy(max_retries=None)
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -846,7 +846,7 @@ class TestReconnectWorkerAttemptCountValidation:
             get_attempt_count=lambda: None,
         )
         interface = SimpleNamespace(
-            _is_connection_closing=False,  # type: ignore[arg-type]
+            _is_connection_closing=False,
             auto_reconnect=True,
             _is_connection_connected=False,
         )
@@ -866,7 +866,7 @@ class TestReconnectWorkerAttemptCountValidation:
             get_attempt_count=lambda: "invalid",
         )
         interface = SimpleNamespace(
-            _is_connection_closing=False,  # type: ignore[arg-type]
+            _is_connection_closing=False,
             auto_reconnect=True,
             _is_connection_connected=False,
         )
@@ -886,7 +886,7 @@ class TestReconnectWorkerAttemptCountValidation:
             get_attempt_count=lambda: True,
         )
         interface = SimpleNamespace(
-            _is_connection_closing=False,  # type: ignore[arg-type]
+            _is_connection_closing=False,
             auto_reconnect=True,
             _is_connection_connected=False,
         )
@@ -902,19 +902,19 @@ class TestReconnectWorkerConcurrentHandling:
     """Tests for concurrent reconnection attempt handling."""
 
     @pytest.mark.unit
-    def test_concurrent_scheduler_checks_thread_reference(self) -> None:  # type: ignore[arg-type]
+    def test_concurrent_scheduler_checks_thread_reference(self) -> None:
         """Scheduler checks existing thread reference to prevent duplicates."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
             state_lock=RLock(),
             thread_coordinator=SimpleNamespace(),  # type: ignore[arg-type]
             interface=SimpleNamespace(  # type: ignore[arg-type]
-                _is_connection_closing=False,  # type: ignore[arg-type]
+                _is_connection_closing=False,
                 _can_initiate_connection=True,
             ),
         )
         # First scheduling attempt
-        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[arg-type,assignment]
+        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[assignment]
         # Second attempt should be rejected
         result = scheduler._schedule_reconnect(True, Event())
         assert result is False
@@ -930,7 +930,7 @@ class TestReconnectWorkerTimeoutScenarios:
         policy = ReconnectPolicy(max_retries=5)
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -954,7 +954,7 @@ class TestReconnectWorkerEdgeCases:
         policy = ReconnectPolicy(max_retries=5)
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="",
         )
@@ -973,7 +973,7 @@ class TestReconnectWorkerEdgeCases:
         policy._attempt_count = 0
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=True,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -995,7 +995,7 @@ class TestReconnectWorkerErrorHandling:
         policy = SimpleNamespace(
             reset=lambda: (_ for _ in ()).throw(Exception("reset error")),
         )
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=True,
         )
@@ -1016,7 +1016,7 @@ class TestReconnectWorkerErrorHandling:
         )
         interface = SimpleNamespace(
             _is_connection_closing=False,
-            auto_reconnect=True,  # type: ignore[arg-type]
+            auto_reconnect=True,
             _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
@@ -1081,7 +1081,7 @@ class TestReconnectSchedulerConcurrency:
     """Tests for scheduler concurrency handling."""
 
     @pytest.mark.unit
-    def test_clear_reference_while_in_progress(self) -> None:  # type: ignore[arg-type]
+    def test_clear_reference_while_in_progress(self) -> None:
         """Clearing reference during operation is safe."""
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -1092,7 +1092,7 @@ class TestReconnectSchedulerConcurrency:
                 _can_initiate_connection=True,
             ),
         )
-        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[arg-type,assignment]
+        scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[assignment]
         # Clear while "in progress"
         scheduler._clear_thread_reference()
         assert scheduler._reconnect_thread is None
@@ -1106,7 +1106,7 @@ class TestReconnectWorkerLogging:
     def test_debug_logs_with_context(self, caplog: pytest.LogCaptureFixture) -> None:
         """Debug logging includes context information."""
         caplog.set_level(logging.DEBUG)
-        interface = SimpleNamespace(  # type: ignore[arg-type]
+        interface = SimpleNamespace(
             _is_connection_closing=True,
             auto_reconnect=True,
         )
@@ -1134,7 +1134,7 @@ class TestReconnectSchedulerThreadExceptions:
 
         coordinator = SimpleNamespace(
             create_thread=lambda **_: mock_thread,
-            start_thread=failing_start,  # type: ignore[arg-type]
+            start_thread=failing_start,
         )
         scheduler = ReconnectScheduler(
             state_manager=BLEStateManager(),
@@ -1170,13 +1170,13 @@ class TestReconnectWorkerGating:
             interface = SimpleNamespace(
                 address=address,
                 _is_connection_closing=False,
-                auto_reconnect=True,  # type: ignore[arg-type]
+                auto_reconnect=True,
                 _is_connection_connected=False,
             )
             policy = ReconnectPolicy(max_retries=3, initial_delay=0.01)
             worker = ReconnectWorker(
                 interface=interface,  # type: ignore[arg-type]
-                reconnect_policy=policy,  # type: ignore[arg-type]
+                reconnect_policy=policy,
             )
 
             # Should detect connected elsewhere and wait
@@ -1205,7 +1205,7 @@ class TestReconnectWorkerGating:
                 address=address,
                 _is_connection_closing=False,
                 auto_reconnect=True,
-                _is_connection_connected=False,  # type: ignore[arg-type]
+                _is_connection_connected=False,
             )
             # Create policy with max_retries=0 so should_retry is False
             policy = ReconnectPolicy(max_retries=0, initial_delay=0.01)
@@ -1231,7 +1231,7 @@ class TestReconnectWorkerGating:
         shutdown_event = Event()
 
         try:
-            interface = SimpleNamespace(  # type: ignore[arg-type]
+            interface = SimpleNamespace(
                 _is_connection_closing=False,
                 _is_connection_connected=True,
                 address=address,
@@ -1278,7 +1278,7 @@ class TestReconnectWorkerErrorPaths:
         def failing_connect(_addr: str) -> None:
             raise MockBLEError("BLE connection failed")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1317,7 +1317,7 @@ class TestReconnectWorkerErrorPaths:
                 interface._is_connection_closing = True
             raise MockBLEError("BLE connection failed")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1344,7 +1344,7 @@ class TestReconnectWorkerErrorPaths:
         def failing_connect(_addr: str) -> None:
             raise ValueError("Unexpected error")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1376,7 +1376,7 @@ class TestReconnectWorkerErrorPaths:
                 interface.auto_reconnect = False  # Disable after first attempt
             raise ValueError("Unexpected error")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1400,7 +1400,7 @@ class TestReconnectWorkerPolicyMissingInLoop:
         # Policy without reset method
         policy = SimpleNamespace()
         interface = SimpleNamespace(
-            _is_connection_closing=False,  # type: ignore[arg-type]
+            _is_connection_closing=False,
             auto_reconnect=True,
             _is_connection_connected=False,
         )
@@ -1424,7 +1424,7 @@ class TestReconnectWorkerGateResults:
         interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=True,
-            _is_connection_connected=False,  # type: ignore[arg-type]
+            _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1454,7 +1454,7 @@ class TestReconnectWorkerGateResults:
         interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=True,
-            _is_connection_connected=False,  # type: ignore[arg-type]
+            _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1481,7 +1481,7 @@ class TestReconnectWorkerGateResults:
         worker._attempt_reconnect_loop(shutdown_event)
 
         # Restore original
-        worker._handle_connected_elsewhere_gate = original_gate  # type: ignore[method-assign,assignment]
+        worker._handle_connected_elsewhere_gate = original_gate  # type: ignore[method-assign]
 
 
 class TestReconnectWorkerBleakErrors:
@@ -1497,14 +1497,14 @@ class TestReconnectWorkerBleakErrors:
         interface = SimpleNamespace(
             _is_connection_closing=False,
             auto_reconnect=True,
-            _is_connection_connected=False,  # type: ignore[arg-type]
+            _is_connection_connected=False,
             address="AA:BB:CC:DD:EE:FF",
         )
 
         def failing_connect(_addr: str) -> None:
             raise BleakDBusError("org.bluez.Error.Failed", 1)  # type: ignore[arg-type]
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1533,7 +1533,7 @@ class TestReconnectWorkerBleakErrors:
         def failing_connect(_addr: str) -> None:
             raise BleakError("Generic BLE error")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1562,7 +1562,7 @@ class TestReconnectWorkerBleakErrors:
         def failing_connect(_addr: str) -> None:
             raise BleakDeviceNotFoundError("Device not found")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1589,14 +1589,14 @@ class TestReconnectWorkerBleakErrors:
             address="AA:BB:CC:DD:EE:FF",
         )
 
-        # type: ignore[arg-type]
+
         def failing_connect(_addr: str) -> None:
             if len(calls) == 0:
                 calls.append(True)
                 interface._is_connection_closing = True
             raise BleakDBusError("org.bluez.Error.Failed", 1)  # type: ignore[arg-type]
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1629,7 +1629,7 @@ class TestReconnectWorkerBleakErrors:
                 interface.auto_reconnect = False
             raise BleakError("Generic BLE error")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1665,7 +1665,7 @@ class TestReconnectWorkerPreSleepAbort:
                 interface._is_connection_closing = True
             raise ValueError("Connection failed")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1699,7 +1699,7 @@ class TestReconnectWorkerPreSleepAbort:
                 interface.auto_reconnect = False
             raise ValueError("Connection failed")
 
-        # type: ignore[arg-type]
+
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1733,8 +1733,8 @@ class TestReconnectWorkerRemainingCoverage:
         )
 
         # Policy that returns None for get_attempt_count
-        policy = SimpleNamespace(  # type: ignore[arg-type]
-            reset=lambda: None,  # type: ignore[arg-type]
+        policy = SimpleNamespace(
+            reset=lambda: None,
             get_attempt_count=lambda: None,
         )
         worker = ReconnectWorker(
@@ -1764,7 +1764,7 @@ class TestReconnectWorkerRemainingCoverage:
             interface = SimpleNamespace(
                 address=address,
                 _is_connection_closing=False,
-                auto_reconnect=True,  # type: ignore[arg-type]
+                auto_reconnect=True,
                 _is_connection_connected=False,
             )
             policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1804,7 +1804,7 @@ class TestReconnectWorkerRemainingCoverage:
         def failing_connect(_addr: str) -> None:
             raise MockBLEError("Connection failed")
 
-        interface.connect = failing_connect  # type: ignore[arg-type]
+        interface.connect = failing_connect
 
         # Policy with max_retries=0 so limit is reached immediately
         policy = ReconnectPolicy(max_retries=0, initial_delay=0.01)

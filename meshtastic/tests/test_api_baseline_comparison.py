@@ -103,7 +103,7 @@ def _extract_api_surface() -> dict[str, Any]:
     global _EXTRACTED_SURFACE_CACHE  # pylint: disable=global-statement
 
     if _EXTRACTED_SURFACE_CACHE is not None:
-        return cast(dict[str, Any], _EXTRACTED_SURFACE_CACHE)
+        return _EXTRACTED_SURFACE_CACHE
 
     project_root = Path(__file__).resolve().parents[2]
     script_path = project_root / "bin" / "extract_api_surface.py"
@@ -171,7 +171,7 @@ def load_baseline() -> dict[str, Any] | None:
         return None
 
     with open(baseline_file, encoding="utf-8") as f:
-        return json.load(f)
+        return cast("dict[str, Any]", json.load(f))
 
 
 def save_baseline(baseline_data: dict[str, Any]) -> None:
@@ -273,7 +273,7 @@ def stored_baseline() -> dict[str, Any] | None:
 def _should_update_baselines(pytestconfig: pytest.Config) -> bool:
     """Safely check if --update-baselines flag is set."""
     try:
-        return pytestconfig.getoption("--update-baselines", default=False)
+        return bool(pytestconfig.getoption("--update-baselines", default=False))
     except (ValueError, AttributeError):
         return False
 
@@ -287,8 +287,11 @@ class TestNodeAPIAgainstBaseline:
     """Tests to verify Node public API matches baseline."""
 
     def test_node_api_against_baseline(
-        self, current_baseline, stored_baseline, pytestconfig
-    ):
+        self,
+        current_baseline: dict[str, Any],
+        stored_baseline: dict[str, Any] | None,
+        pytestconfig: pytest.Config,
+    ) -> None:
         """Verify Node public API methods match the stored baseline.
 
         This test fails if:
@@ -328,7 +331,7 @@ class TestNodeAPIAgainstBaseline:
             msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
-    def test_node_critical_methods_present(self, current_baseline):
+    def test_node_critical_methods_present(self, current_baseline: dict[str, Any]) -> None:
         """Verify critical Node methods are always present regardless of baseline.
 
         This is a safety net to ensure core functionality isn't broken.
@@ -358,8 +361,11 @@ class TestMeshInterfaceAPIAgainstBaseline:
     """Tests to verify MeshInterface public API matches baseline."""
 
     def test_mesh_interface_api_against_baseline(
-        self, current_baseline, stored_baseline, pytestconfig
-    ):
+        self,
+        current_baseline: dict[str, Any],
+        stored_baseline: dict[str, Any] | None,
+        pytestconfig: pytest.Config,
+    ) -> None:
         """Verify MeshInterface public API methods match the stored baseline."""
         if stored_baseline is None:
             if _should_update_baselines(pytestconfig):
@@ -390,7 +396,9 @@ class TestMeshInterfaceAPIAgainstBaseline:
             msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
-    def test_mesh_interface_critical_methods_present(self, current_baseline):
+    def test_mesh_interface_critical_methods_present(
+        self, current_baseline: dict[str, Any]
+    ) -> None:
         """Verify critical MeshInterface methods are always present."""
         critical_methods = {
             "sendText",
@@ -417,8 +425,11 @@ class TestTopLevelExportsAgainstBaseline:
     """Tests to verify main package exports match baseline."""
 
     def test_top_level_exports_against_baseline(
-        self, current_baseline, stored_baseline, pytestconfig
-    ):
+        self,
+        current_baseline: dict[str, Any],
+        stored_baseline: dict[str, Any] | None,
+        pytestconfig: pytest.Config,
+    ) -> None:
         """Verify top-level exports from meshtastic package match baseline."""
         if stored_baseline is None:
             if _should_update_baselines(pytestconfig):
@@ -447,7 +458,7 @@ class TestTopLevelExportsAgainstBaseline:
             msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
-    def test_essential_exports_present(self, current_baseline):
+    def test_essential_exports_present(self, current_baseline: dict[str, Any]) -> None:
         """Verify essential exports are always present."""
         essential_exports = {
             "Node",
@@ -467,8 +478,11 @@ class TestLegacyImportPathsAgainstBaseline:
     """Tests to verify documented runtime compatibility import paths."""
 
     def test_legacy_import_paths_against_baseline(
-        self, current_baseline, stored_baseline, pytestconfig
-    ):
+        self,
+        current_baseline: dict[str, Any],
+        stored_baseline: dict[str, Any] | None,
+        pytestconfig: pytest.Config,
+    ) -> None:
         """Verify manifest-backed runtime compatibility import paths remain stable.
 
         Internal runtime modules that are absent from the manifest are free to move
@@ -507,7 +521,7 @@ class TestLegacyImportPathsAgainstBaseline:
 class TestSignatureAliasComparison:
     """Tests for signature comparison with approved aliases."""
 
-    def test_startota_alias_not_breaking(self):
+    def test_startota_alias_not_breaking(self) -> None:
         """Verify startOTA canonical signature remains non-breaking vs master."""
         base_sig = "(self, ota_mode:admin_pb2.OTAMode.ValueType, ota_file_hash:bytes)"
         pr_sig = (
@@ -520,7 +534,7 @@ class TestSignatureAliasComparison:
             base_sig, pr_sig, "Node", "startOTA"
         )
 
-    def test_startota_drift_from_develop_is_breaking(self):
+    def test_startota_drift_from_develop_is_breaking(self) -> None:
         """Verify switching positional order away from develop is breaking."""
         base_sig = (
             "(self, mode:admin_pb2.OTAMode.ValueType | None=None, "
@@ -537,7 +551,7 @@ class TestSignatureAliasComparison:
             base_sig, pr_sig, "Node", "startOTA"
         )
 
-    def test_startota_missing_param_is_breaking(self):
+    def test_startota_missing_param_is_breaking(self) -> None:
         """Verify removing a required param is still breaking."""
         base_sig = "(self, ota_mode:admin_pb2.OTAMode.ValueType, ota_file_hash:bytes)"
         pr_sig = "(self, ota_mode:admin_pb2.OTAMode.ValueType | None=None)"
@@ -546,7 +560,7 @@ class TestSignatureAliasComparison:
             base_sig, pr_sig, "Node", "startOTA"
         )
 
-    def test_startota_new_required_kwonly_is_breaking(self):
+    def test_startota_new_required_kwonly_is_breaking(self) -> None:
         """Verify adding a new required keyword-only param is breaking."""
         base_sig = "(self, ota_mode:admin_pb2.OTAMode.ValueType, ota_file_hash:bytes)"
         pr_sig = "(self, ota_mode:admin_pb2.OTAMode.ValueType, ota_file_hash:bytes, *, new_required:int)"
@@ -565,12 +579,12 @@ class TestCompatibilityGatePolicy:
         project_root = Path(__file__).resolve().parents[2]
         sys.path.insert(0, str(project_root / "bin"))
         try:
-            from compare_api_surfaces import (  # type: ignore[import-not-found]  # pylint: disable=import-error,import-outside-toplevel
+            from compare_api_surfaces import (  # pylint: disable=import-error,import-outside-toplevel
                 compare_exports,
             )
         finally:
             sys.path.pop(0)
-        return compare_exports
+        return cast("_COMPARE_EXPORTS_FN", compare_exports)
 
     def test_removing_established_root_export_is_breaking(self) -> None:
         """Established root exports (e.g. fixme) must fail the gate when dropped."""
@@ -700,7 +714,7 @@ class TestUpstreamBaselineRefreshWorkflow:
 class TestBaselineGeneration:
     """Tests for baseline generation utilities."""
 
-    def test_baseline_generation_succeeds(self):
+    def test_baseline_generation_succeeds(self) -> None:
         """Verify baseline generation works without errors."""
         api_baseline = generate_baseline()
 
@@ -714,7 +728,7 @@ class TestBaselineGeneration:
         assert len(api_baseline["mesh_interface_methods"]) > 0
         assert len(api_baseline["top_level_exports"]) > 0
 
-    def test_signature_capture_includes_parameters(self):
+    def test_signature_capture_includes_parameters(self) -> None:
         """Verify signature capture includes parameter information."""
         methods = capture_node_methods()
 
@@ -725,7 +739,7 @@ class TestBaselineGeneration:
         assert "self" in sig
         assert "long_name" in sig
 
-    def test_baseline_json_serializable(self):
+    def test_baseline_json_serializable(self) -> None:
         """Verify generated baseline can be serialized to JSON."""
         api_baseline = generate_baseline()
 

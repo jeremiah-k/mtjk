@@ -727,7 +727,7 @@ class TestBLECoroutineRunnerCancelPendingFutures:
         future.cancel = MagicMock(side_effect=RuntimeError("cancel failed"))
 
         with fresh_runner._instance_lock:
-            fresh_runner._pending_futures.add(future)  # type: ignore
+            fresh_runner._pending_futures.add(future)
 
         # Should not raise despite exception
         fresh_runner._cancel_pending_futures()
@@ -805,7 +805,7 @@ class TestBLECoroutineRunnerStop:
         mock_thread.join = MagicMock(return_value=None)
 
         with fresh_runner._instance_lock:
-            fresh_runner._thread = mock_thread  # type: ignore
+            fresh_runner._thread = mock_thread
 
         result = fresh_runner._stop(timeout=0.01)
 
@@ -922,7 +922,7 @@ class TestBLECoroutineRunnerCloseCoroutineSafely:
         # Coroutine should be closed - verify by checking it raises when used
         def use_closed_coro() -> None:
             try:
-                coro.send(None)  # type: ignore
+                coro.send(None)
             except StopIteration:
                 pass
 
@@ -935,7 +935,7 @@ class TestBLECoroutineRunnerCloseCoroutineSafely:
         coro.close = MagicMock(side_effect=RuntimeError("close failed"))
 
         # Should not raise
-        BLECoroutineRunner._close_coroutine_safely(coro)  # type: ignore
+        BLECoroutineRunner._close_coroutine_safely(coro)
 
 
 @pytest.mark.unit
@@ -1299,7 +1299,7 @@ class TestBLECoroutineRunnerStopLoopErrors:
 
         # Mock call_soon_threadsafe to raise
         with patch.object(
-            fresh_runner._loop,  # type: ignore
+            fresh_runner._loop,
             "call_soon_threadsafe",
             side_effect=RuntimeError("loop closing"),
         ):

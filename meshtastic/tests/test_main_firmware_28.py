@@ -2,6 +2,7 @@
 
 # pylint: disable=C0302,W0613,R0917
 
+import getpass
 import sys
 import threading
 from types import SimpleNamespace
@@ -108,7 +109,7 @@ def _run_lockdown_cli(
             mesh_pb2.LockdownStatus(state=authorization_state),  # type: ignore[arg-type]
             status,
         ]
-        monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: "secret")
+        monkeypatch.setattr(getpass, "getpass", lambda _prompt: "secret")
     monkeypatch.setattr(main_module, "build_lockdown_auth", build)
     monkeypatch.setattr(main_module, "send_lockdown_auth", send)
     main_module.onConnected(interface)
@@ -411,7 +412,7 @@ def test_lockdown_cli_provision_rejects_mismatched_interactive_passphrases(
 ) -> None:
     monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     prompts = iter(["secret", "different"])
-    monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: next(prompts))
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: next(prompts))
     _init_lockdown_cli(monkeypatch, "--lockdown-provision")
     interface = MagicMock()
     interface.devPath = ""
@@ -431,7 +432,7 @@ def test_lockdown_cli_provision_reports_auth_failure(
 ) -> None:
     monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     prompts = iter(["secret", "secret"])
-    monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: next(prompts))
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: next(prompts))
     monkeypatch.setattr(
         main_module, "validate_lockdown_passphrase", lambda value: value
     )
@@ -541,7 +542,7 @@ def test_lockdown_cli_lock_now_refuses_unauthorized_reboot(
         else MagicMock(return_value=mesh_pb2.LockdownStatus(state=auth_result))  # type: ignore[arg-type]
     )
     monkeypatch.setattr(main_module, "send_lockdown_auth", send)
-    monkeypatch.setattr(main_module.getpass, "getpass", lambda _prompt: "secret")
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "secret")
     _init_lockdown_cli(monkeypatch, "--lockdown-lock-now", "--lockdown-yes")
     interface = MagicMock()
     interface.devPath = ""
@@ -592,7 +593,7 @@ def test_lockdown_cli_waits_for_status_after_configuration_completion() -> None:
     status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.LOCKED)
 
     def _deliver() -> None:
-        interface.lockdownStatus = status  # type: ignore[assignment]
+        interface.lockdownStatus = status
         pub.sendMessage(LOCKDOWN_STATUS_TOPIC, interface=interface, status=status)
 
     timer = threading.Timer(0.01, _deliver)
@@ -749,7 +750,7 @@ def test_lockdown_cli_interactive_unlock_uses_single_prompt(
 ) -> None:
     getpass_mock = MagicMock(return_value="secret")
     validate_mock = MagicMock(return_value=b"secret")
-    monkeypatch.setattr(main_module.getpass, "getpass", getpass_mock)
+    monkeypatch.setattr(getpass, "getpass", getpass_mock)
     monkeypatch.setattr(main_module, "validate_lockdown_passphrase", validate_mock)
     status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCKED)
 

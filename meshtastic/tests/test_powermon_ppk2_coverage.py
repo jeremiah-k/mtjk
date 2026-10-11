@@ -7,7 +7,7 @@ and hardware state transitions.
 
 import math
 import threading
-from typing import Any, Generator, Type
+from typing import Any, Generator, Type, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -140,7 +140,7 @@ def test_constructor_auto_selects_single_device(
     )
 
     ppk = PPK2PowerSupply(portName=None)
-    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
+    assert ppk.r.port_name == "/dev/ttyACM0"
     ppk.close()
 
 
@@ -157,7 +157,7 @@ def test_constructor_with_explicit_port_name(
     )
 
     ppk = PPK2PowerSupply(portName="/dev/ttyUSB0")
-    assert ppk.r.port_name == "/dev/ttyUSB0"  # type: ignore[attr-defined]
+    assert ppk.r.port_name == "/dev/ttyUSB0"
     ppk.close()
 
 
@@ -175,7 +175,7 @@ def test_constructor_skips_auto_discovery_with_port_name(
 
     def mock_list_devices(_cls: type[Any]) -> list[str]:
         list_devices_called[0] = True
-        return original_list_devices()
+        return cast("list[str]", original_list_devices())
 
     mock_ppk2_api_class.list_devices = classmethod(mock_list_devices)
 
@@ -253,7 +253,7 @@ def test_constructor_deduplicates_same_normalized_port(
     )
 
     ppk = PPK2PowerSupply(portName=None)
-    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
+    assert ppk.r.port_name == "/dev/ttyACM0"
     ppk.close()
 
 
@@ -272,7 +272,7 @@ def test_constructor_auto_selects_single_tuple_device(
     )
 
     ppk = PPK2PowerSupply(portName=None)
-    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
+    assert ppk.r.port_name == "/dev/ttyACM0"
     ppk.close()
 
 
@@ -333,7 +333,7 @@ def test_constructor_mixed_shapes_select_single_valid_port(
     )
 
     ppk = PPK2PowerSupply(portName=None)
-    assert ppk.r.port_name == "/dev/ttyACM0"  # type: ignore[attr-defined]
+    assert ppk.r.port_name == "/dev/ttyACM0"
     ppk.close()
 
 
@@ -763,7 +763,7 @@ def test_constructor_api_init_failure_raises_error(
 ) -> None:
     """PPK2PowerSupply should propagate API initialization errors."""
 
-    def mock_api_init(port_name: str):
+    def mock_api_init(port_name: str) -> None:
         raise SerialException("Failed to open port")
 
     monkeypatch.setattr(
@@ -782,7 +782,7 @@ def test_constructor_get_modifiers_failure_raises_error(
 ) -> None:
     """PPK2PowerSupply should propagate get_modifiers() errors."""
 
-    class FailingAPI(mock_ppk2_api_class):
+    class FailingAPI(mock_ppk2_api_class):  # type: ignore[misc]  # dynamic mock class
         def get_modifiers(self) -> None:
             raise RuntimeError("Modifiers read failed")
 
@@ -918,7 +918,7 @@ def test_measurement_loop_uses_initial_timeout_on_first_read(
     ppk.r.get_data.side_effect = get_data_side_effect
     ppk.r.get_samples.return_value = ([1000], 0)
 
-    def mock_wait(_self, timeout: float | None = None) -> bool:
+    def mock_wait(_self: Any, timeout: float | None = None) -> bool:
         timeouts_used.append(timeout if timeout is not None else 0)
         return True
 
@@ -957,7 +957,7 @@ def test_measurement_loop_uses_subsequent_timeout_on_later_reads(
 
     timeouts_used: list[float] = []
 
-    def mock_wait(_self, timeout: float | None = None) -> bool:
+    def mock_wait(_self: Any, timeout: float | None = None) -> bool:
         timeouts_used.append(timeout if timeout is not None else 0)
         return True
 
@@ -1137,7 +1137,7 @@ def test_setIsSupply_creates_new_thread_when_previous_started(
     new_thread.ident = None
     new_thread.is_alive.return_value = False
 
-    def mock_thread(**kwargs):  # noqa: ARG001
+    def mock_thread(**kwargs: Any) -> MagicMock:  # noqa: ARG001
         return new_thread
 
     monkeypatch.setattr("meshtastic.powermon.ppk2.threading.Thread", mock_thread)
@@ -1314,24 +1314,24 @@ def test_setIsSupply_uses_lock_for_thread_safety(
     original_lock = ppk._measurement_state_lock
 
     class TrackingLock:
-        def __init__(self, real_lock):
+        def __init__(self, real_lock: Any) -> None:
             self._real_lock = real_lock
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             nonlocal lock_acquired
             lock_acquired = True
             return self._real_lock.__enter__()
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> Any:
             return self._real_lock.__exit__(*args)
 
-        def acquire(self, blocking=True, timeout=-1):
+        def acquire(self, blocking: bool = True, timeout: int = -1) -> Any:
             nonlocal lock_acquired
             lock_acquired = True
             return self._real_lock.acquire(blocking, timeout)
 
-        def release(self):
-            return self._real_lock.release()
+        def release(self) -> None:
+            self._real_lock.release()
 
     ppk._measurement_state_lock = TrackingLock(original_lock)  # type: ignore[assignment]
 
@@ -1488,7 +1488,7 @@ def test_measurement_loop_breaks_after_wait_when_measuring_false(
 
     # Set measuring to False during wait
 
-    def mock_wait(_self, timeout: float | None = None) -> bool:
+    def mock_wait(_self: Any, timeout: float | None = None) -> bool:
         ppk.measuring = False
         return True
 
@@ -1512,7 +1512,7 @@ def test_measurement_loop_handles_notify_during_reset(
 
     iteration_count = 0
 
-    def mock_wait(_self, timeout: float | None = None) -> bool:  # noqa: ARG001
+    def mock_wait(_self: Any, timeout: float | None = None) -> bool:  # noqa: ARG001
         nonlocal iteration_count
         iteration_count += 1
         if iteration_count >= 2:

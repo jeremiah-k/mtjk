@@ -61,17 +61,17 @@ from meshtastic.cli.context import ActionOutcome, CliContext, _terminate_cli
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
 # pylint: disable=unused-import
 from meshtastic.cli.parser import (  # noqa: F401,W0611 - legacy __main__ compatibility export
-    _MODEM_PRESET_SHORTHANDS,
-    addChannelConfigArgs,
-    addConfigArgs,
-    addConnectionArgs,
-    addImportExportArgs,
-    addLocalActionArgs,
-    addPositionConfigArgs,
-    addRemoteActionArgs,
-    addRemoteAdminArgs,
-    addSelectionArgs,
-    parse_cli_args,
+    _MODEM_PRESET_SHORTHANDS as _MODEM_PRESET_SHORTHANDS,
+    addChannelConfigArgs as addChannelConfigArgs,
+    addConfigArgs as addConfigArgs,
+    addConnectionArgs as addConnectionArgs,
+    addImportExportArgs as addImportExportArgs,
+    addLocalActionArgs as addLocalActionArgs,
+    addPositionConfigArgs as addPositionConfigArgs,
+    addRemoteActionArgs as addRemoteActionArgs,
+    addRemoteAdminArgs as addRemoteAdminArgs,
+    addSelectionArgs as addSelectionArgs,
+    parse_cli_args as parse_cli_args,
 )
 from meshtastic.cli.values import is_local_destination as _is_local_destination
 from meshtastic.cli.values import (  # noqa: F401,W0611 - legacy __main__ compatibility export

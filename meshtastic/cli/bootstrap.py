@@ -402,7 +402,7 @@ def _open_serial_transport(
         )
         _terminate_cli(hooks, message, 1)
 
-    if client.devPath is not None:
+    if getattr(client, "devPath", None) is not None:
         return client
 
     logger.info(
