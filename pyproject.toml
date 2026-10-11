@@ -10,6 +10,19 @@ license = "GPL-3.0-only"
 license-files = ["LICENSE.md"]
 readme = "README.md"
 requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Topic :: Communications",
+  "Typing :: Typed",
+]
 # Keep pypubsub >=4.0.7 for its PEP 561 typing metadata.
 dependencies = [
   "pyserial>=3.5,<4.0",
@@ -30,6 +43,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/jeremiah-k/mtjk"
 Repository = "https://github.com/jeremiah-k/mtjk"
+Issues = "https://github.com/jeremiah-k/mtjk/issues"
+Changelog = "https://github.com/jeremiah-k/mtjk/releases"
 
 [project.optional-dependencies]
 # CLI niceties are core dependencies; retain the historical no-op cli extra.
