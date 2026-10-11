@@ -18,8 +18,6 @@ fi
 
 distribution_name="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import DISTRIBUTION_NAME; print(DISTRIBUTION_NAME)')"
 primary_cli="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
-compatibility_cli_list="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import COMPATIBILITY_CLI_NAMES; print(" ".join(COMPATIBILITY_CLI_NAMES))')"
-read -r -a compatibility_clis <<<"${compatibility_cli_list}"
 
 "${PROJECT_RUN[@]}" pyinstaller \
 	--clean \
@@ -30,11 +28,6 @@ read -r -a compatibility_clis <<<"${compatibility_cli_list}"
 	--collect-all meshtastic \
 	meshtastic/__main__.py
 
-for compatibility_cli in "${compatibility_clis[@]}"; do
-	[[ -n ${compatibility_cli} ]] || continue
-	cp "dist/${primary_cli}" "dist/${compatibility_cli}"
-done
-
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
-	printf 'primary=%s\ncompatibility=%s\n' "${primary_cli}" "${compatibility_cli_list}" >>"${GITHUB_OUTPUT}"
+	printf 'primary=%s\n' "${primary_cli}" >>"${GITHUB_OUTPUT}"
 fi

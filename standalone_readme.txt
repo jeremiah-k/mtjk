@@ -9,9 +9,6 @@ chmod +x mtjk_ubuntu
 ./mtjk_ubuntu --help
 ```
 
-`meshtastic_ubuntu` is published from the same build as a compatibility name for
-existing workflows.
-
 See https://meshtastic.org/docs/software/python/cli/installation/#standalone-installation-ubuntu-only
 for upstream standalone-installation background.
 
