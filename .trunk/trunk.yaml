@@ -47,9 +47,8 @@ lint:
         - test_config.yaml
     - linters: [mypy-uv]
       paths:
-        # Keep Trunk's mypy scope aligned with CI (meshtastic/ only).
+        # Keep Trunk's mypy scope aligned with CI (meshtastic/ + examples/).
         - bin/**
-        - examples/**
         - tests/**
     - linters: [pylint-uv]
       paths:
@@ -68,7 +67,7 @@ lint:
       commands:
         - name: lint
           output: mypy
-          run: uv run --locked --project ${workspace} mypy meshtastic/
+          run: uv run --locked --project ${workspace} mypy meshtastic/ examples/ --strict
           target: meshtastic
           run_from: ${root_or_parent_with_any_config}
           disable_upstream: true

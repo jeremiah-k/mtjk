@@ -218,7 +218,7 @@ Current `COMPAT_DEPRECATE` methods:
 
 ## Type Checking
 
-- CI enforces `mypy meshtastic/ --strict`; PRs must keep the strict run clean.
+- CI enforces `mypy meshtastic/ examples/ --strict`; PRs must keep the strict run clean.
 - `make ci` runs the same strict check locally (plus pytest, pylint, ruff on tests).
 - New code should be fully annotated; avoid `type: ignore` unless the error is
   genuinely unfixable, and keep ignores narrowly coded (`# type: ignore[code]`).

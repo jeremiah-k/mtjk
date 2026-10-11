@@ -8,13 +8,14 @@ Cleanup/error handling: explicit connect failure message and clean close on call
 """
 
 import argparse
+from typing import Any
 
 from pubsub import pub
 
 import meshtastic.tcp_interface
 
 
-def on_connection(interface, topic=pub.AUTO_TOPIC):  # pylint: disable=unused-argument
+def on_connection(interface: Any, _topic: Any = pub.AUTO_TOPIC) -> None:
     """Print local radio info when connected, then close."""
     print(interface.myInfo)
     interface.close()

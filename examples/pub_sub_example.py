@@ -7,7 +7,7 @@ import sys
 import threading
 from typing import Any
 
-from pubsub import pub  # type: ignore[import-untyped]
+from pubsub import pub
 
 import meshtastic.tcp_interface
 
