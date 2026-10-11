@@ -49,7 +49,7 @@ def _run_main_argv(
 ) -> None:
     """Run ``main()`` with the supplied argv against the supplied interface."""
     _patch_configure_clock(monkeypatch)
-    time_attrs = vars(main_module.time).copy()
+    time_attrs = vars(time_module).copy()
     time_attrs["sleep"] = lambda _seconds: None
     with monkeypatch.context() as apply_patch:
         apply_patch.setattr(sys, "argv", ["", *argv])
@@ -310,7 +310,8 @@ def test_combined_set_then_configure_verifies_each_stage(
             getattr(device_truth, config_name).CopyFrom(
                 getattr(node.localConfig, config_name)
             )
-        return original_write_config(config_name)
+        original_write_config(config_name)
+        return None
 
     node.writeConfig = MagicMock(side_effect=_record_write)
 

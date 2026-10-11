@@ -13,7 +13,7 @@ import sys
 import textwrap
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -60,40 +60,40 @@ NANOPB_IMPORT = 'import "meshtastic/protobuf/nanopb.proto";'
 
 
 @pytest.mark.unit
-def test_parse_value_integer():
+def test_parse_value_integer() -> None:
     assert parse_value("40") == 40
 
 
 @pytest.mark.unit
-def test_parse_value_negative_integer():
+def test_parse_value_negative_integer() -> None:
     assert parse_value("-1") == -1
 
 
 @pytest.mark.unit
-def test_parse_value_true():
+def test_parse_value_true() -> None:
     assert parse_value("true") is True
 
 
 @pytest.mark.unit
-def test_parse_value_false():
+def test_parse_value_false() -> None:
     assert parse_value("false") is False
 
 
 @pytest.mark.unit
-def test_parse_value_string():
+def test_parse_value_string() -> None:
     assert parse_value("IS_8") == "IS_8"
 
 
 @pytest.mark.unit
 @given(st.integers())
-def test_parse_value_any_integer_returns_int(n):
+def test_parse_value_any_integer_returns_int(n: int) -> None:
     """parse_value always returns int for any decimal integer string."""
     assert parse_value(str(n)) == n
 
 
 @pytest.mark.unit
 @given(st.text())
-def test_parse_value_never_crashes(s):
+def test_parse_value_never_crashes(s: str) -> None:
     """parse_value never raises on arbitrary input."""
     result = parse_value(s)
     assert isinstance(result, (int, bool, str))
@@ -105,7 +105,7 @@ def test_parse_value_never_crashes(s):
         lambda s: not s.lstrip("-").isdigit() and s.lower() not in ("true", "false")
     )
 )
-def test_parse_value_non_numeric_non_bool_returns_str(s):
+def test_parse_value_non_numeric_non_bool_returns_str(s: str) -> None:
     """parse_value returns the original string when it is neither an integer nor a boolean."""
     assert parse_value(s) == s
 
@@ -122,7 +122,7 @@ def _write_options(tmp_path: Path, content: str) -> Path:
 
 
 @pytest.mark.unit
-def test_parse_wildcard(tmp_path):
+def test_parse_wildcard(tmp_path: Path) -> None:
     """Wildcard pattern (no dot) lands in the wildcard dict."""
     f = _write_options(tmp_path, "*macaddr max_size:6 fixed_length:true\n")
     specific, wildcard = parse_options_file(f)
@@ -132,7 +132,7 @@ def test_parse_wildcard(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_specific(tmp_path):
+def test_parse_specific(tmp_path: Path) -> None:
     """Single-dot pattern lands in the specific dict with a 2-tuple key."""
     f = _write_options(tmp_path, "*User.long_name max_size:40\n")
     specific, wildcard = parse_options_file(f)
@@ -142,7 +142,7 @@ def test_parse_specific(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_multilevel(tmp_path):
+def test_parse_multilevel(tmp_path: Path) -> None:
     """Three-part pattern (Route.Link.uid) produces a 3-tuple key."""
     f = _write_options(tmp_path, "*Route.Link.uid max_size:48\n")
     specific, wildcard = parse_options_file(f)
@@ -151,7 +151,7 @@ def test_parse_multilevel(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_strips_inline_comments(tmp_path):
+def test_parse_strips_inline_comments(tmp_path: Path) -> None:
     """Text after # is ignored."""
     f = _write_options(tmp_path, "*id max_size:16 # node id strings\n")
     _, wildcard = parse_options_file(f)
@@ -159,7 +159,7 @@ def test_parse_strips_inline_comments(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_skips_comment_only_lines(tmp_path):
+def test_parse_skips_comment_only_lines(tmp_path: Path) -> None:
     """Lines that are entirely comments produce no entries."""
     f = _write_options(tmp_path, "# this is a comment\n*id max_size:16\n")
     _, wildcard = parse_options_file(f)
@@ -167,7 +167,7 @@ def test_parse_skips_comment_only_lines(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_skips_blank_lines(tmp_path):
+def test_parse_skips_blank_lines(tmp_path: Path) -> None:
     """Blank lines are silently ignored."""
     f = _write_options(tmp_path, "\n\n*id max_size:16\n\n")
     _, wildcard = parse_options_file(f)
@@ -175,7 +175,7 @@ def test_parse_skips_blank_lines(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_skips_non_python_options(tmp_path):
+def test_parse_skips_non_python_options(tmp_path: Path) -> None:
     """Options not in FIELD_OPTIONS (e.g. anonymous_oneof) are dropped."""
     f = _write_options(tmp_path, "*MeshPacket.payload_variant anonymous_oneof:true\n")
     specific, wildcard = parse_options_file(f)
@@ -185,7 +185,7 @@ def test_parse_skips_non_python_options(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_skips_nanopb_c_only_type_option(tmp_path):
+def test_parse_skips_nanopb_c_only_type_option(tmp_path: Path) -> None:
     """Nanopb C field-type directives must not leak into Python descriptors."""
     f = _write_options(
         tmp_path,
@@ -197,7 +197,7 @@ def test_parse_skips_nanopb_c_only_type_option(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_merges_repeated_patterns(tmp_path):
+def test_parse_merges_repeated_patterns(tmp_path: Path) -> None:
     """Two lines for the same pattern are merged."""
     f = _write_options(
         tmp_path,
@@ -209,7 +209,7 @@ def test_parse_merges_repeated_patterns(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_int_and_bool_values(tmp_path):
+def test_parse_int_and_bool_values(tmp_path: Path) -> None:
     """int_size parses as int; fixed_length parses as bool."""
     f = _write_options(tmp_path, "*Data.payload max_size:233 fixed_length:false\n")
     specific, _ = parse_options_file(f)
@@ -224,33 +224,33 @@ def test_parse_int_and_bool_values(tmp_path):
 
 
 @pytest.mark.unit
-def test_message_path_matches_simple():
+def test_message_path_matches_simple() -> None:
     stack = [("message", "User")]
     assert message_path_matches(stack, ("User",))
 
 
 @pytest.mark.unit
-def test_message_path_matches_nested():
+def test_message_path_matches_nested() -> None:
     stack = [("message", "Config"), ("message", "DeviceConfig")]
     assert message_path_matches(stack, ("DeviceConfig",))
     assert message_path_matches(stack, ("Config", "DeviceConfig"))
 
 
 @pytest.mark.unit
-def test_message_path_matches_with_oneof_in_stack():
+def test_message_path_matches_with_oneof_in_stack() -> None:
     """Oneof frames in the stack are skipped when looking for messages."""
     stack = [("message", "MeshPacket"), ("oneof", "payload_variant")]
     assert message_path_matches(stack, ("MeshPacket",))
 
 
 @pytest.mark.unit
-def test_message_path_no_match():
+def test_message_path_no_match() -> None:
     stack = [("message", "User")]
     assert not message_path_matches(stack, ("Route",))
 
 
 @pytest.mark.unit
-def test_message_path_multilevel_partial_match():
+def test_message_path_multilevel_partial_match() -> None:
     """A 2-element path must match the last 2 message names on the stack."""
     stack = [("message", "Route"), ("message", "Link")]
     assert message_path_matches(stack, ("Route", "Link"))
@@ -263,12 +263,12 @@ def test_message_path_multilevel_partial_match():
 
 
 @pytest.mark.unit
-def test_format_max_size():
+def test_format_max_size() -> None:
     assert format_nanopb_opts({"max_size": 40}) == "(nanopb).max_size = 40"
 
 
 @pytest.mark.unit
-def test_format_int_size_as_enum():
+def test_format_int_size_as_enum() -> None:
     assert format_nanopb_opts({"int_size": 8}) == "(nanopb).int_size = IS_8"
     assert format_nanopb_opts({"int_size": 16}) == "(nanopb).int_size = IS_16"
     assert format_nanopb_opts({"int_size": 32}) == "(nanopb).int_size = IS_32"
@@ -276,12 +276,12 @@ def test_format_int_size_as_enum():
 
 
 @pytest.mark.unit
-def test_format_bool_true():
+def test_format_bool_true() -> None:
     assert format_nanopb_opts({"fixed_length": True}) == "(nanopb).fixed_length = true"
 
 
 @pytest.mark.unit
-def test_format_bool_false():
+def test_format_bool_false() -> None:
     assert (
         format_nanopb_opts({"fixed_length": False}) == "(nanopb).fixed_length = false"
     )
@@ -300,11 +300,14 @@ def _inject(
     wildcard: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Run inject_into_proto with empty dicts as defaults."""
-    return inject_into_proto(
-        textwrap.dedent(proto_src),
-        specific or {},
-        wildcard or {},
-        _NANOPB_IMPORT_PATH,
+    return cast(
+        str,
+        inject_into_proto(
+            textwrap.dedent(proto_src),
+            specific or {},
+            wildcard or {},
+            _NANOPB_IMPORT_PATH,
+        ),
     )
 
 
@@ -314,7 +317,7 @@ def _inject(
 
 
 @pytest.mark.unit
-def test_inject_adds_option_to_plain_field():
+def test_inject_adds_option_to_plain_field() -> None:
     """A field with no existing options gets a nanopb annotation."""
     proto = """\
         syntax = "proto3";
@@ -546,7 +549,7 @@ def test_inject_multiline_field_keeps_options_afterwards() -> None:
 
 
 @pytest.mark.unit
-def test_inject_merges_with_existing_options():
+def test_inject_merges_with_existing_options() -> None:
     """Nanopb annotation is appended after existing field options."""
     proto = """\
         syntax = "proto3";
@@ -560,7 +563,7 @@ def test_inject_merges_with_existing_options():
 
 
 @pytest.mark.unit
-def test_inject_int_size_uses_enum_name():
+def test_inject_int_size_uses_enum_name() -> None:
     proto = """\
         syntax = "proto3";
         import "meshtastic/protobuf/mesh.proto";
@@ -573,7 +576,7 @@ def test_inject_int_size_uses_enum_name():
 
 
 @pytest.mark.unit
-def test_inject_wildcard_applied_across_messages():
+def test_inject_wildcard_applied_across_messages() -> None:
     """A wildcard option hits the matching field in every message."""
     proto = """\
         syntax = "proto3";
@@ -590,7 +593,7 @@ def test_inject_wildcard_applied_across_messages():
 
 
 @pytest.mark.unit
-def test_inject_specific_not_leaking_to_other_messages():
+def test_inject_specific_not_leaking_to_other_messages() -> None:
     """A message-specific option does NOT apply to a different message's field."""
     proto = """\
         syntax = "proto3";
@@ -608,7 +611,7 @@ def test_inject_specific_not_leaking_to_other_messages():
 
 
 @pytest.mark.unit
-def test_inject_nested_message():
+def test_inject_nested_message() -> None:
     """A 2-part specific key only hits the field in the correct nested message."""
     proto = """\
         syntax = "proto3";
@@ -632,7 +635,7 @@ def test_inject_nested_message():
 
 
 @pytest.mark.unit
-def test_inject_skips_enum_body_values():
+def test_inject_skips_enum_body_values() -> None:
     """Enum value lines must not be treated as field declarations."""
     proto = """\
         syntax = "proto3";
@@ -653,7 +656,7 @@ def test_inject_skips_enum_body_values():
 
 
 @pytest.mark.unit
-def test_inject_optional_qualifier_preserved():
+def test_inject_optional_qualifier_preserved() -> None:
     """The 'optional' qualifier is kept when a field gets an annotation."""
     proto = """\
         syntax = "proto3";
@@ -667,7 +670,7 @@ def test_inject_optional_qualifier_preserved():
 
 
 @pytest.mark.unit
-def test_inject_repeated_qualifier_preserved():
+def test_inject_repeated_qualifier_preserved() -> None:
     proto = """\
         syntax = "proto3";
         import "meshtastic/protobuf/mesh.proto";
@@ -680,7 +683,7 @@ def test_inject_repeated_qualifier_preserved():
 
 
 @pytest.mark.unit
-def test_inject_multiple_options_on_one_field():
+def test_inject_multiple_options_on_one_field() -> None:
     proto = """\
         syntax = "proto3";
         import "meshtastic/protobuf/mesh.proto";
@@ -699,7 +702,7 @@ def test_inject_multiple_options_on_one_field():
 
 
 @pytest.mark.unit
-def test_inject_adds_nanopb_import_when_absent():
+def test_inject_adds_nanopb_import_when_absent() -> None:
     """nanopb.proto import is added when the file has other imports."""
     proto = """\
         syntax = "proto3";
@@ -713,7 +716,7 @@ def test_inject_adds_nanopb_import_when_absent():
 
 
 @pytest.mark.unit
-def test_inject_no_duplicate_nanopb_import():
+def test_inject_no_duplicate_nanopb_import() -> None:
     """nanopb.proto import is NOT added a second time if already present."""
     proto = """\
         syntax = "proto3";
@@ -728,7 +731,7 @@ def test_inject_no_duplicate_nanopb_import():
 
 
 @pytest.mark.unit
-def test_inject_import_placed_after_existing_imports():
+def test_inject_import_placed_after_existing_imports() -> None:
     """Nanopb import appears after the last existing import, not at the top."""
     proto = """\
         syntax = "proto3";
@@ -745,7 +748,7 @@ def test_inject_import_placed_after_existing_imports():
 
 
 @pytest.mark.unit
-def test_inject_import_after_syntax_when_no_existing_imports():
+def test_inject_import_after_syntax_when_no_existing_imports() -> None:
     """When a proto has no imports, nanopb import goes AFTER the syntax line,
     not before it (regression test for the last_import_idx == -1 bug)."""
     proto = """\
@@ -767,7 +770,7 @@ def test_inject_import_after_syntax_when_no_existing_imports():
 
 
 @pytest.mark.unit
-def test_inject_noop_when_no_options():
+def test_inject_noop_when_no_options() -> None:
     """Proto file is returned unchanged when there are no options to inject."""
     proto = 'syntax = "proto3";\nmessage Foo { string x = 1; }\n'
     result = _inject(proto)
@@ -775,7 +778,7 @@ def test_inject_noop_when_no_options():
 
 
 @pytest.mark.unit
-def test_inject_comments_with_braces_do_not_corrupt_nesting():
+def test_inject_comments_with_braces_do_not_corrupt_nesting() -> None:
     """Comments containing braces must not affect the message nesting tracker."""
     proto = """\
         syntax = "proto3";
@@ -802,7 +805,7 @@ def test_inject_comments_with_braces_do_not_corrupt_nesting():
 
 
 @pytest.mark.unit
-def test_inject_map_fields_are_skipped():
+def test_inject_map_fields_are_skipped() -> None:
     """Map<> fields should NOT receive nanopb options (different syntax)."""
     proto = """\
         syntax = "proto3";
@@ -825,7 +828,7 @@ def test_inject_map_fields_are_skipped():
 
 
 @pytest.mark.unit
-def test_inject_oneof_fields_get_options():
+def test_inject_oneof_fields_get_options() -> None:
     """Fields inside a oneof block should receive nanopb options."""
     proto = """\
         syntax = "proto3";
@@ -849,7 +852,7 @@ def test_inject_oneof_fields_get_options():
 
 
 @pytest.mark.unit
-def test_inject_enum_values_not_modified():
+def test_inject_enum_values_not_modified() -> None:
     """Enum value lines (IDENTIFIER = NUMBER) must not get nanopb options."""
     proto = """\
         syntax = "proto3";
@@ -871,7 +874,7 @@ def test_inject_enum_values_not_modified():
 
 
 @pytest.mark.unit
-def test_format_nanopb_opts_sorted_keys():
+def test_format_nanopb_opts_sorted_keys() -> None:
     """format_nanopb_opts output is deterministic (keys sorted alphabetically)."""
     opts = {"max_count": 8, "int_size": 8, "max_size": 40}
     result = format_nanopb_opts(opts)
@@ -883,7 +886,7 @@ def test_format_nanopb_opts_sorted_keys():
 
 
 @pytest.mark.unit
-def test_inject_duplicate_specific_merge_deterministic():
+def test_inject_duplicate_specific_merge_deterministic() -> None:
     """When multiple specific keys match the same field, output is deterministic."""
     proto = """\
         syntax = "proto3";
@@ -909,7 +912,7 @@ def test_inject_duplicate_specific_merge_deterministic():
 
 
 @pytest.mark.unit
-def test_inject_multiple_close_braces_on_one_line():
+def test_inject_multiple_close_braces_on_one_line() -> None:
     """Multiple closing braces on one line should not underflow the context stack."""
     proto = """\
         syntax = "proto3";
@@ -1028,19 +1031,19 @@ def _field_opts(descriptor: Any, *path: str) -> Any:
 
 
 @pytest.mark.unit
-def test_descriptor_user_long_name():
+def test_descriptor_user_long_name() -> None:
     opts = _field_opts(mesh_pb2.DESCRIPTOR.message_types_by_name["User"], "long_name")
     assert opts.max_size == 40
 
 
 @pytest.mark.unit
-def test_descriptor_user_short_name():
+def test_descriptor_user_short_name() -> None:
     opts = _field_opts(mesh_pb2.DESCRIPTOR.message_types_by_name["User"], "short_name")
     assert opts.max_size == 5
 
 
 @pytest.mark.unit
-def test_descriptor_wildcard_macaddr():
+def test_descriptor_wildcard_macaddr() -> None:
     """Wildcard option from mesh.options applied to User.macaddr."""
     opts = _field_opts(mesh_pb2.DESCRIPTOR.message_types_by_name["User"], "macaddr")
     assert opts.max_size == 6
@@ -1048,7 +1051,7 @@ def test_descriptor_wildcard_macaddr():
 
 
 @pytest.mark.unit
-def test_descriptor_meshpacket_hop_limit():
+def test_descriptor_meshpacket_hop_limit() -> None:
     opts = _field_opts(
         mesh_pb2.DESCRIPTOR.message_types_by_name["MeshPacket"], "hop_limit"
     )
@@ -1056,7 +1059,7 @@ def test_descriptor_meshpacket_hop_limit():
 
 
 @pytest.mark.unit
-def test_descriptor_routediscovery_snr_towards():
+def test_descriptor_routediscovery_snr_towards() -> None:
     opts = _field_opts(
         mesh_pb2.DESCRIPTOR.message_types_by_name["RouteDiscovery"], "snr_towards"
     )
@@ -1065,13 +1068,13 @@ def test_descriptor_routediscovery_snr_towards():
 
 
 @pytest.mark.unit
-def test_descriptor_data_payload():
+def test_descriptor_data_payload() -> None:
     opts = _field_opts(mesh_pb2.DESCRIPTOR.message_types_by_name["Data"], "payload")
     assert opts.max_size == 233
 
 
 @pytest.mark.unit
-def test_descriptor_nested_deviceconfig_tzdef():
+def test_descriptor_nested_deviceconfig_tzdef() -> None:
     """Config.DeviceConfig.tzdef — option on a field inside a nested message."""
     config = config_pb2.DESCRIPTOR.message_types_by_name["Config"]
     opts = _field_opts(config, "DeviceConfig", "tzdef")
@@ -1109,7 +1112,7 @@ def test_descriptor_audio_ptt_pin_keeps_int_size_with_metadata() -> None:
 
 
 @pytest.mark.unit
-def test_descriptor_nested_securityconfig_admin_key():
+def test_descriptor_nested_securityconfig_admin_key() -> None:
     """Config.SecurityConfig.admin_key — two options merged from two .options lines."""
     config = config_pb2.DESCRIPTOR.message_types_by_name["Config"]
     opts = _field_opts(config, "SecurityConfig", "admin_key")
@@ -1118,7 +1121,7 @@ def test_descriptor_nested_securityconfig_admin_key():
 
 
 @pytest.mark.unit
-def test_descriptor_multilevel_nested_route_link_uid():
+def test_descriptor_multilevel_nested_route_link_uid() -> None:
     """Route.Link.uid — three-level nested pattern from atak.options."""
     route = atak_pb2.DESCRIPTOR.message_types_by_name["Route"]
     opts = _field_opts(route, "Link", "uid")
@@ -1126,7 +1129,7 @@ def test_descriptor_multilevel_nested_route_link_uid():
 
 
 @pytest.mark.unit
-def test_descriptor_telemetry_environment_one_wire_temperature_transition():
+def test_descriptor_telemetry_environment_one_wire_temperature_transition() -> None:
     """Validate both sides of the upstream one-wire telemetry migration."""
     env = telemetry_pb2.DESCRIPTOR.message_types_by_name["EnvironmentMetrics"]
     legacy = env.fields_by_name["one_wire_temperature"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextvars
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,7 +68,7 @@ def _recording_exit(exits: list[str]) -> CliExit:
         exits.append(message)
         raise SystemExit(return_value)
 
-    return cast(CliExit, _exit)
+    return _exit
 
 
 def _hooks(**overrides: Any) -> ConfigureHooks:
@@ -175,7 +176,7 @@ def _interface(node: Any) -> MagicMock:
     iface.isConnected = threading.Event()
     iface.isConnected.set()
     iface.getNode.return_value = node
-    return iface
+    return cast(MagicMock, iface)
 
 
 def _install_clock(
@@ -197,7 +198,7 @@ def _install_clock(
     list[float]
         Sleep durations requested by the code under test.
     """
-    current_time = configure_actions.time
+    current_time = time
     sleeps: list[float] = []
     monkeypatch.setattr(
         configure_actions,
@@ -952,9 +953,7 @@ def test_main_configure_preview_wrapper_forwards_snapshot(
         module_config=localonly_pb2.LocalModuleConfig(),
     )
     monkeypatch.setattr(main_module, "_configure_hooks", lambda: hooks)
-    monkeypatch.setattr(
-        main_module.cli_configure_actions, "_preview_configure_command", preview
-    )
+    monkeypatch.setattr(configure_actions, "_preview_configure_command", preview)
 
     main_module._run_configure_preview(iface, args, {"timeout": 1}, snapshot)
 

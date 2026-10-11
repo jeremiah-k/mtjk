@@ -73,7 +73,7 @@ from typing import cast as _cast
 
 from google.protobuf.json_format import MessageToJson
 
-from meshtastic.node import Node
+from meshtastic.node import Node as Node  # pylint: disable=useless-import-alias
 from meshtastic.util import (
     DeferredExecution,
     Timeout,

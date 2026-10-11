@@ -3,6 +3,7 @@
 # pylint: disable=W0613,R0917
 
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -397,7 +398,7 @@ def test_apply_configure_channel_url_redacts_and_applies(
         "_channel_url_matches_current_device_state",
         lambda _node, _url: False,
     )
-    monkeypatch.setattr(main_module.time, "sleep", sleep)
+    monkeypatch.setattr(time, "sleep", sleep)
     channel_url = "https://meshtastic.org/e/#sensitive"
 
     applied = main_module._apply_configure_channel_url(
@@ -455,7 +456,7 @@ def test_configure_preflight_reuses_target_node_and_preserves_logger(
         encoding="utf-8",
     )
     iface, target_node = _build_configure_interface()
-    monkeypatch.setattr(main_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     args = SimpleNamespace(configure=[str(config_path)], dest=None)
 
     main_module._handle_configure_command(iface, args, {})

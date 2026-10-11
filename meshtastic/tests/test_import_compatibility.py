@@ -85,8 +85,8 @@ class TestBLEImports:
     def test_ble_interface_import(self) -> None:
         """Test that BLEInterface can be imported from meshtastic.ble_interface."""
         # BLEInterface is a re-export from meshtastic.interfaces.ble
-        from meshtastic.ble_interface import (
-            BLEInterface,  # type: ignore[attr-defined]  # pylint: disable=import-outside-toplevel
+        from meshtastic.ble_interface import (  # pylint: disable=import-outside-toplevel
+            BLEInterface,
         )
 
         assert BLEInterface is not None
@@ -100,8 +100,8 @@ class TestBLEImports:
         COMPAT_STABLE_SHIM
         """
         # Re-export of BleakClient for backwards compatibility
-        from meshtastic.ble_interface import (
-            BleakClient,  # type: ignore[attr-defined]  # pylint: disable=import-outside-toplevel
+        from meshtastic.ble_interface import (  # type: ignore[attr-defined]  # pylint: disable=import-outside-toplevel
+            BleakClient,
         )
 
         assert BleakClient is not None
@@ -114,8 +114,8 @@ class TestBLEImports:
         COMPAT_STABLE_SHIM
         """
         # Re-export of BleakScanner for backwards compatibility
-        from meshtastic.ble_interface import (
-            BleakScanner,  # type: ignore[attr-defined]  # pylint: disable=import-outside-toplevel
+        from meshtastic.ble_interface import (  # type: ignore[attr-defined]  # pylint: disable=import-outside-toplevel
+            BleakScanner,
         )
 
         assert BleakScanner is not None

@@ -218,11 +218,10 @@ Current `COMPAT_DEPRECATE` methods:
 
 ## Type Checking
 
-- CI runs mypy without `--strict` to avoid blocking PRs on minor type issues.
-- The codebase is currently `--strict` compatible; maintainers can run
-  `mypy meshtastic/ --strict` locally to catch regressions.
-- `make ci` runs the same checks as CI (no `--strict`).
-- `make ci-strict` runs CI checks with strict mypy (for maintainers).
+- CI enforces `mypy meshtastic/ --strict`; PRs must keep the strict run clean.
+- `make ci` runs the same strict check locally (plus pytest, pylint, ruff on tests).
+- New code should be fully annotated; avoid `type: ignore` unless the error is
+  genuinely unfixable, and keep ignores narrowly coded (`# type: ignore[code]`).
 
 ## Lint Scope
 

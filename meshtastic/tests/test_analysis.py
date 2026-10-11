@@ -25,7 +25,7 @@ try:
     from pyarrow import feather
 
     # Depends upon matplotlib & other packages in uv's analysis group, not installed by default
-    from meshtastic import powermon_pb2
+    from meshtastic import powermon_pb2, util
     from meshtastic.analysis import __main__ as analysis_main
     from meshtastic.analysis.__main__ import (
         _cli_exit,
@@ -42,6 +42,7 @@ try:
         to_pmon_names,
     )
     from meshtastic.protobuf import mesh_pb2
+    from meshtastic.slog import rootDir
 
     # Import private function for testing
     _is_loopback_host = analysis_main._is_loopback_host
@@ -647,9 +648,7 @@ def test_main_uses_default_slog_when_not_provided(
 ) -> None:
     """main() should use default slog path when --slog is not provided."""
     parser_default_slog = create_argparser().parse_args([]).slog
-    expected_slog = parser_default_slog or os.path.join(
-        analysis_main.rootDir(), "latest"
-    )
+    expected_slog = parser_default_slog or os.path.join(rootDir(), "latest")
     captured: dict[str, str] = {}
 
     class _FakeApp:
@@ -714,7 +713,7 @@ def test_cli_exit_calls_util_our_exit(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["code"] = return_code
         raise SystemExit(return_code)
 
-    monkeypatch.setattr(analysis_main.util, "our_exit", _fake_our_exit)
+    monkeypatch.setattr(util, "our_exit", _fake_our_exit)
 
     with pytest.raises(SystemExit) as exc_info:
         _cli_exit("test error message", 42)

@@ -21,6 +21,7 @@ from meshtastic import mt_config
 from meshtastic.__main__ import (
     main,
 )
+from meshtastic.mesh_interface import MeshInterface
 
 # from ..ble_interface import BLEInterface
 from ..node import Node
@@ -1138,7 +1139,7 @@ def test_get_pref_fails_when_request_returns_without_section(
     pref_node._timeout = Timeout(maxSecs=0)
     lines: list[str] = []
 
-    with pytest.raises(main_module.MeshInterface.MeshInterfaceError, match="lora"):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="lora"):
         main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
 
     assert lines == []
@@ -1150,14 +1151,12 @@ def test_get_pref_preserves_request_failure(
     pref_node: SimpleNamespace,
 ) -> None:
     """Correlated routing refusals retain their typed error and emit no value."""
-    pref_node.requestConfig.side_effect = main_module.MeshInterface.MeshInterfaceError(
+    pref_node.requestConfig.side_effect = MeshInterface.MeshInterfaceError(
         "Routing error on response: NOT_AUTHORIZED"
     )
     lines: list[str] = []
 
-    with pytest.raises(
-        main_module.MeshInterface.MeshInterfaceError, match="NOT_AUTHORIZED"
-    ):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="NOT_AUTHORIZED"):
         main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
 
     assert lines == []

@@ -17,7 +17,7 @@ import sys
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import IO, Any, NoReturn
+from typing import IO, TYPE_CHECKING, Any, NoReturn
 
 import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
@@ -28,6 +28,9 @@ from meshtastic.cli.session_resources import CliSessionResources
 from meshtastic.mesh_interface import MeshInterface
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,7 +357,7 @@ def _open_serial_transport(
 ) -> MeshInterface:
     """Open serial transport, preserving localhost TCP fallback semantics."""
     try:
-        client = session.enter_context(
+        client: MeshInterface = session.enter_context(
             hooks.serial_interface(
                 args.port,
                 debugOut=logfile,
@@ -399,14 +402,14 @@ def _open_serial_transport(
         )
         _terminate_cli(hooks, message, 1)
 
-    if client.devPath is not None:
+    if getattr(client, "devPath", None) is not None:
         return client
 
     logger.info(
         "Serial device unavailable after initialization; falling back to localhost TCP interface."
     )
     try:
-        return session.enter_context(
+        fallback: MeshInterface = session.enter_context(
             hooks.tcp_interface(
                 "localhost",
                 debugOut=logfile,
@@ -415,6 +418,7 @@ def _open_serial_transport(
                 timeout=args.timeout,
             )
         )
+        return fallback
     except hooks.mesh_interface_error as exc:
         _terminate_cli(hooks, f"[TCP localhost] {exc}", 1)
     except OSError as exc:
@@ -434,7 +438,7 @@ def _open_transport(
     """Open the selected BLE, TCP, or serial transport under invocation ownership."""
     if args.ble:
         try:
-            return session.enter_context(
+            ble: MeshInterface = session.enter_context(
                 hooks.ble_interface(
                     args.ble if args.ble != "any" else None,
                     debugOut=logfile,
@@ -444,6 +448,7 @@ def _open_transport(
                     auto_reconnect=args.ble_auto_reconnect,
                 )
             )
+            return ble
         except hooks.ble_interface.BLEError as exc:
             _terminate_cli(hooks, f"[BLE] {exc}", 1)
         except hooks.mesh_interface_error as exc:
@@ -454,7 +459,7 @@ def _open_transport(
             args.host, hooks.default_tcp_port
         )
         try:
-            return session.enter_context(
+            tcp: MeshInterface = session.enter_context(
                 hooks.tcp_interface(
                     tcp_hostname,
                     portNumber=tcp_port,
@@ -464,6 +469,7 @@ def _open_transport(
                     timeout=args.timeout,
                 )
             )
+            return tcp
         except (hooks.mesh_interface_error, OSError) as exc:
             _terminate_cli(
                 hooks, f"Error connecting to {tcp_hostname}:{tcp_port}: {exc}", 1

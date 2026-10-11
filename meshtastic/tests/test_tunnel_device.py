@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import struct
 import subprocess
 from typing import Any
@@ -37,9 +39,9 @@ def fake_kernel_device(
         ioctl_calls.append((request, ifr))
         return _resolved_name_buffer("mesh0")
 
-    monkeypatch.setattr(tunnel_device.os, "open", lambda *_args, **_kwargs: _FAKE_FD)
+    monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: _FAKE_FD)
     monkeypatch.setattr(tunnel_device.fcntl, "ioctl", fake_ioctl)
-    monkeypatch.setattr(tunnel_device.os, "close", lambda fd: closed_fds.append(fd))
+    monkeypatch.setattr(os, "close", lambda fd: closed_fds.append(fd))
     return ioctl_calls, closed_fds
 
 
@@ -53,7 +55,7 @@ def ip_commands(
     def fake_run(command: list[str], check: bool = True) -> None:  # noqa: ARG001
         commands.append(command)
 
-    monkeypatch.setattr(tunnel_device.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     return commands
 
 
@@ -85,7 +87,7 @@ def test_open_without_name_requests_historical_tun_pattern(
 ) -> None:
     """The default constructor should preserve PyTap2's ``tun%d`` request."""
     requests: list[bytes] = []
-    monkeypatch.setattr(tunnel_device.os, "open", lambda *_a, **_k: _FAKE_FD)
+    monkeypatch.setattr(os, "open", lambda *_a, **_k: _FAKE_FD)
 
     def fake_ioctl(_fd: int, _request: int, ifr: bytes) -> bytes:
         requests.append(ifr)
@@ -105,13 +107,13 @@ def test_open_failure_closes_control_device(
 ) -> None:
     """A rejected TUNSETIFF must not leak the opened control device."""
     closed_fds: list[int] = []
-    monkeypatch.setattr(tunnel_device.os, "open", lambda *_a, **_k: _FAKE_FD)
+    monkeypatch.setattr(os, "open", lambda *_a, **_k: _FAKE_FD)
     monkeypatch.setattr(
         tunnel_device.fcntl,
         "ioctl",
         lambda *_args: (_ for _ in ()).throw(OSError("EPERM")),
     )
-    monkeypatch.setattr(tunnel_device.os, "close", lambda fd: closed_fds.append(fd))
+    monkeypatch.setattr(os, "close", lambda fd: closed_fds.append(fd))
 
     with pytest.raises(OSError):
         LinuxTunDevice(name="mesh")
@@ -128,7 +130,7 @@ def test_asm_generic_architectures_are_accepted(
     monkeypatch: pytest.MonkeyPatch, machine: str
 ) -> None:
     """Architectures using the asm-generic ioctl encoding should pass the guard."""
-    monkeypatch.setattr(tunnel_device.platform, "machine", lambda: machine)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
     tunnel_device._require_asm_generic_ioctl()
 
 
@@ -140,7 +142,7 @@ def test_other_architectures_are_rejected(
     monkeypatch: pytest.MonkeyPatch, machine: str
 ) -> None:
     """Architectures with different ioctl encodings must fail clearly."""
-    monkeypatch.setattr(tunnel_device.platform, "machine", lambda: machine)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
 
     with pytest.raises(OSError, match="asm-generic"):
         LinuxTunDevice(name="mesh")
@@ -240,7 +242,7 @@ def test_ip_command_failure_propagates(
     def failing_run(command: list[str], check: bool = True) -> None:
         raise subprocess.CalledProcessError(1, command)
 
-    monkeypatch.setattr(tunnel_device.subprocess, "run", failing_run)
+    monkeypatch.setattr(subprocess, "run", failing_run)
     device = LinuxTunDevice(name="mesh")
 
     with pytest.raises(subprocess.CalledProcessError):
@@ -264,8 +266,8 @@ def test_read_and_write_use_file_descriptor(
         writes.append((fd, data))
         return len(data)
 
-    monkeypatch.setattr(tunnel_device.os, "read", fake_read)
-    monkeypatch.setattr(tunnel_device.os, "write", fake_write)
+    monkeypatch.setattr(os, "read", fake_read)
+    monkeypatch.setattr(os, "write", fake_write)
     device = LinuxTunDevice(name="mesh")
 
     packet = device.read()

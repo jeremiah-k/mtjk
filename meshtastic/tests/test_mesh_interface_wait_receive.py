@@ -1868,7 +1868,8 @@ def test_mesh_interface_handle_packet_delegates_to_receive_pipeline() -> None:
         emit_publication=False,
     )
 
-    assert result == ["handled-packet"]
+    # The fake pipeline returns sentinel strings; compare as objects (typing-only).
+    assert result == cast("list[object]", ["handled-packet"])
     assert fake.calls == [
         (
             "_handle_packet_from_radio",

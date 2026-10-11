@@ -135,7 +135,7 @@ def test_mismatched_response_does_not_consume_handler() -> None:
     iface._request_wait_runtime.correlate_inbound_response(
         packet_dict=wrong,
         skip_response_callback_for_decode_failure=False,
-        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),  # type: ignore[index]
+        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),
     )
     assert callback.call_count == 0
     assert request_id in iface.responseHandlers
@@ -146,7 +146,7 @@ def test_mismatched_response_does_not_consume_handler() -> None:
     iface._request_wait_runtime.correlate_inbound_response(
         packet_dict=correct,
         skip_response_callback_for_decode_failure=False,
-        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),  # type: ignore[index]
+        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),
     )
     callback.assert_called_once_with(correct)
     assert request_id not in iface.responseHandlers
@@ -173,7 +173,7 @@ def test_routing_ack_remains_eligible_before_typed_payload(reason: str | int) ->
     iface._request_wait_runtime.correlate_inbound_response(
         packet_dict=ack,
         skip_response_callback_for_decode_failure=False,
-        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),  # type: ignore[index]
+        extract_request_id=lambda packet: int(packet["decoded"]["requestId"]),
     )
     callback.assert_called_once_with(ack)
 
@@ -220,7 +220,7 @@ def test_matcher_exception_does_not_consume_handler(
     iface._request_wait_runtime.correlate_inbound_response(
         packet_dict=packet,
         skip_response_callback_for_decode_failure=False,
-        extract_request_id=lambda value: int(value["decoded"]["requestId"]),  # type: ignore[index]
+        extract_request_id=lambda value: int(value["decoded"]["requestId"]),
     )
     callback.assert_not_called()
     assert 99 in iface.responseHandlers

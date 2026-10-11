@@ -9,8 +9,8 @@ import pytest
 from pubsub import pub
 
 import meshtastic.lockdown as lockdown_module
+from meshtastic._topics import LOCKDOWN_STATUS_TOPIC
 from meshtastic.lockdown import (
-    LOCKDOWN_STATUS_TOPIC,
     build_lockdown_auth,
     read_lockdown_passphrase_file,
     send_lockdown_auth,

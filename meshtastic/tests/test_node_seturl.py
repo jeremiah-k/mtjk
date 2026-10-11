@@ -846,7 +846,7 @@ def test_setURL_replace_rejects_channel_cache_loss_before_writes(
     anode.channels = [Channel(index=0, role=Channel.Role.DISABLED)]
     # Drop the cache when execution validates the plan against current state.
     channels_lock = _DropChannelsOnEnterCountLock(anode, trigger_enter=3)
-    anode._channels_lock = channels_lock  # type: ignore[assignment]
+    anode._channels_lock = channels_lock
 
     channel_set = apponly_pb2.ChannelSet()
     setting = channel_set.settings.add()
@@ -911,7 +911,7 @@ def test_setURL_add_only_rechecks_channels_before_addition(
     anode.localConfig.lora.hop_limit = 3
     # The second acquisition is the add-only mutation recheck after planning.
     channels_lock = _DropChannelsOnEnterCountLock(anode, trigger_enter=2)
-    anode._channels_lock = channels_lock  # type: ignore[assignment]
+    anode._channels_lock = channels_lock
 
     channel_set = apponly_pb2.ChannelSet()
     setting = channel_set.settings.add()
@@ -933,7 +933,7 @@ def test_setURL_replace_rechecks_channels_before_length_calculation(
     anode.channels = [Channel(index=0, role=Channel.Role.DISABLED)]
     # The second acquisition is the replace-path length/snapshot recheck.
     channels_lock = _DropChannelsOnEnterCountLock(anode, trigger_enter=2)
-    anode._channels_lock = channels_lock  # type: ignore[assignment]
+    anode._channels_lock = channels_lock
 
     channel_set = apponly_pb2.ChannelSet()
     setting = channel_set.settings.add()

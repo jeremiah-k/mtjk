@@ -9,7 +9,13 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from meshtastic.cli import dispatch
+from meshtastic.cli import (
+    channel_contact_actions,
+    configure_actions,
+    device_actions,
+    dispatch,
+    messaging_service_actions,
+)
 from meshtastic.cli.context import ActionOutcome, CliContext
 from meshtastic.mesh_interface import MeshInterface
 
@@ -37,17 +43,17 @@ def _context() -> CliContext:
 def isolated_dispatch_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub connected action entrypoints so lifecycle tests isolate dispatch itself."""
     targets = (
-        (dispatch.device_actions, "_handle_device_actions"),
-        (dispatch.channel_contact_actions, "_handle_contact_import"),
-        (dispatch.messaging_service_actions, "_handle_messaging_actions"),
-        (dispatch.configure_actions, "_handle_configure_actions"),
-        (dispatch.channel_contact_actions, "_handle_channel_mutations"),
-        (dispatch.messaging_service_actions, "_handle_content_reads"),
-        (dispatch.channel_contact_actions, "_handle_region_preset_display"),
-        (dispatch.device_actions, "_handle_lockdown_action"),
-        (dispatch.messaging_service_actions, "_handle_information_actions"),
-        (dispatch.channel_contact_actions, "_handle_channel_contact_display"),
-        (dispatch.messaging_service_actions, "_handle_long_running_services"),
+        (device_actions, "_handle_device_actions"),
+        (channel_contact_actions, "_handle_contact_import"),
+        (messaging_service_actions, "_handle_messaging_actions"),
+        (configure_actions, "_handle_configure_actions"),
+        (channel_contact_actions, "_handle_channel_mutations"),
+        (messaging_service_actions, "_handle_content_reads"),
+        (channel_contact_actions, "_handle_region_preset_display"),
+        (device_actions, "_handle_lockdown_action"),
+        (messaging_service_actions, "_handle_information_actions"),
+        (channel_contact_actions, "_handle_channel_contact_display"),
+        (messaging_service_actions, "_handle_long_running_services"),
     )
     for module, name in targets:
         monkeypatch.setattr(module, name, lambda *_args, **_kwargs: None)
@@ -218,10 +224,10 @@ def test_stop_processing_still_runs_final_disconnect_lifecycle(
     def _stop(_context: CliContext, _hooks: object) -> None:
         _context.outcome.stop_processing = True
 
-    monkeypatch.setattr(dispatch.device_actions, "_handle_device_actions", _stop)
+    monkeypatch.setattr(device_actions, "_handle_device_actions", _stop)
     later_action = MagicMock()
     monkeypatch.setattr(
-        dispatch.messaging_service_actions,
+        messaging_service_actions,
         "_handle_messaging_actions",
         later_action,
     )
@@ -360,7 +366,7 @@ def test_action_failure_after_close_request_still_closes_interface(
         action_context.outcome.close_now = True
         raise RuntimeError("action failed")
 
-    monkeypatch.setattr(dispatch.device_actions, "_handle_device_actions", _fail)
+    monkeypatch.setattr(device_actions, "_handle_device_actions", _fail)
 
     with pytest.raises(RuntimeError, match="action failed"):
         dispatch._dispatch_connected(context, MagicMock())
@@ -380,7 +386,7 @@ def test_successful_dispatch_retains_started_service_resources(
         action_context.outcome.failure_cleanup_callbacks.append(rollback)
         action_context.outcome.stop_processing = True
 
-    monkeypatch.setattr(dispatch.device_actions, "_handle_device_actions", _register)
+    monkeypatch.setattr(device_actions, "_handle_device_actions", _register)
 
     dispatch._dispatch_connected(context, MagicMock())
 

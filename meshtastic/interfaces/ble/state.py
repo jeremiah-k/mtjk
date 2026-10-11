@@ -16,7 +16,7 @@ Lock Ordering Note:
 
 from enum import Enum
 from threading import RLock
-from typing import ClassVar, TypeGuard, cast
+from typing import ClassVar, TypeGuard
 
 from meshtastic.interfaces.ble.constants import logger
 
@@ -453,4 +453,4 @@ def _is_canonical_state_manager(
     """
     if type(candidate) is not BLEStateManager:  # pylint: disable=unidiomatic-typecheck
         return False
-    return cast(BLEStateManager, candidate).lock is lock
+    return candidate.lock is lock

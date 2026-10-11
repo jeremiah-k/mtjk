@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.bootstrap as cli_bootstrap
 from meshtastic import mt_config
 from meshtastic.cli.invocation import (
     CliInvocation,
@@ -107,7 +108,7 @@ def test_common_activates_invocation_only_for_bootstrap_call() -> None:
         assert current.channel_index == 5
         assert current.camel_case is True
 
-    with patch.object(main_module.cli_bootstrap, "run_common", side_effect=_run_common):
+    with patch.object(cli_bootstrap, "run_common", side_effect=_run_common):
         main_module.common()
 
     assert len(seen) == 1

@@ -27,6 +27,7 @@ import meshtastic.__main__ as main_module
 from meshtastic import mt_config
 from meshtastic.__main__ import main
 from meshtastic.cli import configure_actions as cli_configure_actions
+from meshtastic.configure_verify import LocalApplyStatus
 from meshtastic.node import Node
 from meshtastic.protobuf import admin_pb2, config_pb2, localonly_pb2
 from meshtastic.serial_interface import SerialInterface
@@ -242,7 +243,7 @@ def _run_main_set(
     """Run ``main()`` with the supplied argv against the supplied interface."""
     if patch_seam_clock:
         _patch_seam_clock(monkeypatch)
-    time_attrs = vars(main_module.time).copy()
+    time_attrs = vars(time_module).copy()
 
     def _record_sleep(seconds: float) -> None:
         if record is not None:
@@ -704,7 +705,7 @@ def test_local_set_verification_returning_exit_seam_fails_closed(
         main_module,
         "verify_local_config_apply",
         lambda *_args, **_kwargs: SimpleNamespace(
-            status=main_module.LocalApplyStatus.MISMATCH,
+            status=LocalApplyStatus.MISMATCH,
             mismatched_fields=("power.ls_secs",),
             missing_sections=(),
         ),

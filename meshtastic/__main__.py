@@ -33,6 +33,7 @@ import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
 import meshtastic.cli.preference_runtime as cli_preference_runtime
 import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
+import meshtastic.cli.values as cli_values
 import meshtastic.ota
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
@@ -58,30 +59,30 @@ from meshtastic.cli.config_preview import render_preview_value as _render_previe
 from meshtastic.cli.context import ActionOutcome, CliContext, _terminate_cli
 
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
-# pylint: disable=unused-import
-from meshtastic.cli.parser import (  # noqa: F401,W0611 - legacy __main__ compatibility export
-    _MODEM_PRESET_SHORTHANDS,
-    addChannelConfigArgs,
-    addConfigArgs,
-    addConnectionArgs,
-    addImportExportArgs,
-    addLocalActionArgs,
-    addPositionConfigArgs,
-    addRemoteActionArgs,
-    addRemoteAdminArgs,
-    addSelectionArgs,
-    parse_cli_args,
-)
+# pylint: disable=unused-import,useless-import-alias
+from meshtastic.cli.parser import addChannelConfigArgs as addChannelConfigArgs
+from meshtastic.cli.parser import addConfigArgs as addConfigArgs
+from meshtastic.cli.parser import addConnectionArgs as addConnectionArgs
+from meshtastic.cli.parser import addImportExportArgs as addImportExportArgs
+from meshtastic.cli.parser import addLocalActionArgs as addLocalActionArgs
+from meshtastic.cli.parser import addPositionConfigArgs as addPositionConfigArgs
+from meshtastic.cli.parser import addRemoteActionArgs as addRemoteActionArgs
+from meshtastic.cli.parser import addRemoteAdminArgs as addRemoteAdminArgs
+from meshtastic.cli.parser import addSelectionArgs as addSelectionArgs
+from meshtastic.cli.parser import parse_cli_args as parse_cli_args
 from meshtastic.cli.values import is_local_destination as _is_local_destination
 from meshtastic.cli.values import (  # noqa: F401,W0611 - legacy __main__ compatibility export
     looks_like_integer_literal as _looks_like_integer_literal,
 )
 
-# black and isort disagree on these two statements: isort's line-length math
+# black and isort disagree on these three statements: isort's line-length math
 # excludes the noqa comment (so it collapses the statement to one line) while
 # black includes it (so it must stay exploded). They are frozen compat
 # re-exports, so skip them with an isort directive rather than fight it.
 # isort: off
+from meshtastic.cli.parser import (
+    _MODEM_PRESET_SHORTHANDS as _MODEM_PRESET_SHORTHANDS,
+)  # noqa: F401,W0611 - legacy __main__ compatibility export
 from meshtastic.cli.values import (
     parse_integer_literal as _parse_integer_literal,  # noqa: F401,W0611 - legacy __main__ compatibility export
 )
@@ -739,7 +740,7 @@ def checkChannel(interface: MeshInterface, channelIndex: int) -> bool:
 
 
 _normalize_pref_name = cli_preference_runtime.normalize_pref_name
-_parse_bitfield_value = cli_preference_runtime.parse_bitfield_value
+_parse_bitfield_value = cli_values.parse_bitfield_value
 
 
 def _display_pref_name(comp_name: str) -> str:

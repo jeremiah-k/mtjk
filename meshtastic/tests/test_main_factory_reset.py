@@ -12,6 +12,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pubsub import pub
 
 import meshtastic.__main__ as main_module
 import meshtastic.cli.device_actions as device_actions
@@ -132,7 +133,7 @@ def test_local_factory_reset_accepts_transient_reboot_disconnect() -> None:
             time.sleep(0.01)
             # Model a fast reconnect: the pubsub edge must remain observable even
             # though isConnected is already set again by the time the wait polls.
-            main_module.pub.sendMessage("meshtastic.connection.lost", interface=iface)
+            pub.sendMessage("meshtastic.connection.lost", interface=iface)
             connected.set()
 
         threading.Thread(target=_disconnect_after_send, daemon=True).start()
@@ -279,7 +280,7 @@ def test_local_factory_reset_ignores_pre_send_disconnect_event() -> None:
 
     def _factory_reset(*, full: bool) -> SimpleNamespace:
         assert full is False
-        main_module.pub.sendMessage("meshtastic.connection.lost", interface=iface)
+        pub.sendMessage("meshtastic.connection.lost", interface=iface)
         return SimpleNamespace(id=654)
 
     reset_node = SimpleNamespace(
@@ -884,9 +885,7 @@ def test_local_factory_reset_resends_while_acceptance_pending() -> None:
 
             def _disconnect_after_resend() -> None:
                 time.sleep(0.02)
-                main_module.pub.sendMessage(
-                    "meshtastic.connection.lost", interface=iface
-                )
+                pub.sendMessage("meshtastic.connection.lost", interface=iface)
 
             threading.Thread(target=_disconnect_after_resend, daemon=True).start()
         return request

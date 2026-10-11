@@ -115,18 +115,18 @@ def test_write_bytes_raises_on_invalid_written_count() -> None:
         class MockStream:
             """Mock stream that returns invalid write result."""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.is_open = True
 
-            def write(self, _data):
+            def write(self, _data: bytes) -> object:
                 """Return an object that cannot be converted to int."""
                 return object()
 
-            def flush(self):
+            def flush(self) -> None:
                 """Mock flush method."""
                 pass
 
-            def close(self):
+            def close(self) -> None:
                 """Mock close method."""
                 pass
 
@@ -153,18 +153,18 @@ def test_write_bytes_raises_on_value_error_from_string() -> None:
         class MockStream:
             """Mock stream that returns string causing ValueError."""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.is_open = True
 
-            def write(self, _data):
+            def write(self, _data: bytes) -> str:
                 """Return a string that causes ValueError on int conversion."""
                 return "not_a_number"
 
-            def flush(self):
+            def flush(self) -> None:
                 """Mock flush method."""
                 pass
 
-            def close(self):
+            def close(self) -> None:
                 """Mock close method."""
                 pass
 

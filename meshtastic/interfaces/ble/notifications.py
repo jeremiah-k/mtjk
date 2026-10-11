@@ -554,7 +554,7 @@ class BLENotificationDispatcher:
             error_handler, "safe_execute", "_safe_execute"
         )
         if safe_execute_hook is not None:
-            safe_execute_callable = cast(Callable[..., Any], safe_execute_hook)
+            safe_execute_callable = safe_execute_hook
 
             def _report_via_safe_execute(
                 message: str,

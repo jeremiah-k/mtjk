@@ -90,7 +90,7 @@ def _config_response_packet(
 
 def _extract_request_id(packet: dict[str, Any]) -> int | None:
     """Extract the request id the way the receive pipeline does."""
-    request_id = packet.get("decoded", {}).get("requestId")  # type: ignore[union-attr]
+    request_id = packet.get("decoded", {}).get("requestId")
     return int(request_id) if isinstance(request_id, int) else None
 
 

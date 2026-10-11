@@ -4,6 +4,7 @@ import builtins
 import importlib
 import sys
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -46,7 +47,7 @@ def _restore_modules(
 class TestBleInterfaceImportFailure:
     """Test import failure paths - these must be separate to not pollute imports."""
 
-    def test_bleak_import_failure_raises_import_error(self):
+    def test_bleak_import_failure_raises_import_error(self) -> None:
         """Test that missing bleak raises ImportError with helpful message."""
         module_snapshot = _snapshot_modules(_BLE_IMPORT_TEST_MODULE_PREFIXES)
 
@@ -61,7 +62,7 @@ class TestBleInterfaceImportFailure:
         # Mock import to raise ModuleNotFoundError for bleak
         original_import = builtins.__import__
 
-        def mock_import(name, *args, **kwargs):
+        def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
             if name == "bleak" or name.startswith("bleak."):
                 exc = ModuleNotFoundError(f"No module named '{name}'")
                 exc.name = name.split(".")[0] if "." in name else name
@@ -79,7 +80,7 @@ class TestBleInterfaceImportFailure:
             builtins.__import__ = original_import
             _restore_modules(module_snapshot, _BLE_IMPORT_TEST_MODULE_PREFIXES)
 
-    def test_non_bleak_module_not_found_raises_original(self):
+    def test_non_bleak_module_not_found_raises_original(self) -> None:
         """Test that missing non-bleak modules re-raise the original error."""
         # This tests lines 25-28 where non-bleak ModuleNotFoundError is re-raised
         # Need to simulate a different module failing during the bleak import process
@@ -95,7 +96,7 @@ class TestBleInterfaceImportFailure:
         original_import = builtins.__import__
         call_count = 0
 
-        def mock_import(name, *args, **kwargs):
+        def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if name == "bleak":
@@ -123,7 +124,7 @@ class TestBleInterfaceImportFailure:
 class TestBleInterfaceCompatImports:
     """Test import compatibility paths when bleak is available."""
 
-    def test_bleak_imports_available(self):
+    def test_bleak_imports_available(self) -> None:
         """Test that bleak imports are available when bleak is installed."""
         # Import should succeed when bleak is available
         import meshtastic.ble_interface as ble_iface
@@ -139,7 +140,7 @@ class TestBleInterfaceCompatImports:
 class TestBleInterfaceExports:
     """Test module-level export verification."""
 
-    def test_all_exports_present(self):
+    def test_all_exports_present(self) -> None:
         """Test that all expected symbols are in __all__."""
         import meshtastic.ble_interface as ble_iface
 
@@ -158,7 +159,7 @@ class TestBleInterfaceExports:
         for export in expected_exports:
             assert export in ble_iface.__all__, f"{export} should be in __all__"
 
-    def test_uuid_constants_exported(self):
+    def test_uuid_constants_exported(self) -> None:
         """Test that UUID constants are exported."""
         import meshtastic.ble_interface as ble_iface
 
@@ -175,7 +176,7 @@ class TestBleInterfaceExports:
             assert hasattr(ble_iface, const), f"{const} should be exported"
             assert const in ble_iface.__all__, f"{const} should be in __all__"
 
-    def test_error_constants_exported(self):
+    def test_error_constants_exported(self) -> None:
         """Test that error constants are exported."""
         import meshtastic.ble_interface as ble_iface
 
@@ -194,7 +195,7 @@ class TestBleInterfaceExports:
             assert hasattr(ble_iface, const), f"{const} should be exported"
             assert const in ble_iface.__all__, f"{const} should be in __all__"
 
-    def test_ble_classes_exported(self):
+    def test_ble_classes_exported(self) -> None:
         """Test that BLE classes are properly exported."""
         import meshtastic.ble_interface as ble_iface
 
@@ -202,7 +203,7 @@ class TestBleInterfaceExports:
         assert hasattr(ble_iface, "BLEClient")
         assert hasattr(ble_iface, "BLEConfig")
 
-    def test_logger_exported(self):
+    def test_logger_exported(self) -> None:
         """Test that logger is exported."""
         import meshtastic.ble_interface as ble_iface
 
@@ -213,7 +214,7 @@ class TestBleInterfaceExports:
 class TestBleInterfaceShimBehavior:
     """Test shim function behavior and delegation."""
 
-    def test_ble_symbols_same_as_interfaces_ble(self):
+    def test_ble_symbols_same_as_interfaces_ble(self) -> None:
         """Test that ble_interface exports match meshtastic.interfaces.ble exports."""
         import meshtastic.ble_interface as ble_iface
         from meshtastic.interfaces import ble as _ble
@@ -228,7 +229,7 @@ class TestBleInterfaceShimBehavior:
             compat_obj = getattr(ble_iface, symbol)
             assert iface_obj is compat_obj, f"{symbol} should be same object"
 
-    def test_compat_bleak_exports_in_all(self):
+    def test_compat_bleak_exports_in_all(self) -> None:
         """Test that compatibility bleak exports are in __all__."""
         import meshtastic.ble_interface as ble_iface
 
@@ -249,7 +250,7 @@ class TestBleInterfaceShimBehavior:
 class TestBleInterfaceEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_all_unique_no_duplicates(self):
+    def test_all_unique_no_duplicates(self) -> None:
         """Test that __all__ has no duplicates."""
         import meshtastic.ble_interface as ble_iface
 
@@ -258,7 +259,7 @@ class TestBleInterfaceEdgeCases:
             set(ble_iface.__all__)
         ), "__all__ should not have duplicates"
 
-    def test_no_circular_import_issues(self):
+    def test_no_circular_import_issues(self) -> None:
         """Test that importing ble_interface doesn't cause circular import issues."""
         # Clear the module from cache and reimport
         module_name = "meshtastic.ble_interface"

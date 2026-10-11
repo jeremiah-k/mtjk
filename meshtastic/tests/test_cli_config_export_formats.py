@@ -8,6 +8,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 from meshtastic.__main__ import setPref
 from meshtastic.cli import config_io, configure_actions
@@ -448,7 +449,7 @@ def test_yaml_export_includes_all_optional_local_snapshot_fields() -> None:
     mock.localNode.moduleConfig = localonly_pb2.LocalModuleConfig()
 
     rendered = config_io.export_config(cast(MeshInterface, mock), camel_case=False)
-    configuration = config_io.yaml.safe_load(rendered.split("\n", 1)[1])
+    configuration = yaml.safe_load(rendered.split("\n", 1)[1])
 
     assert configuration["canned_messages"] == "one|two"
     assert configuration["ringtone"] == "ring"
@@ -520,7 +521,7 @@ def test_profile_export_retains_raw_neighbor_info_and_security_keys() -> None:
     profile = config_io._parse_profile_bytes(
         config_io._export_profile(cast(MeshInterface, mock))
     )
-    configuration = config_io.yaml.safe_load(yaml_text.split("\n", 1)[1])
+    configuration = yaml.safe_load(yaml_text.split("\n", 1)[1])
     converted = config_io._profile_to_configuration(profile)
 
     assert mock.localNode.moduleConfig.neighbor_info.update_interval == 0

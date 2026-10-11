@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,7 +38,7 @@ def _patch_fast_monotonic(monkeypatch: pytest.MonkeyPatch) -> None:
         value[0] += 100.0
         return value[0]
 
-    time_attrs = vars(main_module.time).copy()
+    time_attrs = vars(time).copy()
     time_attrs["monotonic"] = _fast
     monkeypatch.setattr(
         main_module, "time", SimpleNamespace(**time_attrs), raising=True
@@ -77,7 +78,7 @@ def _build_export_interface(
     iface.getMyNodeInfo.return_value = {}
     iface.getCannedMessage.return_value = ""
     iface.getRingtone.return_value = ""
-    return iface
+    return cast(MagicMock, iface)
 
 
 def _build_configure_interface(
@@ -170,7 +171,7 @@ def _run_main_configure_file(
 ) -> None:
     """Run ``main`` for ``--configure`` against a supplied interface mock."""
     argv = ["", "--configure", str(config_path)]
-    time_attrs = vars(main_module.time).copy()
+    time_attrs = vars(time).copy()
     time_attrs["sleep"] = lambda _seconds: None
     with monkeypatch.context() as configure_patch:
         configure_patch.setattr(sys, "argv", argv)

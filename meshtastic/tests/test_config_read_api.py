@@ -2,14 +2,17 @@
 
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from google.protobuf.struct_pb2 import Struct
 
 import meshtastic._deadline as _deadline_module
 import meshtastic.mesh_interface as _mesh_interface_module
+from meshtastic import ResponseHandler
 from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._deadline import _operation_deadline, _remaining_timeout
 from meshtastic.admin_response import (
@@ -31,7 +34,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def client():
+def client() -> Iterator[MeshInterface]:
     with MeshInterface(noProto=True) as interface:
         interface.nodesByNum = {}
         interface.nodes = {}
@@ -40,7 +43,7 @@ def client():
         yield interface
 
 
-def deliver(client, packet):
+def deliver(client: MeshInterface, packet: dict[str, Any]) -> None:
     client._request_wait_runtime.correlate_inbound_response(
         packet_dict=packet,
         skip_response_callback_for_decode_failure=(
@@ -50,7 +53,13 @@ def deliver(client, packet):
     )
 
 
-def response_packet(packet, *, module=False, section="lora", source=2):
+def response_packet(
+    packet: mesh_pb2.MeshPacket,
+    *,
+    module: bool = False,
+    section: str = "lora",
+    source: int = 2,
+) -> dict[str, Any]:
     raw = admin_pb2.AdminMessage()
     response = raw.get_module_config_response if module else raw.get_config_response
     getattr(response, section).SetInParent()
@@ -66,12 +75,18 @@ def response_packet(packet, *, module=False, section="lora", source=2):
     ],
 )
 def test_every_section_uses_named_wire_enum(
-    client, monkeypatch, module, request_enum, section
-):
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    module: bool,
+    request_enum: int,
+    section: str,
+) -> None:
     remote = Node(client, 2, noProto=False)
-    received = []
+    received: list[admin_pb2.AdminMessage] = []
 
-    def send(packet, *args, **kwargs):
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         request = admin_pb2.AdminMessage.FromString(packet.decoded.payload)
         received.append(request)
         deliver(client, response_packet(packet, module=module, section=section))
@@ -95,12 +110,16 @@ def test_every_section_uses_named_wire_enum(
     assert client._response_wait_errors == {}
 
 
-def test_read_is_fresh_detached_and_does_not_replace_cache(client, monkeypatch):
+def test_read_is_fresh_detached_and_does_not_replace_cache(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     remote = Node(client, 2, noProto=False)
     remote.localConfig.lora.hop_limit = 7
-    responses = []
+    responses: list[admin_pb2.AdminMessage] = []
 
-    def send(packet, *args, **kwargs):
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         response = response_packet(packet)
         raw = response["decoded"]["admin"]["raw"]
         raw.get_config_response.lora.hop_limit = len(responses) + 2
@@ -118,8 +137,12 @@ def test_read_is_fresh_detached_and_does_not_replace_cache(client, monkeypatch):
 
 
 @pytest.mark.parametrize("path", ["lora.hop_limit", "lora.hopLimit"])
-def test_preference_returns_raw_scalar_and_validates_aliases(client, monkeypatch, path):
-    def send(packet, *args, **kwargs):
+def test_preference_returns_raw_scalar_and_validates_aliases(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         response = response_packet(packet)
         response["decoded"]["admin"]["raw"].get_config_response.lora.hop_limit = 4
         deliver(client, response)
@@ -129,10 +152,14 @@ def test_preference_returns_raw_scalar_and_validates_aliases(client, monkeypatch
     assert Node(client, 2, noProto=False).readPreference(path) == 4
 
 
-def test_preference_copies_repeated_bytes_and_message_values(client, monkeypatch):
-    response = None
+def test_preference_copies_repeated_bytes_and_message_values(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response: dict[str, Any] | None = None
 
-    def send(packet, *args, **kwargs):
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         nonlocal response
         response = response_packet(packet, section="security")
         security = response["decoded"]["admin"]["raw"].get_config_response.security
@@ -143,11 +170,14 @@ def test_preference_copies_repeated_bytes_and_message_values(client, monkeypatch
     monkeypatch.setattr(client, "_send_packet", send)
     remote = Node(client, 2, noProto=False)
     values = remote.readPreference("security.adminKey")
+    assert isinstance(values, list)
     values.append(b"other")
+    assert response is not None
     assert list(
         response["decoded"]["admin"]["raw"].get_config_response.security.admin_key
     ) == [b"key"]
     message = remote.readPreference("security")
+    assert isinstance(message, config_pb2.Config.SecurityConfig)
     message.admin_key.append(b"message copy")
     assert list(
         response["decoded"]["admin"]["raw"].get_config_response.security.admin_key
@@ -167,8 +197,10 @@ def test_preference_copies_repeated_bytes_and_message_values(client, monkeypatch
         {"adminIndex": 8},
     ],
 )
-def test_invalid_read_options_fail_before_transmission(client, monkeypatch, options):
-    def send(*args, **kwargs):
+def test_invalid_read_options_fail_before_transmission(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any]
+) -> None:
+    def send(*args: Any, **kwargs: Any) -> mesh_pb2.MeshPacket:
         pytest.fail("invalid read transmitted a packet")
 
     monkeypatch.setattr(client, "_send_packet", send)
@@ -187,8 +219,10 @@ def test_invalid_read_options_fail_before_transmission(client, monkeypatch, opti
         "mqtt..enabled",
     ],
 )
-def test_invalid_preference_paths_fail_before_transmission(client, monkeypatch, path):
-    def send(*args, **kwargs):
+def test_invalid_preference_paths_fail_before_transmission(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    def send(*args: Any, **kwargs: Any) -> mesh_pb2.MeshPacket:
         pytest.fail("invalid path transmitted a packet")
 
     monkeypatch.setattr(client, "_send_packet", send)
@@ -197,9 +231,11 @@ def test_invalid_preference_paths_fail_before_transmission(client, monkeypatch, 
 
 
 def test_wrong_source_subtype_variant_and_ack_do_not_consume_request(
-    client, monkeypatch
-):
-    def send(packet, *args, **kwargs):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         for response in [
             response_packet(packet, source=3),
             response_packet(packet, section="power"),
@@ -221,15 +257,18 @@ def test_wrong_source_subtype_variant_and_ack_do_not_consume_request(
 
 @pytest.mark.parametrize("decode", [False, True])
 def test_typed_failures_include_context_and_retire_only_owned_state(
-    client, monkeypatch, decode
-):
-    def sentinel(packet):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, decode: bool
+) -> None:
+    def sentinel(packet: dict[str, Any]) -> None:
         return None
 
-    client.responseHandlers[1234] = sentinel
+    handler = cast("ResponseHandler", sentinel)
+    client.responseHandlers[1234] = handler
 
-    def send(packet, *args, **kwargs):
-        decoded = {"requestId": packet.id}
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
+        decoded: dict[str, Any] = {"requestId": packet.id}
         decoded.update(
             {"admin": {DECODE_ERROR_KEY: "malformed"}}
             if decode
@@ -244,21 +283,25 @@ def test_typed_failures_include_context_and_retire_only_owned_state(
     ) as captured:
         Node(client, 2, noProto=False).readConfig("lora", timeout=0.1)
     error = captured.value
+    assert error.requestId is not None
     assert error.nodeNum == 2 and error.requestId > 0
     assert error.operation == "get_config_request"
     if not decode:
+        assert isinstance(error, RequestRejectedError)
         assert error.reason == "NOT_AUTHORIZED"
-    assert client.responseHandlers == {1234: sentinel}
+    assert client.responseHandlers == {1234: handler}
     assert client._response_wait_errors == {}
     assert client._acknowledgment.receivedNak is False
 
 
 def test_timeout_retires_handler_and_late_response_cannot_change_cache(
-    client, monkeypatch
-):
-    packets = []
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    packets: list[mesh_pb2.MeshPacket] = []
 
-    def send(packet, *args, **kwargs):
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         packets.append(packet)
         return packet
 
@@ -273,10 +316,14 @@ def test_timeout_retires_handler_and_late_response_cannot_change_cache(
     assert not remote.localConfig.HasField("lora")
 
 
-def test_concurrent_reads_correlate_out_of_order(client, monkeypatch):
+def test_concurrent_reads_correlate_out_of_order(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     barrier = threading.Barrier(2)
 
-    def send(packet, *args, **kwargs):
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         request = admin_pb2.AdminMessage.FromString(packet.decoded.payload)
         barrier.wait(timeout=2)
         section = (
@@ -298,7 +345,7 @@ def test_concurrent_reads_correlate_out_of_order(client, monkeypatch):
     assert client._response_wait_errors == {}
 
 
-def test_connection_wait_shares_budget(client):
+def test_connection_wait_shares_budget(client: MeshInterface) -> None:
     client.noProto = False
     try:
         start = time.monotonic()
@@ -312,8 +359,8 @@ def test_connection_wait_shares_budget(client):
 
 @pytest.mark.parametrize("cause", ["stored_failure", "abort_reason"])
 def test_expired_connection_deadline_preserves_more_specific_failure(
-    client, monkeypatch, cause
-):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, cause: str
+) -> None:
     """A fatal failure or abort observed at the deadline beats a generic timeout."""
     client.noProto = False
     failure = RuntimeError("transport failed during connect")
@@ -333,7 +380,7 @@ def test_expired_connection_deadline_preserves_more_specific_failure(
         frozen_time.monotonic = fake_monotonic
         monkeypatch.setattr(module, "time", frozen_time)
 
-    def expire_wait(_seconds):
+    def expire_wait(_seconds: float) -> bool:
         if cause == "stored_failure":
             client.failure = failure
         clock["now"] += 1.0
@@ -364,11 +411,13 @@ def test_expired_connection_deadline_preserves_more_specific_failure(
         client.failure = None
 
 
-def test_full_tx_queue_shares_budget_and_removes_unsent_packet(client, monkeypatch):
+def test_full_tx_queue_shares_budget_and_removes_unsent_packet(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client.noProto = False
     client.isConnected.set()
     client.queueStatus = mesh_pb2.QueueStatus(free=0, maxlen=16)
-    sent = []
+    sent: list[mesh_pb2.ToRadio] = []
     monkeypatch.setattr(client, "_send_to_radio_impl", sent.append)
     try:
         start = time.monotonic()
@@ -382,12 +431,12 @@ def test_full_tx_queue_shares_budget_and_removes_unsent_packet(client, monkeypat
         client.noProto = True
 
 
-def test_disabled_protocol_reports_request_failure(client):
+def test_disabled_protocol_reports_request_failure(client: MeshInterface) -> None:
     with pytest.raises(RequestError, match="not sent"):
         client.localNode.readConfig("lora")
 
 
-def test_nested_deadline_cannot_extend_budget_and_resets_context():
+def test_nested_deadline_cannot_extend_budget_and_resets_context() -> None:
     with _operation_deadline(0.01):
         with _operation_deadline(30):
             assert _remaining_timeout(30) <= 0.01
@@ -395,9 +444,11 @@ def test_nested_deadline_cannot_extend_budget_and_resets_context():
 
 
 def test_module_preference_reads_defaults_enums_and_nested_messages(
-    client, monkeypatch
-):
-    def send(packet, *args, **kwargs):
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def send(
+        packet: mesh_pb2.MeshPacket, *args: Any, **kwargs: Any
+    ) -> mesh_pb2.MeshPacket:
         raw_request = admin_pb2.AdminMessage.FromString(packet.decoded.payload)
         is_module = raw_request.HasField("get_module_config_request")
         response = response_packet(
@@ -420,7 +471,9 @@ def test_module_preference_reads_defaults_enums_and_nested_messages(
     assert remote.readPreference("lora.region") == config_pb2.Config.LoRaConfig.US
 
 
-def test_expired_queue_wait_preserves_unrelated_queued_packet(client, monkeypatch):
+def test_expired_queue_wait_preserves_unrelated_queued_packet(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client.noProto = False
     client.isConnected.set()
     client.queueStatus = mesh_pb2.QueueStatus(free=0, maxlen=16)
@@ -440,7 +493,9 @@ def test_expired_queue_wait_preserves_unrelated_queued_packet(client, monkeypatc
         client.noProto = True
 
 
-def test_unreadable_section_fails_closed_before_transmission(client, monkeypatch):
+def test_unreadable_section_fails_closed_before_transmission(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     readable = {
         key: name
         for key, name in _CONFIG_RESPONSE_SUBTYPE_BY_REQUEST.items()
@@ -454,10 +509,12 @@ def test_unreadable_section_fails_closed_before_transmission(client, monkeypatch
         Node(client, 2, noProto=False).readPreference("lora.region")
 
 
-def test_transport_failure_translates_to_request_error(client, monkeypatch):
+def test_transport_failure_translates_to_request_error(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     failure = MeshInterface.MeshInterfaceError("transport gone")
 
-    def send(node, message, **kwargs):
+    def send(node: Node, message: admin_pb2.AdminMessage, **kwargs: Any) -> None:
         raise failure
 
     monkeypatch.setattr("meshtastic.node._send_admin_with_ack_scope", send)
@@ -472,11 +529,13 @@ def test_transport_failure_translates_to_request_error(client, monkeypatch):
     assert not isinstance(excinfo.value, RequestTimeoutError)
 
 
-def test_transport_timeout_cause_translates_to_request_timeout(client, monkeypatch):
+def test_transport_timeout_cause_translates_to_request_timeout(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
     failure = MeshInterface.MeshInterfaceError("slow transport")
     failure.__cause__ = TimeoutError("backend read timed out")
 
-    def send(node, message, **kwargs):
+    def send(node: Node, message: admin_pb2.AdminMessage, **kwargs: Any) -> None:
         raise failure
 
     monkeypatch.setattr("meshtastic.node._send_admin_with_ack_scope", send)
@@ -489,7 +548,7 @@ def test_transport_timeout_cause_translates_to_request_timeout(client, monkeypat
     assert excinfo.value.operation == "get_config_request"
 
 
-def test_copy_value_detaches_map_entries():
+def test_copy_value_detaches_map_entries() -> None:
     holder = Struct()
     holder.update({"key": "value"})
     field = holder.DESCRIPTOR.fields_by_name["fields"]
@@ -497,10 +556,12 @@ def test_copy_value_detaches_map_entries():
     copied = _copy_value(holder.fields, field)
 
     assert copied == {"key": holder.fields["key"]}
+    assert isinstance(copied, dict)
     assert copied["key"] is not holder.fields["key"]
 
 
-def test_copy_value_rejects_unsupported_type():
+def test_copy_value_rejects_unsupported_type() -> None:
     scalar = config_pb2.Config.DESCRIPTOR.fields_by_name["lora"].message_type
+    assert scalar is not None
     with pytest.raises(TypeError, match="Unsupported preference value: object"):
         _copy_value(object(), scalar.fields_by_name["hop_limit"])

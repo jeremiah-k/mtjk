@@ -5,8 +5,10 @@ from __future__ import annotations
 import errno
 import logging
 import signal
+import socket
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -124,9 +126,9 @@ def test_simradio_node_waits_for_next_boot_marker(
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(marker)
 
-    monkeypatch.setattr(simradio_harness.time, "sleep", _record_reboot)
+    monkeypatch.setattr(time, "sleep", _record_reboot)
     monkeypatch.setattr(
-        simradio_harness.time,
+        time,
         "monotonic",
         iter((0.0, 0.0, 0.1)).__next__,
     )
@@ -258,7 +260,7 @@ def test_expected_reboot_exit_relaunches_same_vfs_and_records_recovery(
     replacement.poll.return_value = None
     popen = MagicMock(return_value=replacement)
     monkeypatch.setattr(simradio_harness, "_ensure_port_available", lambda _port: None)
-    monkeypatch.setattr(simradio_harness.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(subprocess, "Popen", popen)
 
     node._restart_after_expected_reboot_exit(
@@ -404,11 +406,11 @@ def test_simradio_mesh_paces_text_sends_per_originating_node() -> None:
 
     with (
         patch.object(
-            simradio_harness.time,
+            time,
             "monotonic",
             side_effect=(10.0, 10.0, 10.25, 11.1, 11.1, 11.1),
         ),
-        patch.object(simradio_harness.time, "sleep") as sleep,
+        patch.object(time, "sleep") as sleep,
     ):
         first = mesh.send_text(0, "first", wantAck=False)
         second = mesh.send_text(0, "second", wantAck=False)
@@ -619,7 +621,7 @@ def test_simradio_node_rejects_occupied_port(
     probe.__enter__.return_value = probe
     probe.connect_ex.return_value = 0
     monkeypatch.setattr(
-        simradio_harness.socket,
+        socket,
         "socket",
         lambda *_args, **_kwargs: probe,
     )
@@ -643,7 +645,7 @@ def test_simradio_port_preflight_allows_non_listening_kernel_state(
     probe.__enter__.return_value = probe
     probe.connect_ex.return_value = errno.ECONNREFUSED
     monkeypatch.setattr(
-        simradio_harness.socket,
+        socket,
         "socket",
         lambda *_args, **_kwargs: probe,
     )
@@ -663,7 +665,7 @@ def test_simradio_port_preflight_rejects_ambiguous_probe_result(
     probe.__enter__.return_value = probe
     probe.connect_ex.return_value = errno.ETIMEDOUT
     monkeypatch.setattr(
-        simradio_harness.socket,
+        socket,
         "socket",
         lambda *_args, **_kwargs: probe,
     )
@@ -749,7 +751,7 @@ def test_run_cli_retries_transient_failure_without_logging_values(
         )
     )
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: next(completed))
-    monkeypatch.setattr(simradio_helpers.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     with caplog.at_level(logging.DEBUG, logger="meshtastic.tests.simradio_helpers"):
         result = run_cli(
@@ -773,7 +775,7 @@ def test_connect_iface_retries_the_owned_interface_connection(
     iface = MagicMock(spec=TCPInterface)
     constructor = MagicMock(side_effect=(ConnectionRefusedError(), iface))
     monkeypatch.setattr(simradio_helpers, "TCPInterface", constructor)
-    monkeypatch.setattr(simradio_helpers.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     assert connect_iface(4404, wait_timeout=1.0) is iface
     assert constructor.call_count == 2
@@ -788,7 +790,7 @@ def test_verify_state_eventually_retries_only_state_mismatches(
     second = MagicMock(spec=TCPInterface)
     connect = MagicMock(side_effect=(first, second))
     monkeypatch.setattr(simradio_helpers, "connect_iface", connect)
-    monkeypatch.setattr(simradio_helpers.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     attempts = 0
 

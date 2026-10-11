@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
@@ -55,7 +55,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
 
 def _interface_double() -> MagicMock:
     """Return an interface double constrained to the MeshInterface method surface."""
-    return create_autospec(MeshInterface, instance=True)
+    return cast(MagicMock, create_autospec(MeshInterface, instance=True))
 
 
 def _context(interface: Any, **arg_overrides: Any) -> CliContext:

@@ -1,5 +1,6 @@
 """Focused tests for CLI serial reconnect helpers."""
 
+import time
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -119,7 +120,7 @@ def test_listen_loop_poll_once_sleeps_long_when_non_serial(
 ) -> None:
     client = _mesh_client()
     sleep = MagicMock()
-    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(time, "sleep", sleep)
 
     assert runtime._listen_loop_poll_once(client) is False
     sleep.assert_called_once_with(runtime.MAIN_LOOP_IDLE_SLEEP_SECONDS)

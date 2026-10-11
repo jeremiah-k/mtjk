@@ -58,13 +58,13 @@ class _FakeWriter:
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.schema: Any = None
-        self.rows: list[dict] = []
+        self.rows: list[dict[str, Any]] = []
 
     def setSchema(self, _schema: Any) -> None:
         """Set the schema for the writer."""
         self.schema = _schema
 
-    def addRow(self, _row: dict) -> None:
+    def addRow(self, _row: dict[str, Any]) -> None:
         """Add a row to the writer."""
         self.rows.append(_row)
 
@@ -145,7 +145,7 @@ def test_logset_handles_symlink_update_failure_on_latest_dir(
     # Make unlink fail
     original_unlink = Path.unlink
 
-    def failing_unlink(self, missing_ok: bool = False) -> None:
+    def failing_unlink(self: Path, missing_ok: bool = False) -> None:
         if "latest" in str(self):
             raise OSError("Cannot remove file")
         original_unlink(self, missing_ok=missing_ok)
@@ -261,7 +261,9 @@ def test_logset_symlink_fails_silently(
     monkeypatch.setattr(slog_module, "PowerLogger", lambda *args, **kwargs: mock_power)
 
     # Make symlink fail
-    def failing_symlink(self, target, target_is_directory: bool = False) -> None:
+    def failing_symlink(
+        self: Path, target: str, target_is_directory: bool = False
+    ) -> None:
         raise OSError("Symlink not supported")
 
     monkeypatch.setattr(Path, "symlink_to", failing_symlink)
@@ -409,7 +411,7 @@ def test_power_logger_writer_close_failure_during_error_cleanup(
     mock_writer.setSchema.side_effect = RuntimeError("schema error")
     mock_writer.close.side_effect = OSError("close error")
 
-    def mock_writer_factory(path):  # noqa: ARG001
+    def mock_writer_factory(path: str) -> MagicMock:  # noqa: ARG001
         return mock_writer
 
     monkeypatch.setattr(slog_module, "FeatherWriter", mock_writer_factory)
@@ -687,7 +689,7 @@ def test_power_logger_writer_close_failure_after_meter_close_failure(
     mock_writer.setSchema = MagicMock()
     mock_writer.close.side_effect = OSError("writer close failed")
 
-    def mock_writer_factory(path):  # noqa: ARG001
+    def mock_writer_factory(path: str) -> MagicMock:  # noqa: ARG001
         return mock_writer
 
     monkeypatch.setattr(slog_module, "FeatherWriter", mock_writer_factory)
@@ -866,12 +868,12 @@ def test_logset_startup_failure_closes_power_logger(
     power_logger_mock = MagicMock()
     power_logger_mock.close = MagicMock()
 
-    def mock_power_factory(*args, **kwargs):  # noqa: ARG001
+    def mock_power_factory(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001
         return power_logger_mock
 
     monkeypatch.setattr(slog_module, "PowerLogger", mock_power_factory)
 
-    def mock_slog_factory(*args, **kwargs):
+    def mock_slog_factory(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("setup failed")
 
     monkeypatch.setattr(slog_module, "StructuredLogger", mock_slog_factory)
@@ -895,12 +897,12 @@ def test_logset_startup_failure_logs_secondary_error(
     power_logger_mock = MagicMock()
     power_logger_mock.close.side_effect = OSError("power close failed")
 
-    def mock_power_factory(*args, **kwargs):  # noqa: ARG001
+    def mock_power_factory(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001
         return power_logger_mock
 
     monkeypatch.setattr(slog_module, "PowerLogger", mock_power_factory)
 
-    def mock_slog_factory(*args, **kwargs):
+    def mock_slog_factory(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("setup failed")
 
     monkeypatch.setattr(slog_module, "StructuredLogger", mock_slog_factory)
@@ -930,7 +932,7 @@ def test_structured_logger_setup_failure_cleanup(
     mock_writer.setSchema.side_effect = RuntimeError("schema failed")
     mock_writer.close = MagicMock()
 
-    def mock_writer_factory(path):  # noqa: ARG001
+    def mock_writer_factory(path: str) -> MagicMock:  # noqa: ARG001
         return mock_writer
 
     monkeypatch.setattr(slog_module, "FeatherWriter", mock_writer_factory)
@@ -960,7 +962,7 @@ def test_structured_logger_raw_file_setup_failure_cleanup(
     # Fail after raw file is opened
     call_count = 0
 
-    def fail_on_setSchema(*args, **kwargs):  # noqa: ARG001
+    def fail_on_setSchema(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
         nonlocal call_count
         call_count += 1
         if call_count >= 1:
@@ -969,7 +971,7 @@ def test_structured_logger_raw_file_setup_failure_cleanup(
     mock_writer.setSchema = MagicMock(side_effect=fail_on_setSchema)
     mock_writer.close = MagicMock()
 
-    def mock_writer_factory(path):  # noqa: ARG001
+    def mock_writer_factory(path: str) -> MagicMock:  # noqa: ARG001
         return mock_writer
 
     monkeypatch.setattr(slog_module, "FeatherWriter", mock_writer_factory)

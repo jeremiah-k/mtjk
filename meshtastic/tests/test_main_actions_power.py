@@ -5,6 +5,7 @@
 import logging
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import IO, Any, cast
@@ -22,6 +23,7 @@ from meshtastic.__main__ import (
     printConfig,
     tunnelMain,
 )
+from meshtastic.protobuf import admin_pb2
 
 # from ..ble_interface import BLEInterface
 from ..node import Node
@@ -1381,7 +1383,7 @@ def test_main_ota_update_succeeds_and_prints_completion(
         for call_args in get_node.call_args_list
     )
     node.startOTA.assert_called_once_with(
-        mode=main_module.admin_pb2.OTAMode.OTA_WIFI,
+        mode=admin_pb2.OTAMode.OTA_WIFI,
         ota_file_hash=ota.hash_bytes.return_value,
     )
     assert sleep_mock.call_args_list == [call(main_module.OTA_REBOOT_WAIT_SECONDS)]
@@ -1472,7 +1474,7 @@ def test_main_ota_update_allows_explicit_local_dest(
     assert "OTA update completed successfully!" in out
     assert err == ""
     local_node.startOTA.assert_called_once_with(
-        mode=main_module.admin_pb2.OTAMode.OTA_WIFI,
+        mode=admin_pb2.OTAMode.OTA_WIFI,
         ota_file_hash=ota.hash_bytes.return_value,
     )
     other_node.startOTA.assert_not_called()
@@ -1552,7 +1554,7 @@ def test_create_power_meter_sleeps_after_power_on_when_not_waiting(
     monkeypatch.setattr(main_module, "SimPowerSupply", lambda: fake_meter)
     monkeypatch.setattr(mt_config, "args", args)
     sleep_mock = MagicMock()
-    time_attrs = vars(main_module.time).copy()
+    time_attrs = vars(time).copy()
     time_attrs["sleep"] = sleep_mock
     monkeypatch.setattr(
         main_module, "time", SimpleNamespace(**time_attrs), raising=True

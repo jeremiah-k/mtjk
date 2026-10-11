@@ -968,12 +968,13 @@ def _local_owner_via_admin(target_node: Any) -> mesh_pb2.User | None:
     message = admin_pb2.AdminMessage()
     message.get_owner_request = True
     try:
-        return request_admin_response(
+        owner: mesh_pb2.User | None = request_admin_response(
             message,
             "get_owner_response",
             mesh_pb2.User,
             response_timeout_seconds=ADMIN_RESPONSE_WAIT_SECONDS,
         )
+        return owner
     except Exception:  # pylint: disable=broad-except
         logger.debug("Local owner state request failed.", exc_info=True)
         return None

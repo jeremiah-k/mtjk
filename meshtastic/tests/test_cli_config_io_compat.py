@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.config_io as cli_config_io
+from meshtastic import mt_config
 
 
 @pytest.mark.unit
@@ -26,7 +28,7 @@ def test_export_config_facade_injects_current_main_module_shims(
 
     iface = MagicMock()
     with patch.object(
-        main_module.cli_config_io,
+        cli_config_io,
         "export_config",
         return_value="exported",
     ) as runtime_export:
@@ -35,7 +37,7 @@ def test_export_config_facade_injects_current_main_module_shims(
     assert result == "exported"
     runtime_export.assert_called_once_with(
         iface,
-        camel_case=main_module.mt_config.camel_case,
+        camel_case=mt_config.camel_case,
         message_to_dict=message_to_dict,
         prefix_base64_bytes_fields_fn=prefix,
         set_missing_flags_false_fn=materialize,
@@ -61,7 +63,7 @@ def test_print_available_fields_facade_uses_current_localonly_factories(
     )
 
     with patch.object(
-        main_module.cli_config_io,
+        cli_config_io,
         "print_available_config_fields",
     ) as runtime_print:
         main_module.printAvailableConfigFields()
@@ -78,8 +80,8 @@ def test_print_config_facade_uses_current_camel_case_setting(
     """Legacy ``printConfig`` should delegate with the current CLI casing mode."""
     config = MagicMock()
     runtime_print = MagicMock()
-    monkeypatch.setattr(main_module.cli_config_io, "print_config", runtime_print)
-    monkeypatch.setattr(main_module.mt_config, "camel_case", True)
+    monkeypatch.setattr(cli_config_io, "print_config", runtime_print)
+    monkeypatch.setattr(mt_config, "camel_case", True)
 
     main_module.printConfig(config)
 
@@ -98,5 +100,5 @@ def test_is_repeated_field_supports_legacy_descriptor_labels() -> None:
         (singular, False),
         (missing_label, False),
     ):
-        assert main_module.cli_config_io.is_repeated_field(descriptor) is expected
+        assert cli_config_io.is_repeated_field(descriptor) is expected
         assert main_module._is_repeated_field(descriptor) is expected

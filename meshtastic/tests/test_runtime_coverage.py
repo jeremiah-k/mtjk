@@ -8,6 +8,7 @@ to improve coverage of runtime modules.
 
 import logging
 import threading
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,8 +29,8 @@ from meshtastic.mesh_interface_runtime.receive_pipeline import (
     _PacketRuntimeContext,
 )
 from meshtastic.node import Node
+from meshtastic.node_runtime.shared import ERROR_REASON_NONE
 from meshtastic.node_runtime.transport_runtime.ack import (
-    ERROR_REASON_NONE,
     _NodeAckNakRuntime,
 )
 from meshtastic.protobuf import (
@@ -689,7 +690,7 @@ class TestReceivePipelineIdentityEnrichmentEdgeCases:
         # fromId should be None since node has no user
         assert packet_dict.get("fromId") is None
         # toId should be BROADCAST_ADDR
-        assert packet_dict.get("toId") == BROADCAST_ADDR
+        assert packet_dict.get("toId") == cast(Any, BROADCAST_ADDR)
 
     @pytest.mark.unit
     def test_enrich_identity_node_user_no_id(
@@ -1115,7 +1116,7 @@ class TestReceivePipelineInvokeCallbackEdgeCases:
     ) -> None:
         """Test that callback exceptions are suppressed and logged."""
 
-        def failing_callback(iface, packet):
+        def failing_callback(iface: Any, packet: Any) -> None:
             raise ValueError("Callback failed!")
 
         packet_context = _PacketRuntimeContext(
