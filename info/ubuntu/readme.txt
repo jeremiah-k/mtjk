@@ -1,1 +1,0 @@
-info run on ubuntu

@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from meshtastic._branding import (
-    COMPATIBILITY_CLI_NAMES,
     DISTRIBUTION_NAME,
     PRIMARY_CLI_NAME,
 )
@@ -372,7 +371,6 @@ def test_standalone_build_copies_configured_distribution_metadata(
     pyinstaller_args = tmp_path / "pyinstaller-args.txt"
     uv = fake_bin / "uv"
     (tmp_path / ("poetry.lock" if legacy_lock else "uv.lock")).touch()
-    compatibility_names = " ".join(COMPATIBILITY_CLI_NAMES)
     uv.write_text(
         f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -391,7 +389,6 @@ if [[ $1 == run && $2 == python && $3 == -c ]]; then
   case $4 in
     *DISTRIBUTION_NAME*) printf '%s\n' '{DISTRIBUTION_NAME}' ;;
     *PRIMARY_CLI_NAME*) printf '%s\n' '{PRIMARY_CLI_NAME}' ;;
-    *COMPATIBILITY_CLI_NAMES*) printf '%s\n' '{compatibility_names}' ;;
     *) exit 2 ;;
   esac
   exit 0
@@ -438,15 +435,16 @@ exit 2
         assert commands[0] == "sync --locked --extra cli"
         assert all(command.startswith("run --locked") for command in commands[1:])
     assert github_output.read_text(encoding="utf-8") == (
-        f"primary={PRIMARY_CLI_NAME}\ncompatibility={compatibility_names}\n"
+        f"primary={PRIMARY_CLI_NAME}\n"
     )
     args = pyinstaller_args.read_text(encoding="utf-8").splitlines()
     metadata_index = args.index("--copy-metadata")
     assert args[metadata_index + 1] == DISTRIBUTION_NAME
     name_index = args.index("-n")
     assert args[name_index + 1] == PRIMARY_CLI_NAME
-    for compatibility_cli in COMPATIBILITY_CLI_NAMES:
-        assert (tmp_path / "dist" / compatibility_cli).is_file()
+    assert sorted(entry.name for entry in (tmp_path / "dist").iterdir()) == [
+        PRIMARY_CLI_NAME
+    ]
 
 
 @pytest.mark.unit
@@ -594,9 +592,9 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     build_bin = (_REPO_ROOT / "bin" / "build-bin.sh").read_text(encoding="utf-8")
     assert "from meshtastic._branding import DISTRIBUTION_NAME" in build_bin
     assert "from meshtastic._branding import PRIMARY_CLI_NAME" in build_bin
-    assert "from meshtastic._branding import COMPATIBILITY_CLI_NAMES" in build_bin
     assert '-n "${primary_cli}"' in build_bin
     assert '--copy-metadata "${distribution_name}"' in build_bin
+    assert "COMPATIBILITY_CLI_NAMES" not in build_bin
 
     release_assets = assets_path.read_text(encoding="utf-8")
     assert (
@@ -604,7 +602,8 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
     )
     assert "id: cli_branding" in release_assets
     assert "steps.cli_branding.outputs.primary" in release_assets
-    assert "steps.cli_branding.outputs.compatibility" in release_assets
+    assert "COMPATIBILITY_CLI_NAMES" not in release_assets
+    assert "outputs.compatibility" not in release_assets
     assert "workflow_dispatch:" in release_assets
     assert "release_tag:" in release_assets
     assert 'gh release view "${RELEASE_TAG}"' in release_assets
@@ -625,13 +624,12 @@ def test_release_workflows_preserve_minimal_pypi_and_verified_assets() -> None:
         '"${RUNNER_TEMP}/smoke-standalone.sh" "dist/${PRIMARY_CLI_NAME}" '
         '"${RELEASE_VERSION}" "${PRIMARY_CLI_NAME}"'
     ) in release_assets
-    assert (
-        '"${RUNNER_TEMP}/smoke-standalone.sh" "dist/${cli_name}" '
-        '"${RELEASE_VERSION}" "${PRIMARY_CLI_NAME}"'
-    ) in release_assets
     assert "rm -rf release-assets" in release_assets
     assert "mkdir release-assets" in release_assets
-    assert 'cp "dist/${cli_name}" "release-assets/${cli_name}_ubuntu"' in release_assets
+    assert (
+        'cp "dist/${PRIMARY_CLI_NAME}" "release-assets/${PRIMARY_CLI_NAME}_ubuntu"'
+        in release_assets
+    )
     assert "cp standalone_readme.txt release-assets/readme.txt" in release_assets
     assert "path: release-assets/*" in release_assets
     assert "files: release-assets/*" in release_assets
