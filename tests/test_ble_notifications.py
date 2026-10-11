@@ -1,5 +1,7 @@
 """Unit tests for BLE notification subscription management."""
 
+from typing import Any, cast
+
 import pytest
 
 from meshtastic.interfaces.ble.constants import FROMNUM_UUID
@@ -55,7 +57,7 @@ def test_resubscribe_all_stops_after_cleanup_epoch_change(
                 manager._cleanup_all()
 
     client = _Client()
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
 
     assert client.calls == ["char-1"]
     assert len(manager) == 0
@@ -86,7 +88,7 @@ def test_resubscribe_all_skips_fromnum_characteristic(
             self.calls.append(characteristic)
 
     client = _Client()
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
 
     assert FROMNUM_UUID not in client.calls
     assert client.calls == ["char-1"]

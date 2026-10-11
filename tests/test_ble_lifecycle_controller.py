@@ -6,6 +6,7 @@ delegation to sub-controllers, and fallback hook resolution.
 """
 
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_ownership_with_capture():
+def mock_ownership_with_capture() -> tuple[SimpleNamespace, dict[str, object]]:
     """Fixture providing mock ownership coordinator with capture dict."""
     captured: dict[str, object] = {}
 
@@ -54,9 +55,9 @@ class TestBLELifecycleControllerInit:
         """BLELifecycleController.__init__ should create all sub-controllers."""
         mock_iface = SimpleNamespace()
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
 
-        assert controller._iface is mock_iface
+        assert controller._iface is cast(Any, mock_iface)
         assert controller._receive is not None
         assert controller._disconnect is not None
         assert controller._connection_ownership is not None
@@ -66,10 +67,10 @@ class TestBLELifecycleControllerInit:
         """BLELifecycleController should store reference to the bound interface."""
         mock_iface = SimpleNamespace(some_attr="test_value")
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
 
-        assert controller._iface is mock_iface
-        assert controller._iface.some_attr == "test_value"
+        assert controller._iface is cast(Any, mock_iface)
+        assert cast(Any, controller._iface).some_attr == "test_value"
 
 
 class TestBLELifecycleControllerReceiveDelegation:
@@ -84,7 +85,7 @@ class TestBLELifecycleControllerReceiveDelegation:
             )
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         controller._set_receive_wanted(want_receive=True)
@@ -100,7 +101,7 @@ class TestBLELifecycleControllerReceiveDelegation:
             )
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         controller._set_receive_wanted(want_receive=False)
@@ -111,7 +112,7 @@ class TestBLELifecycleControllerReceiveDelegation:
         """_should_run_receive_loop should delegate to the _receive coordinator."""
         mock_receive = SimpleNamespace(should_run_receive_loop=lambda: True)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         result = controller._should_run_receive_loop()
@@ -122,7 +123,7 @@ class TestBLELifecycleControllerReceiveDelegation:
         """_should_run_receive_loop should return False when coordinator says so."""
         mock_receive = SimpleNamespace(should_run_receive_loop=lambda: False)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         result = controller._should_run_receive_loop()
@@ -138,7 +139,7 @@ class TestBLELifecycleControllerReceiveDelegation:
             )
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         controller._start_receive_thread(name="test-thread", reset_recovery=False)
@@ -154,7 +155,7 @@ class TestBLELifecycleControllerReceiveDelegation:
             )
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._receive = mock_receive  # type: ignore[assignment]
 
         controller._start_receive_thread(name="test-thread")
@@ -168,22 +169,26 @@ class TestBLELifecycleControllerDisconnectDelegation:
     def test_handle_disconnect_delegates_to_disconnect_coordinator(self) -> None:
         """_handle_disconnect should delegate to the _disconnect coordinator."""
         calls: list[dict[str, object]] = []
-        mock_disconnect = SimpleNamespace(
-            handle_disconnect=lambda source, *, client, bleak_client: (
-                calls.append(
-                    {"source": source, "client": client, "bleak_client": bleak_client}
-                )
-                or True
+
+        def _handle_disconnect(
+            source: str, *, client: object, bleak_client: object
+        ) -> bool:
+            calls.append(
+                {"source": source, "client": client, "bleak_client": bleak_client}
             )
-        )
+            return True
+
+        mock_disconnect = SimpleNamespace(handle_disconnect=_handle_disconnect)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
         mock_bleak = SimpleNamespace()
         result = controller._handle_disconnect(
-            "test-source", client=mock_client, bleak_client=mock_bleak
+            "test-source",
+            client=cast(Any, mock_client),
+            bleak_client=cast(Any, mock_bleak),
         )
 
         assert result is True
@@ -195,7 +200,7 @@ class TestBLELifecycleControllerDisconnectDelegation:
         """_handle_disconnect should return the boolean result from coordinator."""
         mock_disconnect = SimpleNamespace(handle_disconnect=lambda *_a, **_kw: False)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         result = controller._handle_disconnect("source")
@@ -207,11 +212,11 @@ class TestBLELifecycleControllerDisconnectDelegation:
         calls: list[object] = []
         mock_disconnect = SimpleNamespace(on_ble_disconnect=calls.append)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         mock_bleak = SimpleNamespace()
-        controller._on_ble_disconnect(mock_bleak)
+        controller._on_ble_disconnect(cast(Any, mock_bleak))
 
         assert calls == [mock_bleak]
 
@@ -222,7 +227,7 @@ class TestBLELifecycleControllerDisconnectDelegation:
             schedule_auto_reconnect=lambda: calls.append("scheduled")
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         controller._schedule_auto_reconnect()
@@ -240,11 +245,11 @@ class TestBLELifecycleControllerConnectionOwnershipDelegation:
             _emit_verified_connection_side_effects=calls.append
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
-        controller._emit_verified_connection_side_effects(mock_client)
+        controller._emit_verified_connection_side_effects(cast(Any, mock_client))
 
         assert calls == [mock_client]
 
@@ -278,13 +283,13 @@ class TestBLELifecycleControllerHookResolution:
             _discard_invalidated_connected_client=_discard_invalidated_connected_client
         )
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         # Call _discard_invalidated_connected_client which uses _resolve_hook internally
         mock_client = SimpleNamespace(address="test-addr")
         controller._discard_invalidated_connected_client(
-            mock_client,
+            cast(Any, mock_client),
             restore_address=None,
             restore_last_connection_request=None,
         )
@@ -309,7 +314,7 @@ class TestBLELifecycleControllerHookResolution:
             _discard_invalidated_connected_client=_discard_invalidated_connected_client
         )
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         mock_client = SimpleNamespace(address="test-addr")
@@ -319,7 +324,7 @@ class TestBLELifecycleControllerHookResolution:
         ) as state_manager_is_closing:
             # This should use fallback since no hook exists.
             controller._discard_invalidated_connected_client(
-                mock_client,
+                cast(Any, mock_client),
                 restore_address=None,
                 restore_last_connection_request=None,
             )
@@ -344,7 +349,7 @@ class TestBLELifecycleControllerHookResolution:
             _discard_invalidated_connected_client=_discard_invalidated_connected_client
         )
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         mock_client = SimpleNamespace(address="test-addr")
@@ -354,7 +359,7 @@ class TestBLELifecycleControllerHookResolution:
         ) as state_manager_is_closing:
             # This should use fallback since hook is not callable.
             controller._discard_invalidated_connected_client(
-                mock_client,
+                cast(Any, mock_client),
                 restore_address=None,
                 restore_last_connection_request=None,
             )
@@ -379,7 +384,7 @@ class TestBLELifecycleControllerHookResolution:
             _discard_invalidated_connected_client=_discard_invalidated_connected_client
         )
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         with patch(
@@ -388,7 +393,7 @@ class TestBLELifecycleControllerHookResolution:
         ) as state_manager_is_closing:
             mock_client = SimpleNamespace(address="test-addr")
             controller._discard_invalidated_connected_client(
-                mock_client,
+                cast(Any, mock_client),
                 restore_address=None,
                 restore_last_connection_request=None,
             )
@@ -404,7 +409,7 @@ class TestBLELifecycleControllerHookResolution:
         mock_iface = SimpleNamespace()
         mock_ownership, captured = mock_ownership_with_capture
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         with (
@@ -431,7 +436,7 @@ class TestBLELifecycleControllerHookResolution:
         ):
             mock_client = SimpleNamespace(address="test-addr")
             controller._discard_invalidated_connected_client(
-                mock_client,
+                cast(Any, mock_client),
                 restore_address=None,
                 restore_last_connection_request=None,
             )
@@ -457,7 +462,7 @@ class TestBLELifecycleControllerHookResolution:
         mock_iface = SimpleNamespace()
         mock_ownership, captured = mock_ownership_with_capture
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         with (
@@ -484,7 +489,7 @@ class TestBLELifecycleControllerHookResolution:
         ):
             mock_client = SimpleNamespace(address="test-addr")
             controller._discard_invalidated_connected_client(
-                mock_client,
+                cast(Any, mock_client),
                 restore_address=None,
                 restore_last_connection_request=None,
             )
@@ -525,12 +530,12 @@ class TestBLELifecycleControllerHookResolution:
             _discard_invalidated_connected_client=capture_kwargs
         )
 
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         mock_client = SimpleNamespace(address="test-addr")
         controller._discard_invalidated_connected_client(
-            mock_client,
+            cast(Any, mock_client),
             restore_address="AA:BB:CC:DD:EE:FF",
             restore_last_connection_request="aa:bb:cc:dd:ee:ff",
         )
@@ -546,7 +551,7 @@ class TestBLELifecycleControllerShutdownDelegation:
         """_is_connection_closing should delegate to the _shutdown coordinator."""
         mock_shutdown = SimpleNamespace(is_connection_closing=lambda: True)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._shutdown = mock_shutdown  # type: ignore[assignment]
 
         result = controller._is_connection_closing()
@@ -565,7 +570,7 @@ class TestBLELifecycleControllerShutdownDelegation:
             )
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._shutdown = mock_shutdown  # type: ignore[assignment]
 
         controller._close(
@@ -595,7 +600,7 @@ class TestBLELifecycleControllerShutdownDelegation:
 
         mock_shutdown = SimpleNamespace(close=_capture_close)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._shutdown = mock_shutdown  # type: ignore[assignment]
 
         controller._close(
@@ -625,11 +630,11 @@ class TestBLELifecycleControllerClientManagement:
             disconnect_and_close_client=_capture_disconnect
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
-        controller._disconnect_and_close_client(mock_client)
+        controller._disconnect_and_close_client(cast(Any, mock_client))
 
         assert calls == [(mock_client, None)]
 
@@ -651,7 +656,7 @@ class TestBLELifecycleControllerClientManagement:
 
         mock_shutdown = SimpleNamespace(close=_close_without_timeout)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._shutdown = mock_shutdown  # type: ignore[assignment]
 
         controller._close(
@@ -681,7 +686,7 @@ class TestBLELifecycleControllerClientManagement:
 
         mock_shutdown = SimpleNamespace(close=_raise_unrelated)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._shutdown = mock_shutdown  # type: ignore[assignment]
 
         with pytest.raises(TypeError, match="takes 1 positional argument"):
@@ -704,11 +709,11 @@ class TestBLELifecycleControllerClientManagement:
             disconnect_and_close_client=_disconnect_without_timeout
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
-        controller._disconnect_and_close_client(mock_client, timeout=3.0)
+        controller._disconnect_and_close_client(cast(Any, mock_client), timeout=3.0)
 
         assert calls == [(mock_client,)]
 
@@ -721,12 +726,12 @@ class TestBLELifecycleControllerClientManagement:
 
         mock_disconnect = SimpleNamespace(disconnect_and_close_client=_raise_unrelated)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._disconnect = mock_disconnect  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
         with pytest.raises(TypeError, match="takes 1 positional argument"):
-            controller._disconnect_and_close_client(mock_client, timeout=3.0)
+            controller._disconnect_and_close_client(cast(Any, mock_client), timeout=3.0)
 
     def test_has_ever_connected_session_delegates_to_ownership_coordinator(
         self,
@@ -734,7 +739,7 @@ class TestBLELifecycleControllerClientManagement:
         """_has_ever_connected_session should delegate to _connection_ownership coordinator."""
         mock_ownership = SimpleNamespace(_has_ever_connected_session=lambda: True)
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         result = controller._has_ever_connected_session()
@@ -744,15 +749,20 @@ class TestBLELifecycleControllerClientManagement:
     def test_is_owned_connected_client_delegates_to_ownership_coordinator(self) -> None:
         """_is_owned_connected_client should delegate to _connection_ownership coordinator."""
         calls: list[object] = []
+
+        def _is_owned_connected_client(client: object) -> bool:
+            calls.append(client)
+            return True
+
         mock_ownership = SimpleNamespace(
-            _is_owned_connected_client=lambda client: (calls.append(client) or True)
+            _is_owned_connected_client=_is_owned_connected_client
         )
         mock_iface = SimpleNamespace()
-        controller = BLELifecycleController(mock_iface)
+        controller = BLELifecycleController(cast(Any, mock_iface))
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         mock_client = SimpleNamespace()
-        result = controller._is_owned_connected_client(mock_client)
+        result = controller._is_owned_connected_client(cast(Any, mock_client))
 
         assert result is True
         assert calls == [mock_client]

@@ -6,7 +6,7 @@ import logging
 import re
 import threading
 from types import SimpleNamespace
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import pytest
 from bleak.exc import BleakError
@@ -754,7 +754,7 @@ def test_establish_and_update_client_preserves_newer_client_on_handoff_failure(
             )
 
         with iface._state_lock:
-            assert iface.client is newer_client
+            assert iface.client is cast(Any, newer_client)
             assert iface.address == newer_client.address
             assert iface._last_connection_request == "newer-session"
             assert iface._client_publish_pending is False
@@ -813,8 +813,10 @@ def test_establish_and_update_client_sets_last_request_from_device_and_updates_p
                 pair_on_connect=False,
             )
 
-        assert result_client is connected_client
-        assert updated_refs == [(cast(BLEClient, connected_client), previous_client)]
+        assert result_client is cast(Any, connected_client)
+        assert updated_refs == [
+            (cast(BLEClient, connected_client), cast(BLEClient, previous_client))
+        ]
         assert iface._last_connection_request == iface._sanitize_address(
             connected_client.address
         )
@@ -1170,9 +1172,9 @@ def test_thread_event_dispatcher_resolution_paths(
             _ClassCoordinator()
         )
         assert callable(class_dispatch)
-        cast(Callable[[str], None], class_dispatch)("class-evt")
+        class_dispatch("class-evt")
         assert class_calls == ["class-evt"]
-        iface.thread_coordinator = _ClassCoordinator()
+        iface.thread_coordinator = cast(Any, _ClassCoordinator())
         iface._set_thread_event("class-evt-2")
         assert class_calls == ["class-evt", "class-evt-2"]
 
@@ -1186,7 +1188,7 @@ def test_thread_event_dispatcher_resolution_paths(
             instance_coordinator
         )
         assert callable(instance_dispatch)
-        cast(Callable[[str], None], instance_dispatch)("instance-evt")
+        instance_dispatch("instance-evt")
         assert instance_calls == ["instance-evt"]
 
         missing_coordinator = SimpleNamespace()
@@ -1201,7 +1203,7 @@ def test_thread_event_dispatcher_resolution_paths(
                 cast(str, message)
             ),
         )
-        iface.thread_coordinator = missing_coordinator
+        iface.thread_coordinator = cast(Any, missing_coordinator)
         iface._set_thread_event("missing-evt")
         assert any(
             "No callable thread event dispatcher available" in message

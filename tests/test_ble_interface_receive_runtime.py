@@ -7,7 +7,7 @@ import math
 import threading
 from collections.abc import Iterator
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -298,7 +298,7 @@ def test_receive_loop_waits_while_publish_pending(
     )
 
     with iface._state_lock:
-        iface.client = client
+        iface.client = cast(Any, client)
         iface._client_publish_pending = True
     iface._want_receive = True
 
@@ -437,7 +437,7 @@ def test_start_receive_thread_clears_cached_thread_when_start_fails(
 
         def _raise_start_failure(_thread: object) -> None:
             assert _thread is thread_like
-            assert iface._receiveThread is thread_like
+            assert iface._receiveThread is cast(Any, thread_like)
             raise RuntimeError(START_FAILED_MSG)
 
         monkeypatch.setattr(
@@ -448,7 +448,10 @@ def test_start_receive_thread_clears_cached_thread_when_start_fails(
         )
 
         if invoke_start == "facade":
-            start_receive = iface._start_receive_thread
+
+            def start_receive(*, name: str) -> None:
+                iface._start_receive_thread(name=name)
+
         else:
 
             def start_receive(*, name: str) -> None:
@@ -505,7 +508,7 @@ def _patch_receive_start_monotonic(
     import meshtastic.interfaces.ble.lifecycle_receive_runtime as lifecycle_receive_runtime
 
     clock = SimpleNamespace(value=initial)
-    real_time = lifecycle_receive_runtime.time
+    real_time = vars(lifecycle_receive_runtime)["time"]
 
     def _monotonic() -> float:
         return float(clock.value)
@@ -618,7 +621,7 @@ def _run_receive_pending_marker_scenario(
     )
     assert all(call["daemon"] is True for call in create_calls)
     assert start_calls == [thread_one]
-    assert iface._receiveThread is thread_one
+    assert iface._receiveThread is cast(Any, thread_one)
     assert iface._receive_start_pending is True
 
     clock.value = t0 + small_delta
@@ -630,7 +633,7 @@ def _run_receive_pending_marker_scenario(
     )
     assert all(call["daemon"] is True for call in create_calls)
     assert start_calls == [thread_one]
-    assert iface._receiveThread is thread_one
+    assert iface._receiveThread is cast(Any, thread_one)
     assert iface._receive_start_pending is True
 
     clock.value = t0 + timeout - small_delta
@@ -642,7 +645,7 @@ def _run_receive_pending_marker_scenario(
     )
     assert all(call["daemon"] is True for call in create_calls)
     assert start_calls == [thread_one]
-    assert iface._receiveThread is thread_one
+    assert iface._receiveThread is cast(Any, thread_one)
     assert iface._receive_start_pending is True
 
     clock.value = t0 + timeout + small_delta
@@ -654,7 +657,7 @@ def _run_receive_pending_marker_scenario(
     )
     assert all(call["daemon"] is True for call in create_calls)
     assert start_calls == [thread_one, thread_two]
-    assert iface._receiveThread is thread_two
+    assert iface._receiveThread is cast(Any, thread_two)
     assert iface._receive_start_pending is False
     assert len(deferred_schedule_calls) == 1
 
@@ -744,7 +747,7 @@ def test_start_receive_thread_retains_cached_thread_when_start_noops(
 
             def _assert_cached_thread(thread: object) -> None:
                 assert thread is thread_like
-                assert iface._receiveThread is thread_like
+                assert iface._receiveThread is cast(Any, thread_like)
 
             _, start_calls = _patch_receive_start_threads(
                 monkeypatch,
@@ -756,7 +759,7 @@ def test_start_receive_thread_retains_cached_thread_when_start_noops(
             BLELifecycleService._start_receive_thread(iface, name="BLEReceiveStartNoop")
 
             assert start_calls == [thread_like]
-            assert iface._receiveThread is thread_like
+            assert iface._receiveThread is cast(Any, thread_like)
     finally:
         iface.close()
 
@@ -889,7 +892,7 @@ def test_start_receive_thread_ident_only_probe_keeps_pending_state(
 
             BLELifecycleService._start_receive_thread(iface, name="BLEReceiveIdentOnly")
 
-            assert iface._receiveThread is thread_like
+            assert iface._receiveThread is cast(Any, thread_like)
             assert iface._receive_start_pending is True
             assert iface._receive_start_pending_since == t0
             assert iface._receive_recovery_attempts == 4

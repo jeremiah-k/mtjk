@@ -5,9 +5,12 @@ to mirror the historical split of tunnel coverage; it verifies Tunnel wiring
 against a fake LinuxTunDevice when protocol handling is enabled.
 """
 
+import platform
+import threading
 from types import SimpleNamespace
 
 import pytest
+from pubsub import pub
 
 from meshtastic import mt_config
 from meshtastic import tunnel as tunnel_module
@@ -44,15 +47,15 @@ def test_tunnel_initialization_creates_tun_device_when_proto_enabled(
             return False
 
     monkeypatch.setattr(tunnel_module, "LinuxTunDevice", _FakeTunDevice)
-    monkeypatch.setattr(tunnel_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
-        tunnel_module.threading,
+        threading,
         "Thread",
         lambda *_args, **_kwargs: _FakeThread(),
     )
-    monkeypatch.setattr(tunnel_module.pub, "subscribe", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pub, "subscribe", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        tunnel_module.pub,
+        pub,
         "unsubscribe",
         lambda *_args, **_kwargs: None,
     )

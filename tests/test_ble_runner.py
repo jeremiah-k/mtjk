@@ -4,7 +4,7 @@ import asyncio
 import threading
 import time
 import warnings
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from concurrent.futures import Future
 from typing import Any, cast
 
@@ -70,14 +70,14 @@ def ensure_runner_running() -> Generator[None, None, None]:
 class TestBLECoroutineRunner:
     """Tests for the singleton BLECoroutineRunner."""
 
-    def test_singleton_returns_same_instance(self):
+    def test_singleton_returns_same_instance(self) -> None:
         """Verify that BLECoroutineRunner is a true singleton."""
         runner1 = BLECoroutineRunner()
         runner2 = BLECoroutineRunner()
 
         assert runner1 is runner2
 
-    def test_singleton_persistence(self):
+    def test_singleton_persistence(self) -> None:
         """Verify the singleton persists its thread across client instances."""
         runner = BLECoroutineRunner()
 
@@ -100,12 +100,12 @@ class TestBLECoroutineRunner:
         client2.close()
         assert thread1.is_alive()
 
-    def test_multiple_clients_shared_loop(self):
+    def test_multiple_clients_shared_loop(self) -> None:
         """Verify that multiple clients can run coroutines on the shared loop."""
         client1 = BLEClient()
         client2 = BLEClient()
 
-        async def get_loop_id():
+        async def get_loop_id() -> int:
             """Get the identifier of the currently running asyncio event loop.
 
             Returns
@@ -128,7 +128,7 @@ class TestBLECoroutineRunner:
         client1.close()
         client2.close()
 
-    def test_runner_restart_if_dead(self):
+    def test_runner_restart_if_dead(self) -> None:
         """Verify that the runner restarts its thread if it somehow died."""
         runner = BLECoroutineRunner()
         runner._ensure_running()
@@ -152,7 +152,7 @@ class TestBLECoroutineRunner:
 
         client.close()
 
-    def test_is_running_property(self):
+    def test_is_running_property(self) -> None:
         """Verify the is_running property correctly reports state."""
         runner = BLECoroutineRunner()
 
@@ -169,8 +169,9 @@ class TestBLECoroutineRunner:
         assert runner._is_running is False
 
     def test_handle_loop_exception_without_exception_disables_exc_info(
-        self, monkeypatch
-    ):
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Loop exception logging should avoid traceback output when no exception exists."""
         runner = BLECoroutineRunner()
         observed_exc_info: list[object] = []
@@ -199,13 +200,13 @@ class TestBLECoroutineRunner:
         assert observed_exc_info == [False]
         assert loop.seen_contexts == [{"message": "test error", "exception": None}]
 
-    def test_cancel_pending_futures(self):
+    def test_cancel_pending_futures(self) -> None:
         """Verify that pending futures are properly cancelled."""
         runner = BLECoroutineRunner()
         runner._ensure_running()
 
         # Create a future that won't complete
-        async def never_complete():
+        async def never_complete() -> None:
             """Run a coroutine that suspends indefinitely.
 
             Awaiting this coroutine will block forever; it never completes and never raises.
@@ -223,7 +224,9 @@ class TestBLECoroutineRunner:
         # Future should be cancelled
         assert future.cancelled()
 
-    def test_ensure_running_timeout_raises(self, monkeypatch):
+    def test_ensure_running_timeout_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """_ensure_running should fail fast when loop readiness does not arrive."""
         runner = BLECoroutineRunner()
         never_ready = threading.Event()
@@ -233,8 +236,9 @@ class TestBLECoroutineRunner:
             runner._ensure_running(timeout=0.01)
 
     def test_run_coroutine_threadsafe_supports_startup_timeout_aliases(
-        self, monkeypatch
-    ):
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Both startup_timeout and legacy timeout should drive runner startup wait."""
         runner = BLECoroutineRunner()
         observed_timeouts = []
@@ -264,7 +268,9 @@ class TestBLECoroutineRunner:
                 runner._loop = original_loop
                 runner._warned_timeout_alias = original_warned_timeout_alias
 
-    def test_run_coroutine_threadsafe_timeout_alias_warns_deprecated(self, monkeypatch):
+    def test_run_coroutine_threadsafe_timeout_alias_warns_deprecated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Legacy timeout alias should emit a deprecation warning."""
         runner = BLECoroutineRunner()
         monkeypatch.setattr(
@@ -291,7 +297,9 @@ class TestBLECoroutineRunner:
                 runner._loop = original_loop
                 runner._warned_timeout_alias = original_warned_timeout_alias
 
-    def test_run_coroutine_threadsafe_timeout_alias_warns_once(self, monkeypatch):
+    def test_run_coroutine_threadsafe_timeout_alias_warns_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Legacy timeout alias should emit at most one warning per runner instance."""
         runner = BLECoroutineRunner()
         monkeypatch.setattr(
@@ -326,8 +334,9 @@ class TestBLECoroutineRunner:
                 runner._warned_timeout_alias = original_warned_timeout_alias
 
     def test_run_coroutine_threadsafe_startup_timeout_has_no_deprecation_warning(
-        self, monkeypatch
-    ):
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Explicit startup_timeout should not emit timeout-alias deprecation warnings."""
         runner = BLECoroutineRunner()
         monkeypatch.setattr(
@@ -356,7 +365,7 @@ class TestBLECoroutineRunner:
                 runner._loop = original_loop
                 runner._warned_timeout_alias = original_warned_timeout_alias
 
-    def test_run_coroutine_threadsafe_rejects_ambiguous_timeout_args(self):
+    def test_run_coroutine_threadsafe_rejects_ambiguous_timeout_args(self) -> None:
         """Passing both timeout names should raise to avoid ambiguous behavior."""
         runner = BLECoroutineRunner()
 
@@ -369,10 +378,10 @@ class TestBLECoroutineRunner:
         finally:
             coro.close()
 
-    def test_completed_futures_are_removed_from_tracking(self):
+    def test_completed_futures_are_removed_from_tracking(self) -> None:
         """Completed futures should be removed from runner tracking promptly."""
         runner = BLECoroutineRunner()
-        future = Future()
+        future: Future[int] = Future()
         with runner._instance_lock:
             runner._pending_futures.add(future)
         future.add_done_callback(runner._discard_tracked_future)
@@ -388,7 +397,7 @@ class TestBLECoroutineRunner:
         with runner._instance_lock:
             assert future not in runner._pending_futures
 
-    def test_zombie_runner_count(self):
+    def test_zombie_runner_count(self) -> None:
         """Runner shutdown without stop-timeout should not increment zombie count."""
         # Initial count should be 0
         initial_count = get_zombie_runner_count()
@@ -419,7 +428,7 @@ class TestBLECoroutineRunner:
         # increment the zombie counter.
         assert current_count == initial_count
 
-    def test_zombie_runner_increments_when_stop_times_out(self):
+    def test_zombie_runner_increments_when_stop_times_out(self) -> None:
         """stop() timeout path should increment zombie runner count."""
 
         class FakeLoop:
@@ -433,22 +442,22 @@ class TestBLECoroutineRunner:
                 """No-op stop used in timeout-path tests."""
                 return None
 
-            def call_soon_threadsafe(self, fn):
+            def call_soon_threadsafe(self, fn: Callable[..., Any]) -> None:
                 """Invoke callable immediately."""
                 fn()
 
         class FakeThread:
             """Thread stub that records join timeout calls."""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 """Initialize join-call recorder."""
-                self.join_calls = []
+                self.join_calls: list[float | None] = []
 
             def is_alive(self) -> bool:
                 """Report thread as alive for timeout-path testing."""
                 return True
 
-            def join(self, timeout=None):
+            def join(self, timeout: float | None = None) -> None:
                 """Record requested timeout."""
                 self.join_calls.append(timeout)
 
@@ -476,7 +485,9 @@ class TestBLECoroutineRunner:
                 runner._stop_requested = False
             runner._ensure_running()
 
-    def test_stop_unregisters_atexit_handler(self, monkeypatch):
+    def test_stop_unregisters_atexit_handler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Explicit stop should unregister the runner atexit callback."""
         runner = BLECoroutineRunner()
         runner._ensure_running()
@@ -494,7 +505,9 @@ class TestBLECoroutineRunner:
         assert unregister_calls == [runner._atexit_handler]
         assert runner._atexit_registered is False
 
-    def test_restart_reregisters_atexit_handler(self, monkeypatch):
+    def test_restart_reregisters_atexit_handler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Runner restart should re-register the atexit callback after explicit stop."""
         runner = BLECoroutineRunner()
         runner._ensure_running()
@@ -528,7 +541,7 @@ class TestBLECoroutineRunner:
 class TestBLEClientWithRunner:
     """Tests for BLEClient using the singleton runner."""
 
-    def test_client_creates_runner(self):
+    def test_client_creates_runner(self) -> None:
         """Verify that creating a client initializes the runner."""
         client = BLEClient()
 
@@ -537,7 +550,7 @@ class TestBLEClientWithRunner:
 
         client.close()
 
-    def test_client_close_is_idempotent(self):
+    def test_client_close_is_idempotent(self) -> None:
         """Verify that close() can be called multiple times."""
         client = BLEClient()
 
@@ -547,12 +560,12 @@ class TestBLEClientWithRunner:
 
         assert client._closed is True
 
-    def test_async_await_raises_when_closed(self):
+    def test_async_await_raises_when_closed(self) -> None:
         """Verify that async_await raises when client is closed."""
         client = BLEClient()
         client.close()
 
-        async def dummy():
+        async def dummy() -> int:
             """Return the integer 42.
 
             Returns
@@ -571,12 +584,12 @@ class TestBLEClientWithRunner:
 
         assert "closed" in str(exc_info.value).lower()
 
-    def test_async_run_raises_when_closed(self):
+    def test_async_run_raises_when_closed(self) -> None:
         """Verify that async_run raises when client is closed."""
         client = BLEClient()
         client.close()
 
-        async def dummy():
+        async def dummy() -> int:
             """Return the integer 42.
 
             Returns
@@ -595,7 +608,7 @@ class TestBLEClientWithRunner:
 
         assert "closed" in str(exc_info.value).lower()
 
-    def test_client_close_disconnects_active_bleak_client(self):
+    def test_client_close_disconnects_active_bleak_client(self) -> None:
         """close() should disconnect a connected underlying bleak client before closing."""
 
         class ConnectedBleakClient:
@@ -606,7 +619,7 @@ class TestBLEClientWithRunner:
             disconnect()
             """
 
-            def __init__(self):
+            def __init__(self) -> None:
                 """Initialize the mock connected bleak client state.
 
                 Sets `is_connected` to True and initializes `disconnect_calls` to 0.
@@ -614,7 +627,7 @@ class TestBLEClientWithRunner:
                 self.is_connected = True
                 self.disconnect_calls = 0
 
-            async def disconnect(self):
+            async def disconnect(self) -> None:
                 """Mark the client as disconnected and record the disconnect invocation.
 
                 This method sets the client's connected state to False and increments an internal
@@ -632,7 +645,7 @@ class TestBLEClientWithRunner:
         assert bleak_client.disconnect_calls == 1
         assert client._closed is True
 
-    def test_client_close_suppresses_disconnect_failures(self):
+    def test_client_close_suppresses_disconnect_failures(self) -> None:
         """close() should remain best-effort when disconnect raises."""
 
         class FailingBleakClient:
@@ -641,7 +654,7 @@ class TestBLEClientWithRunner:
             is_connected = True
 
             @staticmethod
-            async def disconnect():
+            async def disconnect() -> None:
                 """Raise a RuntimeError with the message "boom".
 
                 Raises

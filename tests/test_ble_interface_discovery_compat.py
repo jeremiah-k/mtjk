@@ -91,7 +91,7 @@ def test_find_device_direct_connect_without_discovery_manager() -> None:
     None
     """
     iface = object.__new__(ble_mod.BLEInterface)
-    iface._discovery_manager = None  # type: ignore[assignment]
+    iface._discovery_manager = None
 
     address = "AA:BB:CC:DD:EE:FF"
     direct_device = BLEInterface.findDevice(iface, address)
@@ -140,7 +140,9 @@ def test_report_notification_handler_error_covers_hook_and_fallback_paths(
     )
 
     raising_hook = MagicMock(side_effect=RuntimeError("hook failed"))
-    iface.error_handler = SimpleNamespace(handle_unhandled_exception=raising_hook)
+    iface.error_handler = cast(
+        Any, SimpleNamespace(handle_unhandled_exception=raising_hook)
+    )
     iface._report_notification_handler_error("hook-error")
 
     # Unconfigured child mock should be treated as unavailable and fall back to logger.debug.
@@ -412,7 +414,7 @@ def test_wait_for_disconnect_notifications_skips_unconfigured_queuework(
     )
 
     BLECompatibilityEventService.wait_for_disconnect_notifications(
-        iface,
+        cast(Any, iface),
         timeout=0.01,
         publishing_thread=publishing_thread,
     )
@@ -470,7 +472,7 @@ def test_publish_connection_status_runs_async_fallback_when_queuework_unconfigur
 
     with caplog.at_level(logging.DEBUG):
         BLECompatibilityEventService.publish_connection_status(
-            iface,
+            cast(Any, iface),
             connected=True,
             publishing_thread=publishing_thread,
         )
@@ -537,7 +539,7 @@ def test_publish_connection_status_runs_async_fallback_when_enqueue_raises(
     )
     with caplog.at_level(logging.DEBUG):
         BLECompatibilityEventService.publish_connection_status(
-            iface,
+            cast(Any, iface),
             connected=False,
             publishing_thread=publishing_thread,
         )
@@ -581,7 +583,7 @@ def test_publish_connection_status_runs_async_fallback_when_publishing_thread_mi
 
     with caplog.at_level(logging.DEBUG):
         BLECompatibilityEventService.publish_connection_status(
-            iface,
+            cast(Any, iface),
             connected=True,
             publishing_thread=None,
         )
@@ -615,7 +617,7 @@ def test_publish_connection_status_skips_when_publishing_thread_missing_during_s
 
     with caplog.at_level(logging.DEBUG):
         BLECompatibilityEventService.publish_connection_status(
-            iface,
+            cast(Any, iface),
             connected=False,
             publishing_thread=None,
         )

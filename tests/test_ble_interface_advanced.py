@@ -23,6 +23,7 @@ from meshtastic.interfaces.ble.constants import (
     FROMRADIO_UUID,
     LEGACY_LOGRADIO_UUID,
     LOGRADIO_UUID,
+    BLEConfig,
 )
 from meshtastic.interfaces.ble.interface import BLEInterface
 from meshtastic.protobuf import mesh_pb2
@@ -396,7 +397,7 @@ def test_auto_reconnect_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
         # Allow time for auto-reconnect thread to run.
         reconnect_poll_iterations = max(
             1,
-            int(ble_mod.BLEConfig.AUTO_RECONNECT_INITIAL_DELAY / 0.01),
+            int(BLEConfig.AUTO_RECONNECT_INITIAL_DELAY / 0.01),
         )
         for _ in range(reconnect_poll_iterations):
             if (
@@ -700,7 +701,7 @@ def test_rapid_connect_disconnect_stress_test(
             return self._delegate_to_bleak("connect", *_args, **_kwargs)
 
         @property
-        def is_connected(self) -> bool:
+        def is_connected(self) -> bool:  # type: ignore[override]
             """Delegate connection-state queries to the shared bleak client stub."""
             return cast(bool, self._delegate_to_bleak("is_connected"))
 
@@ -720,7 +721,7 @@ def test_rapid_connect_disconnect_stress_test(
             """Delegate notify-stop behavior to the shared bleak client stub."""
             self._delegate_to_bleak("stopNotify", *_args, **_kwargs)
 
-        def close(self) -> None:
+        def close(self, timeout: float | None = None) -> None:
             """No-op close method used in tests to avoid interacting with the event loop.
 
             This intentionally performs no action so that calling `close()` on a mock client does not trigger
@@ -999,7 +1000,7 @@ def test_rapid_connect_disconnect_stress_test(
         baseline_client_objects = list(
             cast(list["StressTestClient"], _get_stress_test_clients(iface2))
         )
-        worker_errors: Queue[Exception] = Queue()
+        concurrent_worker_errors: Queue[Exception] = Queue()
 
         def _stress_test_disconnects() -> None:
             """Perform a burst of simulated BLE disconnects on iface2 to exercise auto-reconnect and disconnect handling.
@@ -1018,7 +1019,7 @@ def test_rapid_connect_disconnect_stress_test(
                     iface2._on_ble_disconnect(bleak_client)
                     time.sleep(0.005)
                 except Exception as exc:  # noqa: BLE001 - test collects worker failures
-                    worker_errors.put(exc)
+                    concurrent_worker_errors.put(exc)
 
         # Start multiple threads for concurrent operations
         threads: list[threading.Thread] = []
@@ -1031,10 +1032,12 @@ def test_rapid_connect_disconnect_stress_test(
         for thread in threads:
             thread.join()
 
-        collected_worker_errors: list[Exception] = []
-        while not worker_errors.empty():
-            collected_worker_errors.append(worker_errors.get_nowait())
-        assert collected_worker_errors == []
+        collected_concurrent_worker_errors: list[Exception] = []
+        while not concurrent_worker_errors.empty():
+            collected_concurrent_worker_errors.append(
+                concurrent_worker_errors.get_nowait()
+            )
+        assert collected_concurrent_worker_errors == []
         assert client2.bleak_client is not None
         assert cast(Any, client2.bleak_client).disconnect_count >= 0
         connect_call_snapshot, stub_kwargs = _snapshot_connect_stub_state(iface2)

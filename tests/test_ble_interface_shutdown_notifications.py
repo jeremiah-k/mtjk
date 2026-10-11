@@ -136,7 +136,7 @@ def test_close_skips_disconnect_when_interpreter_finalizing(
     iface = _build_interface(monkeypatch, client, start_receive_thread=False)
     try:
         with monkeypatch.context() as finalizing:
-            sys_attrs = vars(connection_mod.sys).copy()
+            sys_attrs = vars(vars(connection_mod)["sys"]).copy()
             sys_attrs["is_finalizing"] = lambda: True
             finalizing.setattr(
                 connection_mod,
@@ -152,7 +152,7 @@ def test_close_skips_disconnect_when_interpreter_finalizing(
     finally:
         # The interpreter-finalizing branch intentionally skips client I/O.
         # Clean the test double after the scoped module patch is restored.
-        iface._client_manager._safe_close_client(client)
+        iface._client_manager._safe_close_client(cast(Any, client))
 
     assert client.disconnect_calls == 1
     assert client.close_calls == 1
@@ -510,9 +510,12 @@ def test_register_notifications_safe_call_inline_fallback_when_safe_execute_miss
     iface = _build_interface(monkeypatch, client, start_receive_thread=False)
     errors: list[str] = []
     try:
-        iface.error_handler = SimpleNamespace(
-            safe_execute=None,
-            _safe_execute=None,
+        iface.error_handler = cast(
+            Any,
+            SimpleNamespace(
+                safe_execute=None,
+                _safe_execute=None,
+            ),
         )
         monkeypatch.setattr(
             iface,
@@ -606,9 +609,12 @@ def test_register_notifications_safe_execute_fallback_still_invokes_handler(
     log_calls: list[tuple[object, bytes]] = []
     error_hook = MagicMock()
     try:
-        iface.error_handler = SimpleNamespace(
-            safe_execute=_incompatible_safe_execute,
-            handle_unhandled_exception=error_hook,
+        iface.error_handler = cast(
+            Any,
+            SimpleNamespace(
+                safe_execute=_incompatible_safe_execute,
+                handle_unhandled_exception=error_hook,
+            ),
         )
         monkeypatch.setattr(
             iface,
@@ -747,7 +753,7 @@ def _prepare_provisional_notification_registration(
 ) -> int:
     """Place an interface in the pre-publication CONNECTING phase."""
     with iface._state_lock:
-        iface.client = published_client
+        iface.client = cast(Any, published_client)
         iface._disconnect_notified = False
         iface._client_publish_pending = True
         iface._client_replacement_pending = replacement_pending
@@ -778,7 +784,7 @@ def test_register_notifications_keeps_fromnum_during_provisional_connect(
         )
     finally:
         with iface._state_lock:
-            iface.client = client
+            iface.client = cast(Any, client)
             iface._client_publish_pending = False
         iface.close()
 
@@ -859,7 +865,7 @@ def test_register_notifications_serializes_overlapping_calls(
         for worker in workers:
             worker.join(timeout=2.0)
         with iface._state_lock:
-            iface.client = client
+            iface.client = cast(Any, client)
             iface._client_publish_pending = False
         iface.close()
 
@@ -885,7 +891,7 @@ def test_register_notifications_keeps_fromnum_during_client_replacement(
         assert iface._fromnum_notify_enabled is True
     finally:
         with iface._state_lock:
-            iface.client = new_client
+            iface.client = cast(Any, new_client)
             iface._client_publish_pending = False
             iface._client_replacement_pending = False
         iface.close()
@@ -995,7 +1001,9 @@ def test_execute_optional_registration_stops_backend_when_tracking_fails(
         def has_characteristic(self, uuid: str) -> bool:
             return uuid == LEGACY_LOGRADIO_UUID
 
-        def stop_notify(self, characteristic: str, **_kwargs: object) -> None:
+        def stop_notify(  # type: ignore[override]
+            self, characteristic: str, **_kwargs: object
+        ) -> None:
             self.stop_notify_calls.append(characteristic)
 
     def _fail_subscribe(*_args: object, **_kwargs: object) -> int:
@@ -1037,7 +1045,9 @@ def test_execute_optional_registration_retains_started_state_when_compensation_f
         def has_characteristic(self, uuid: str) -> bool:
             return uuid == LEGACY_LOGRADIO_UUID
 
-        def stop_notify(self, _characteristic: str, **_kwargs: object) -> None:
+        def stop_notify(  # type: ignore[override]
+            self, _characteristic: str, **_kwargs: object
+        ) -> None:
             raise RuntimeError("stop failed")
 
     def _fail_subscribe(*_args: object, **_kwargs: object) -> int:
@@ -1142,7 +1152,7 @@ def test_execute_fromnum_registration_rolls_back_failed_commit(
         assert not dispatcher._started_notify_characteristics
     finally:
         with iface._state_lock:
-            iface.client = client
+            iface.client = cast(Any, client)
         iface.close()
 
 
@@ -1172,7 +1182,7 @@ def test_register_notifications_rolls_back_if_session_changes_during_start(
         assert not iface._notification_dispatcher._started_notify_characteristics
     finally:
         with iface._state_lock:
-            iface.client = client
+            iface.client = cast(Any, client)
         iface.close()
 
 
@@ -1238,7 +1248,7 @@ def test_register_notifications_rolls_back_if_client_disconnects_during_start(
         assert not iface._notification_dispatcher._started_notify_characteristics
     finally:
         with iface._state_lock:
-            iface.client = client
+            iface.client = cast(Any, client)
         iface.close()
 
 

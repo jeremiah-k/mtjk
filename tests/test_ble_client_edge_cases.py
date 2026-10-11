@@ -297,10 +297,10 @@ def test_bleclient_management_call_reraises_non_notimplemented_bleerror() -> Non
         return None
 
     def _raise_bleerror(
-        awaitable: Awaitable[object], timeout: float | None = None
+        coro: Coroutine[Any, Any, object], timeout: float | None = None
     ) -> NoReturn:
         _ = timeout
-        close_awaitable = getattr(awaitable, "close", None)
+        close_awaitable = getattr(coro, "close", None)
         if callable(close_awaitable):
             close_awaitable()
         try:

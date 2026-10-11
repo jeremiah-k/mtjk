@@ -15,7 +15,7 @@ import re
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -123,7 +123,7 @@ class _FakeDiscoveryClient:
     def __enter__(self) -> "_FakeDiscoveryClient":
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:
         return False
 
     def _discover(self, **_kwargs: Any) -> dict[str, Any]:
@@ -205,7 +205,7 @@ def _build_minimal_interface() -> BLEInterface:
     iface._connection_orchestrator = MagicMock()
     iface._connection_validator = MagicMock()
     iface._client_manager = MagicMock()
-    iface._management_command_handler = MagicMock()
+    cast(Any, iface)._management_command_handler = MagicMock()
     iface._discovery_manager = None
     iface._publishing_thread_override = None
     # Set up parent class attributes
@@ -218,7 +218,7 @@ def _build_minimal_interface() -> BLEInterface:
     iface._prior_publish_was_reconnect = False
     iface._last_connect_pair_override = None
     iface._last_connect_timeout_override = None
-    iface._auto_reconnect = False
+    cast(Any, iface)._auto_reconnect = False
     iface.auto_reconnect = False
     return iface
 
@@ -232,7 +232,7 @@ def test_ble_address_property_prefers_active_client_address() -> None:
     """ble_address should use the connected client's concrete address when available."""
     iface = _build_minimal_interface()
     iface.address = "AA:BB:CC:DD:EE:FF"
-    iface.client = DummyClient(address="11:22:33:44:55:66")
+    iface.client = cast(BLEClient, DummyClient(address="11:22:33:44:55:66"))
 
     assert iface.ble_address == "11:22:33:44:55:66"
 
@@ -241,7 +241,7 @@ def test_ble_address_property_ignores_invalid_active_client_address() -> None:
     """ble_address should not expose active-client sentinel identifiers."""
     iface = _build_minimal_interface()
     iface.address = None
-    iface.client = DummyClient(address="unknown")
+    iface.client = cast(BLEClient, DummyClient(address="unknown"))
 
     assert iface.bleAddress is None
     assert iface.ble_address is None
@@ -289,7 +289,7 @@ def test_close_forwards_timeout_to_lifecycle_controller() -> None:
     """close(timeout=...) should pass the caller budget to lifecycle shutdown."""
     iface = _build_minimal_interface()
     close_calls: list[dict[str, object]] = []
-    iface._get_lifecycle_controller = lambda: SimpleNamespace(
+    cast(Any, iface)._get_lifecycle_controller = lambda: SimpleNamespace(
         _close=lambda **kwargs: close_calls.append(dict(kwargs))
     )
 
@@ -311,7 +311,7 @@ def test_close_delegates_across_repeated_calls() -> None:
     """Multiple close(timeout=...) calls should remain safe and delegate cleanup."""
     iface = _build_minimal_interface()
     close_calls: list[dict[str, object]] = []
-    iface._get_lifecycle_controller = lambda: SimpleNamespace(
+    cast(Any, iface)._get_lifecycle_controller = lambda: SimpleNamespace(
         _close=lambda **kwargs: close_calls.append(dict(kwargs))
     )
 
@@ -329,7 +329,7 @@ def test_close_timeout_budget_propagates_to_shutdown_stages() -> None:
     """close(timeout=...) should propagate the total budget to lifecycle shutdown."""
     iface = _build_minimal_interface()
     budgets: list[float | None] = []
-    iface._get_lifecycle_controller = lambda: SimpleNamespace(
+    cast(Any, iface)._get_lifecycle_controller = lambda: SimpleNamespace(
         _close=lambda *, management_shutdown_wait_timeout=5.0, management_wait_poll_seconds=0.5, timeout=None: budgets.append(
             timeout
         )
@@ -413,7 +413,7 @@ def test_scan_returns_empty_list_on_runtime_error(
     def _raise_runtime_error(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("Simulated runtime error")
 
-    fake_client._discover = _raise_runtime_error
+    cast(Any, fake_client)._discover = _raise_runtime_error
     monkeypatch.setattr(
         "meshtastic.interfaces.ble.interface.BLEClient",
         lambda **kwargs: fake_client,
@@ -433,7 +433,7 @@ def test_scan_returns_empty_list_on_unexpected_exception(
     def _raise_unexpected(**kwargs: Any) -> dict[str, Any]:
         raise ValueError("Unexpected error")
 
-    fake_client._discover = _raise_unexpected
+    cast(Any, fake_client)._discover = _raise_unexpected
     monkeypatch.setattr(
         "meshtastic.interfaces.ble.interface.BLEClient",
         lambda **kwargs: fake_client,
@@ -453,9 +453,9 @@ def test_scan_propagates_dbus_error(
     fake_client = _FakeDiscoveryClient({})
 
     def _raise_dbus_error(**kwargs: Any) -> dict[str, Any]:
-        raise BleakDBusError("org.bluez.Error.Failed", "Test DBus error")
+        raise BleakDBusError("org.bluez.Error.Failed", ["Test DBus error"])
 
-    fake_client._discover = _raise_dbus_error
+    cast(Any, fake_client)._discover = _raise_dbus_error
     monkeypatch.setattr(
         "meshtastic.interfaces.ble.interface.BLEClient",
         lambda **kwargs: fake_client,
@@ -475,7 +475,7 @@ def test_find_device_raises_when_no_peripherals_found_no_address(
 ) -> None:
     """FindDevice should raise when no peripherals found and no address provided."""
     iface = _build_minimal_interface()
-    iface._discovery_manager = FailingDiscoveryManager()
+    cast(Any, iface)._discovery_manager = FailingDiscoveryManager()
 
     with pytest.raises(
         BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND
@@ -490,7 +490,7 @@ def test_find_device_raises_when_no_peripherals_found_with_name(
 ) -> None:
     """FindDevice should raise when name doesn't look like address and no devices found."""
     iface = _build_minimal_interface()
-    iface._discovery_manager = FailingDiscoveryManager()
+    cast(Any, iface)._discovery_manager = FailingDiscoveryManager()
 
     with pytest.raises(
         BLEInterface.BLEError, match=ERROR_NO_PERIPHERALS_FOUND
@@ -506,7 +506,7 @@ def test_find_device_attempts_direct_connect_for_address(
 ) -> None:
     """FindDevice should attempt direct address connect when scan fails for address."""
     iface = _build_minimal_interface()
-    iface._discovery_manager = FailingDiscoveryManager()
+    cast(Any, iface)._discovery_manager = FailingDiscoveryManager()
 
     with caplog.at_level(logging.WARNING):
         # This should create a synthetic device for direct connect
@@ -521,7 +521,7 @@ def test_find_device_raises_when_sanitization_fails(
 ) -> None:
     """FindDevice should raise when address sanitization fails."""
     iface = _build_minimal_interface()
-    iface._discovery_manager = FailingDiscoveryManager()
+    cast(Any, iface)._discovery_manager = FailingDiscoveryManager()
 
     # Use an invalid address that looks like a BLE address but can't be sanitized
     with pytest.raises(BLEInterface.BLEError):
@@ -534,7 +534,7 @@ def test_find_device_with_self_address_multiple_matches_uses_requested_identifie
     """findDevice(None) should report the resolved self.address for multiple matches."""
     iface = _build_minimal_interface()
     iface.address = "target-name"
-    iface._discovery_manager = MultipleDiscoveryManager()
+    cast(Any, iface)._discovery_manager = MultipleDiscoveryManager()
 
     with pytest.raises(BLEInterface.BLEError) as exc_info:
         iface.findDevice(None)
@@ -547,7 +547,7 @@ def test_find_device_explicit_target_multiple_matches_uses_requested_identifier(
 ):
     """findDevice(address) should continue reporting the explicit requested target."""
     iface = _build_minimal_interface()
-    iface._discovery_manager = MultipleDiscoveryManager()
+    cast(Any, iface)._discovery_manager = MultipleDiscoveryManager()
 
     with pytest.raises(BLEInterface.BLEError) as exc_info:
         iface.findDevice("explicit-name")
@@ -570,7 +570,7 @@ def test_send_to_radio_handles_bleak_error(
     def _raise_bleak_error(*args: Any, **kwargs: Any) -> None:
         raise BleakError("Write failed")
 
-    client.write_gatt_char = _raise_bleak_error
+    cast(Any, client).write_gatt_char = _raise_bleak_error
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -596,7 +596,7 @@ def test_send_to_radio_handles_bleclient_error(
     def _raise_bleclient_error(*args: Any, **kwargs: Any) -> None:
         raise BLEClient.BLEError("Write failed")
 
-    client.write_gatt_char = _raise_bleclient_error
+    cast(Any, client).write_gatt_char = _raise_bleclient_error
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -622,7 +622,7 @@ def test_send_to_radio_handles_runtime_error(
     def _raise_runtime_error(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("Write failed")
 
-    client.write_gatt_char = _raise_runtime_error
+    cast(Any, client).write_gatt_char = _raise_runtime_error
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -648,7 +648,7 @@ def test_send_to_radio_handles_os_error(
     def _raise_os_error(*args: Any, **kwargs: Any) -> None:
         raise OSError("Write failed")
 
-    client.write_gatt_char = _raise_os_error
+    cast(Any, client).write_gatt_char = _raise_os_error
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -677,7 +677,7 @@ def test_send_to_radio_skips_when_publish_pending(
     def _record_write(*args: Any, **kwargs: Any) -> None:
         write_calls.append((args, kwargs))
 
-    client.write_gatt_char = _record_write
+    cast(Any, client).write_gatt_char = _record_write
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -710,7 +710,7 @@ def test_send_to_radio_skips_when_closing(
     def _record_write(*args: Any, **kwargs: Any) -> None:
         write_calls.append((args, kwargs))
 
-    client.write_gatt_char = _record_write
+    cast(Any, client).write_gatt_char = _record_write
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -742,7 +742,7 @@ def test_send_to_radio_logs_slow_write(
     def _slow_write(*args: Any, **kwargs: Any) -> None:
         time.sleep(1.1)  # Simulate slow write
 
-    client.write_gatt_char = _slow_write
+    cast(Any, client).write_gatt_char = _slow_write
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -772,7 +772,7 @@ def test_send_to_radio_allows_disconnect_message_when_closing(
     def _record_write(*args: Any, **kwargs: Any) -> None:
         write_calls.append((args, kwargs))
 
-    client.write_gatt_char = _record_write
+    cast(Any, client).write_gatt_char = _record_write
 
     with iface._state_lock:
         iface.client = cast(BLEClient, client)
@@ -885,7 +885,7 @@ def test_finalize_connection_gates_handles_stale_client(
         assert iface._state_manager._transition_to(ConnectionState.CONNECTED)
 
     finalize_calls = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _finalize_connection_gates=finalize_calls
     )
 
@@ -1004,7 +1004,9 @@ def test_should_run_receive_loop_uses_explicit_controller_hook() -> None:
     """_should_run_receive_loop should use an explicitly declared lifecycle hook."""
     iface = _build_minimal_interface()
 
-    iface._lifecycle_controller = SimpleNamespace(should_run_receive_loop=lambda: False)
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
+        should_run_receive_loop=lambda: False
+    )
     result = iface._should_run_receive_loop()
     assert result is False
 
@@ -1014,7 +1016,7 @@ def test_start_receive_thread_uses_explicit_controller_hook() -> None:
     iface = _build_minimal_interface()
 
     start_receive_thread = MagicMock(side_effect=lambda **kwargs: None)
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         start_receive_thread=start_receive_thread
     )
 
@@ -1044,7 +1046,9 @@ def test_on_ble_disconnect_delegates_to_lifecycle_controller(
     iface = _build_minimal_interface()
 
     on_ble_disconnect = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(_on_ble_disconnect=on_ble_disconnect)
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
+        _on_ble_disconnect=on_ble_disconnect
+    )
 
     mock_client = MagicMock()
     iface._on_ble_disconnect(mock_client)
@@ -1059,7 +1063,7 @@ def test_schedule_auto_reconnect_delegates_to_lifecycle_controller(
     iface = _build_minimal_interface()
 
     schedule_auto_reconnect = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _schedule_auto_reconnect=schedule_auto_reconnect
     )
     iface.auto_reconnect = True
@@ -1117,7 +1121,7 @@ def test_mark_address_keys_disconnected_skips_empty_keys() -> None:
 def test_get_or_create_error_handler_creates_new_handler() -> None:
     """_get_or_create_error_handler should create handler when missing."""
     iface = _build_minimal_interface()
-    iface.error_handler = None
+    cast(Any, iface).error_handler = None
 
     handler = iface._get_or_create_error_handler()
     assert handler is not None
@@ -1128,7 +1132,7 @@ def test_get_or_create_error_handler_returns_existing() -> None:
     """_get_or_create_error_handler should return existing handler."""
     iface = _build_minimal_interface()
     existing_handler = object()
-    iface.error_handler = existing_handler
+    cast(Any, iface).error_handler = existing_handler
 
     handler = iface._get_or_create_error_handler()
     assert handler is existing_handler
@@ -1207,7 +1211,7 @@ def test_get_or_create_collaborator_lockless_fallback_converges_racing_callers()
     assert len(created) == 1
     assert len(results) == 2
     assert results[0] is results[1]
-    assert iface._test_collaborator is results[0]
+    assert cast(Any, iface)._test_collaborator is results[0]
 
 
 def test_notification_registration_compat_state_probe_revalidates_outside_lock() -> (
@@ -1632,9 +1636,7 @@ def test_lifecycle_wrapper_ignores_synthesized_private_hook() -> None:
             return True
 
     iface = _build_minimal_interface()
-    iface._get_lifecycle_controller = (  # type: ignore[method-assign]
-        lambda: _DynamicLifecycleController()
-    )
+    cast(Any, iface)._get_lifecycle_controller = lambda: _DynamicLifecycleController()
 
     assert iface._handle_disconnect("declared-fallback") is True
     assert calls == ["declared-fallback"]
@@ -1751,7 +1753,7 @@ def test_set_thread_event_handles_missing_dispatcher(
 ) -> None:
     """_set_thread_event should handle missing thread coordinator."""
     iface = _build_minimal_interface()
-    iface.thread_coordinator = None
+    cast(Any, iface).thread_coordinator = None
 
     with caplog.at_level(logging.DEBUG):
         iface._set_thread_event("test-event")
@@ -1775,7 +1777,9 @@ def test_set_thread_event_handles_exception(
         "_resolve_thread_event_dispatcher",
         lambda coordinator: _failing_dispatch,
     )
-    iface.thread_coordinator = SimpleNamespace(set_event=lambda event_name: None)
+    cast(Any, iface).thread_coordinator = SimpleNamespace(
+        set_event=lambda event_name: None
+    )
 
     with caplog.at_level(logging.DEBUG):
         iface._set_thread_event("test-event")
@@ -1993,7 +1997,7 @@ def test_establish_connection_dispatches_to_orchestrator(
 
     result = iface._establish_connection("test-address")
 
-    assert result is expected_client
+    assert result is cast(Any, expected_client)
 
 
 def test_establish_connection_handles_typeerror_for_legacy_kwargs(
@@ -2022,7 +2026,7 @@ def test_establish_connection_handles_typeerror_for_legacy_kwargs(
 
     result = iface._establish_connection("test-address")
 
-    assert result is expected_client
+    assert result is cast(Any, expected_client)
     assert call_count == 2
 
 
@@ -2100,7 +2104,7 @@ def test_get_management_client_if_available_ignores_undeclared_lock_ownership() 
 
     handler = MagicMock()
     handler.get_management_client_if_available = MagicMock(return_value=None)
-    iface._management_command_handler = handler
+    cast(Any, iface)._management_command_handler = handler
 
     result = iface._get_management_client_if_available("test-address")
     assert result is None
@@ -2118,10 +2122,10 @@ def test_get_management_client_if_available_uses_locked_version() -> None:
         get_management_client_if_available_locked=get_management_client_if_available_locked,
         get_management_client_if_available=MagicMock(return_value=None),
     )
-    iface._management_command_handler = handler
+    cast(Any, iface)._management_command_handler = handler
 
     result = iface._get_management_client_if_available_locked("test-address")
-    assert result is expected_client
+    assert result is cast(Any, expected_client)
     get_management_client_if_available_locked.assert_called_once_with("test-address")
 
 
@@ -2134,7 +2138,7 @@ def test_get_management_client_for_target_ignores_undeclared_lock_ownership() ->
 
     handler = MagicMock()
     handler.get_management_client_for_target = MagicMock(return_value=None)
-    iface._management_command_handler = handler
+    cast(Any, iface)._management_command_handler = handler
 
     result = iface._get_management_client_for_target(
         "test-address",
@@ -2155,13 +2159,13 @@ def test_get_management_client_for_target_uses_locked_version() -> None:
         get_management_client_for_target_locked=get_management_client_for_target_locked,
         get_management_client_for_target=MagicMock(return_value=None),
     )
-    iface._management_command_handler = handler
+    cast(Any, iface)._management_command_handler = handler
 
     result = iface._get_management_client_for_target_locked(
         "test-address",
         prefer_current_client=True,
     )
-    assert result is expected_client
+    assert result is cast(Any, expected_client)
     get_management_client_for_target_locked.assert_called_once_with(
         "test-address",
         prefer_current_client=True,
@@ -2179,7 +2183,7 @@ def test_emit_verified_connection_side_effects_delegates() -> None:
     client = DummyClient()
 
     emit_verified_connection_side_effects = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _emit_verified_connection_side_effects=emit_verified_connection_side_effects
     )
 
@@ -2211,7 +2215,7 @@ def test_discard_invalidated_connected_client_delegates() -> None:
     client = DummyClient()
 
     discard_invalidated_connected_client = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _discard_invalidated_connected_client=discard_invalidated_connected_client
     )
 
@@ -2229,7 +2233,7 @@ def test_is_owned_connected_client_delegates() -> None:
     iface = _build_minimal_interface()
     client = DummyClient()
 
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _is_owned_connected_client=MagicMock(return_value=True)
     )
 
@@ -2261,7 +2265,7 @@ def test_run_bluetoothctl_trust_command_delegates() -> None:
     iface = _build_minimal_interface()
 
     run_bluetoothctl_trust_command = MagicMock()
-    iface._management_command_handler = SimpleNamespace(
+    cast(Any, iface)._management_command_handler = SimpleNamespace(
         run_bluetoothctl_trust_command=run_bluetoothctl_trust_command
     )
 
@@ -2389,7 +2393,7 @@ def test_establish_and_update_client_computes_alias_key() -> None:
             "alias-key",
         )
 
-    assert result_client is client
+    assert result_client is cast(Any, client)
     assert device_key is not None
 
 
@@ -2430,7 +2434,7 @@ def test_wait_for_disconnect_notifications_delegates() -> None:
     iface = _build_minimal_interface()
 
     wait_for_disconnect_notifications = MagicMock()
-    iface._compatibility_publisher = SimpleNamespace(
+    cast(Any, iface)._compatibility_publisher = SimpleNamespace(
         wait_for_disconnect_notifications=wait_for_disconnect_notifications
     )
 
@@ -2450,7 +2454,7 @@ def test_disconnect_and_close_client_delegates() -> None:
     client = DummyClient()
 
     disconnect_and_close_client = MagicMock()
-    iface._lifecycle_controller = SimpleNamespace(
+    cast(Any, iface)._lifecycle_controller = SimpleNamespace(
         _disconnect_and_close_client=disconnect_and_close_client
     )
 
@@ -2471,7 +2475,7 @@ def test_drain_publish_queue_delegates() -> None:
     iface = _build_minimal_interface()
 
     drain_publish_queue = MagicMock()
-    iface._compatibility_publisher = SimpleNamespace(
+    cast(Any, iface)._compatibility_publisher = SimpleNamespace(
         drain_publish_queue=drain_publish_queue
     )
 
@@ -2491,7 +2495,7 @@ def test_publish_connection_status_delegates() -> None:
     iface = _build_minimal_interface()
 
     publish_connection_status = MagicMock()
-    iface._compatibility_publisher = SimpleNamespace(
+    cast(Any, iface)._compatibility_publisher = SimpleNamespace(
         publish_connection_status=publish_connection_status
     )
 
