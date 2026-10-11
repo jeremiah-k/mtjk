@@ -141,6 +141,16 @@ jobs:
       - name: Lint shell scripts
         run: .trunk/trunk check --filter=shellcheck bin/*.sh
 
+  formatting:
+    name: Formatting (trunk)
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout_step
+      # Formatter-only lane: black + isort over every tracked file. The uv-managed
+      # linters (mypy-uv, pylint-uv) stay out so this job needs no project venv.
+      - name: Check formatting with trunk
+        run: .trunk/trunk check --all --filter=black,isort
+
   compatibility:
     name: Compatibility Inventory (py3.13)
     runs-on: ubuntu-latest
