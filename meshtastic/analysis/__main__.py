@@ -234,7 +234,8 @@ def get_pmon_raises(dslog: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(  # noqa: TRY003
             f"pm_mask contains values outside uint64 range at rows {bad_rows_preview}{suffix}"
         )
-    pm_masks = pm_mask_series.astype(np.uint64, copy=False).to_numpy(copy=False)
+    # pandas 3 removed astype's copy keyword; CoW makes the copy flag moot.
+    pm_masks = pm_mask_series.astype(np.uint64).to_numpy(copy=False)
 
     # possible to do this with pandas rolling windows if I was smarter?
     pm_changes = [

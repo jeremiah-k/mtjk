@@ -24,7 +24,7 @@ source of truth for `mtjk` maintenance policy.
 
 ## Python and typing baseline
 
-- Runtime baseline is Python 3.11+ (see `pyproject.toml`: `requires-python = ">=3.11,<3.15"`).
+- Runtime baseline is Python 3.11+ (see `pyproject.toml`: `requires-python = ">=3.11"`).
 - Use PEP 604 unions (`X | None`, `A | B`) and built-in generics
   (`dict[K, V]`, `list[T]`, `tuple[T, ...]`) for new and edited annotations.
 - Do not churn code with typing-only mass rewrites; normalize typing style only
@@ -99,7 +99,7 @@ the installation with `uv --version`. The minimum supported uv version is
 declared by `tool.uv.required-version` in `pyproject.toml`; upgrade uv if it
 reports that your version is too old. From the repository root, run
 `uv sync --locked` to create the local `.venv` with the core package and the
-default development group. Python 3.11–3.14 is supported; use `--python 3.13`
+default development group. Python 3.11–3.15 is supported; use `--python 3.13`
 to select an interpreter explicitly. For the same dependency selection as CI,
 include the optional analysis extra and power-monitor group:
 

@@ -255,8 +255,9 @@ def test_get_pmon_raises_requires_time_column() -> None:
 def test_get_pmon_raises_rejects_uint64_overflow() -> None:
     """get_pmon_raises should reject values beyond representable range.
 
-    Large integers are converted to float64 by pd.to_numeric, triggering
-    the float64 exactness check before the uint64 range check.
+    Which guard fires depends on the pandas version: pandas 2 coerces large
+    integers to float64 (exactness check first), while pandas 3 keeps them
+    integral (uint64 range check first). Either rejection is correct.
     """
     uint64_max = np.iinfo(np.uint64).max
     overflow_val = int(uint64_max) + 1
@@ -268,7 +269,10 @@ def test_get_pmon_raises_rejects_uint64_overflow() -> None:
     )
     with pytest.raises(
         ValueError,
-        match="pm_mask contains values that cannot be exactly represented in float64",
+        match=(
+            r"pm_mask contains values (?:that cannot be exactly represented "
+            r"in float64|outside uint64 range)"
+        ),
     ):
         get_pmon_raises(dslog)
 
