@@ -3,30 +3,13 @@
 # pylint: disable=wrong-import-position
 
 import asyncio
+import importlib
 from types import ModuleType
 
 import pytest
 
 pytest.importorskip("bleak")
-import meshtastic.interfaces.ble.utils as ble_utils
-from meshtastic.ble_interface import (
-    BLEAddressMismatchError as CompatBLEAddressMismatchError,
-)
-from meshtastic.ble_interface import (
-    BLEConnectionSuppressedError as CompatBLEConnectionSuppressedError,
-)
-from meshtastic.ble_interface import (
-    BLEConnectionTimeoutError as CompatBLEConnectionTimeoutError,
-)
-from meshtastic.ble_interface import (
-    BLEDBusTransportError as CompatBLEDBusTransportError,
-)
-from meshtastic.ble_interface import (
-    BLEDeviceNotFoundError as CompatBLEDeviceNotFoundError,
-)
-from meshtastic.ble_interface import BLEDiscoveryError as CompatBLEDiscoveryError
-from meshtastic.ble_interface import MeshtasticBLEError as CompatMeshtasticBLEError
-from meshtastic.ble_interface import sanitize_address as compat_sanitize_address
+import meshtastic.ble_interface as ble_interface_compat
 from meshtastic.interfaces.ble import (
     BLEAddressMismatchError as PublicBLEAddressMismatchError,
 )
@@ -74,7 +57,7 @@ def test_resolve_ble_module_reraises_unrelated_import_error(
             name="some_unrelated_module",
         )
 
-    monkeypatch.setattr(ble_utils.importlib, "import_module", _raise_transitive)
+    monkeypatch.setattr(importlib, "import_module", _raise_transitive)
 
     with pytest.raises(ImportError, match="transitive failure"):
         resolve_ble_module()
@@ -94,7 +77,7 @@ def test_with_timeout_returns_result() -> None:
 def test_resolve_ble_module_returns_module(monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_ble_module should return the value from importlib.import_module."""
     sentinel = ModuleType("sentinel_ble_module")
-    monkeypatch.setattr(ble_utils.importlib, "import_module", lambda _name: sentinel)
+    monkeypatch.setattr(importlib, "import_module", lambda _name: sentinel)
 
     assert resolve_ble_module() is sentinel
 
@@ -108,19 +91,26 @@ def test_sanitize_address_exported_from_ble_public_api() -> None:
 @pytest.mark.unit
 def test_sanitize_address_exported_from_ble_compat_surface() -> None:
     """sanitize_address should be available through meshtastic.ble_interface."""
+    compat_sanitize_address = vars(ble_interface_compat)["sanitize_address"]
     assert compat_sanitize_address("AA:BB:CC:DD:EE:FF") == "aabbccddeeff"
 
 
 @pytest.mark.unit
 def test_typed_ble_exceptions_exported_from_public_and_compat_surfaces() -> None:
     """Typed BLE exceptions should be importable from public and compat BLE modules."""
-    assert PublicMeshtasticBLEError is CompatMeshtasticBLEError
-    assert PublicBLEDiscoveryError is CompatBLEDiscoveryError
-    assert PublicBLEDeviceNotFoundError is CompatBLEDeviceNotFoundError
-    assert PublicBLEConnectionSuppressedError is CompatBLEConnectionSuppressedError
-    assert PublicBLEConnectionTimeoutError is CompatBLEConnectionTimeoutError
-    assert PublicBLEAddressMismatchError is CompatBLEAddressMismatchError
-    assert PublicBLEDBusTransportError is CompatBLEDBusTransportError
+    compat_surface = vars(ble_interface_compat)
+    assert PublicMeshtasticBLEError is compat_surface["MeshtasticBLEError"]
+    assert PublicBLEDiscoveryError is compat_surface["BLEDiscoveryError"]
+    assert PublicBLEDeviceNotFoundError is compat_surface["BLEDeviceNotFoundError"]
+    assert (
+        PublicBLEConnectionSuppressedError
+        is compat_surface["BLEConnectionSuppressedError"]
+    )
+    assert (
+        PublicBLEConnectionTimeoutError is compat_surface["BLEConnectionTimeoutError"]
+    )
+    assert PublicBLEAddressMismatchError is compat_surface["BLEAddressMismatchError"]
+    assert PublicBLEDBusTransportError is compat_surface["BLEDBusTransportError"]
 
 
 @pytest.mark.unit

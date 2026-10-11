@@ -109,7 +109,7 @@ def test_connection_module_type_checking_import_branch(
     connection_module = importlib.import_module("meshtastic.interfaces.ble.connection")
     stub_interface_module = types.ModuleType("meshtastic.interfaces.ble.interface")
     stub_ble_interface = type("BLEInterface", (), {})
-    stub_interface_module.BLEInterface = stub_ble_interface
+    vars(stub_interface_module)["BLEInterface"] = stub_ble_interface
 
     try:
         with monkeypatch.context() as patch_context:
@@ -1671,7 +1671,7 @@ def test_connection_orchestrator_falls_back_to_find_device_when_findDevice_missi
     )
 
     orchestrator = ConnectionOrchestrator(
-        interface=interface,
+        interface=cast(Any, interface),
         validator=validator,
         client_manager=client_manager,
         discovery_manager=MagicMock(),
@@ -1721,7 +1721,7 @@ def test_connection_orchestrator_falls_back_to_underscore_find_device() -> None:
     )
 
     orchestrator = ConnectionOrchestrator(
-        interface=interface,
+        interface=cast(Any, interface),
         validator=validator,
         client_manager=client_manager,
         discovery_manager=MagicMock(),

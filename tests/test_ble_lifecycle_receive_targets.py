@@ -18,7 +18,7 @@ from bleak.exc import BleakDBusError, BleakError
 try:
     from bleak.exc import BleakGATTProtocolError
 except ImportError:  # pragma: no cover - compatibility with older local envs
-    BleakGATTProtocolError = BleakError  # type: ignore[assignment]
+    BleakGATTProtocolError = BleakError  # type: ignore[assignment, misc]
 
 from meshtastic.interfaces.ble.constants import ERROR_INTERFACE_CLOSING
 from meshtastic.interfaces.ble.lifecycle_primitives import (
@@ -77,7 +77,7 @@ def _make_gatt_protocol_error() -> BaseException:
     """
     for args in (("gatt",), (1,), ("gatt", 1), ()):
         try:
-            return BleakGATTProtocolError(*args)  # type: ignore[misc]
+            return BleakGATTProtocolError(*args)
         except TypeError:
             continue
     return BleakError("gatt")
@@ -186,15 +186,12 @@ def test_lifecycle_thread_dispatch_helpers_cover_legacy_and_missing(
             create_thread=lambda **_kwargs: created_thread,
             _create_thread=None,
         )
-        assert (
-            BLELifecycleService._thread_create_thread(
-                iface,
-                target=lambda: None,
-                name="name",
-                daemon=True,
-            )
-            is created_thread
-        )
+        assert BLELifecycleService._thread_create_thread(
+            iface,
+            target=lambda: None,
+            name="name",
+            daemon=True,
+        ) is cast(Any, created_thread)
 
         iface.thread_coordinator = SimpleNamespace()
         with pytest.raises(AttributeError):
@@ -325,9 +322,12 @@ def test_lifecycle_receive_shim_preserves_method_scoped_collaborators(
         set_only = SimpleNamespace(
             set_receive_wanted=lambda *, want_receive: wanted_calls.append(want_receive)
         )
-        should_only = SimpleNamespace(
-            should_run_receive_loop=lambda: (should_run_calls.append("run"), True)[1]
-        )
+
+        def _should_run_receive_loop() -> bool:
+            should_run_calls.append("run")
+            return True
+
+        should_only = SimpleNamespace(should_run_receive_loop=_should_run_receive_loop)
         start_only = SimpleNamespace(
             start_receive_thread=lambda *, name, reset_recovery: start_calls.append(
                 (name, reset_recovery)
@@ -381,10 +381,10 @@ def test_lifecycle_compute_disconnect_keys_paths(
 
         unknown_previous = DummyClient()
         unknown_previous.address = "unknown"
-        unknown_previous.bleak_client.address = "unknown"
+        cast(Any, unknown_previous.bleak_client).address = "unknown"
         fallback_plan = BLELifecycleService._compute_disconnect_keys(
             iface,
-            previous_client=unknown_previous,
+            previous_client=cast(Any, unknown_previous),
             alias_key="alias",
             should_reconnect=False,
             address="22:33:44:55:66:77",
@@ -419,7 +419,7 @@ def test_lifecycle_resolve_disconnect_target_gates(
         owned_connecting_plan = BLELifecycleService._resolve_disconnect_target(
             iface,
             "src",
-            owned_connecting_client,
+            cast(Any, owned_connecting_client),
             None,
         )
         assert owned_connecting_plan.early_return is None
@@ -481,8 +481,8 @@ def test_lifecycle_execute_disconnect_side_effects_paths(
         )
         stale_plan = _DisconnectPlan(
             early_return=None,
-            previous_client=DummyClient(),
-            client_at_start=DummyClient(),
+            previous_client=cast(Any, DummyClient()),
+            client_at_start=cast(Any, DummyClient()),
             address="addr",
             disconnect_keys=("stale-key",),
             should_reconnect=False,
@@ -502,8 +502,8 @@ def test_lifecycle_execute_disconnect_side_effects_paths(
         closed_previous.clear()
         stale_epoch_plan = _DisconnectPlan(
             early_return=None,
-            previous_client=DummyClient(),
-            client_at_start=DummyClient(),
+            previous_client=cast(Any, DummyClient()),
+            client_at_start=cast(Any, DummyClient()),
             session_epoch=2,
             address="addr",
             disconnect_keys=("stale-epoch-key",),
@@ -622,7 +622,7 @@ def test_lifecycle_state_manager_helper_paths(
             _is_connected=MagicMock(),
         )
         with pytest.raises(AttributeError):
-            BLELifecycleService._client_is_connected(bad_client)
+            BLELifecycleService._client_is_connected(cast(Any, bad_client))
     finally:
         _reset_state_manager(iface)
         iface.close()
@@ -650,7 +650,7 @@ def test_lifecycle_invalidation_and_publish_verification_paths(
         with pytest.raises(iface.BLEError, match=ERROR_INTERFACE_CLOSING):
             BLELifecycleService._raise_for_invalidated_connect_result(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "device-key",
                 "alias-key",
                 is_closing=True,
@@ -698,7 +698,7 @@ def test_lifecycle_invalidation_and_publish_verification_paths(
         with pytest.raises(iface.BLEError, match="invalidated"):
             BLELifecycleService._verify_and_publish_connected(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "key",
                 "alias",
                 restore_address=None,
@@ -741,7 +741,7 @@ def test_lifecycle_finalize_and_cleanup_thread_paths(
         )
         BLELifecycleService._finalize_connection_gates(
             iface,
-            DummyClient(),
+            cast(Any, DummyClient()),
             "dev",
             "alias",
         )
@@ -992,16 +992,16 @@ def test_shutdown_close_timeout_budget_rolls_forward_to_later_stages(
             float | None, kwargs["unsubscribe_timeout"]
         )
 
-    coordinator._await_management_shutdown = _await_management_shutdown
-    coordinator._shutdown_discovery = lambda: None
-    coordinator._shutdown_receive_thread = _shutdown_receive_thread
-    coordinator._close_mesh_interface = _close_mesh_interface
-    coordinator._unregister_exit_handler = lambda: None
-    coordinator._shutdown_client = _shutdown_client
-    coordinator._cleanup_thread_coordinator = (
+    cast(Any, coordinator)._await_management_shutdown = _await_management_shutdown
+    cast(Any, coordinator)._shutdown_discovery = lambda: None
+    cast(Any, coordinator)._shutdown_receive_thread = _shutdown_receive_thread
+    cast(Any, coordinator)._close_mesh_interface = _close_mesh_interface
+    cast(Any, coordinator)._unregister_exit_handler = lambda: None
+    cast(Any, coordinator)._shutdown_client = _shutdown_client
+    cast(Any, coordinator)._cleanup_thread_coordinator = (
         lambda *, timeout=None: captured.__setitem__("cleanup_timeout", timeout)
     )
-    coordinator._finalize_close_state = lambda: None
+    cast(Any, coordinator)._finalize_close_state = lambda: None
 
     try:
         coordinator.close(
@@ -1136,6 +1136,12 @@ def test_receive_controller_delegates_to_lifecycle_controller(
             raising=True,
         )
         lifecycle_calls: list[tuple[str, object]] = []
+
+        def _handle_disconnect(reason: str, *, client: object | None = None) -> bool:
+            _ = client
+            lifecycle_calls.append(("disconnect", reason))
+            return True
+
         iface._get_lifecycle_controller = lambda: SimpleNamespace(
             has_ever_connected_session=lambda: True,
             is_connection_closing=lambda: True,
@@ -1143,10 +1149,7 @@ def test_receive_controller_delegates_to_lifecycle_controller(
             set_receive_wanted=lambda *, want_receive: lifecycle_calls.append(
                 ("set", want_receive)
             ),
-            handle_disconnect=lambda reason, *, client=None: (
-                lifecycle_calls.append(("disconnect", reason)),
-                True,
-            )[1],
+            handle_disconnect=_handle_disconnect,
             start_receive_thread=lambda *, name, reset_recovery: lifecycle_calls.append(
                 ("start", (name, reset_recovery))
             ),
@@ -1701,7 +1704,7 @@ def test_receive_service_branch_targets_payload_paths(
             controller,
             "_read_and_handle_payload",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                BleakDBusError("err", "dbus")
+                BleakDBusError("err", ["dbus"])
             ),
         )
         iface._handle_read_loop_disconnect = lambda *_args, **_kwargs: True
@@ -1827,7 +1830,9 @@ def test_receive_service_branch_targets_retry_and_warning_paths(
             raising=False,
         )
         payloads = [b"", b"data"]
-        read_client.read_gatt_char = lambda *_args, **_kwargs: payloads.pop(0)
+        cast(Any, read_client).read_gatt_char = lambda *_args, **_kwargs: payloads.pop(
+            0
+        )
         delays: list[float] = []
         monkeypatch.setattr(
             "meshtastic.interfaces.ble.receive_service._sleep",
@@ -1920,12 +1925,15 @@ def test_wait_for_read_trigger_normalizes_non_bool_ever_connected(
             "_coordinator_wait_for_event",
             staticmethod(lambda *_args, **_kwargs: False),
         )
+
+        def _check_and_clear_event(*_args: object, **_kwargs: object) -> bool:
+            reconnected_checks.append("checked")
+            return True
+
         monkeypatch.setattr(
             BLEReceiveRecoveryService,
             "_coordinator_check_and_clear_event",
-            staticmethod(
-                lambda *_args, **_kwargs: (reconnected_checks.append("checked") or True)
-            ),
+            staticmethod(_check_and_clear_event),
         )
         monkeypatch.setattr(
             BLEReceiveRecoveryService,
@@ -2077,7 +2085,7 @@ def test_lifecycle_remaining_thread_and_disconnect_target_branches(
             iface._state_manager._reset_to_disconnected()
         bleak_client = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
         plan = BLELifecycleService._resolve_disconnect_target(
-            iface, "src", None, bleak_client
+            iface, "src", None, cast(Any, bleak_client)
         )
         assert plan.address == "AA:BB:CC:DD:EE:FF"
     finally:
@@ -2108,7 +2116,9 @@ def test_lifecycle_remaining_close_previous_client_async_branches(
             "_thread_start_thread",
             staticmethod(lambda *_args, **_kwargs: None),
         )
-        BLELifecycleService._close_previous_client_async(iface, previous_client)
+        BLELifecycleService._close_previous_client_async(
+            iface, cast(Any, previous_client)
+        )
 
         monkeypatch.setattr(
             BLELifecycleService,
@@ -2116,7 +2126,9 @@ def test_lifecycle_remaining_close_previous_client_async_branches(
             staticmethod(lambda *_args, **_kwargs: (_ for _ in ()).throw(SystemExit())),
         )
         with pytest.raises(SystemExit):
-            BLELifecycleService._close_previous_client_async(iface, previous_client)
+            BLELifecycleService._close_previous_client_async(
+                iface, cast(Any, previous_client)
+            )
 
         monkeypatch.setattr(
             BLELifecycleService,
@@ -2125,7 +2137,9 @@ def test_lifecycle_remaining_close_previous_client_async_branches(
                 lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("fail"))
             ),
         )
-        BLELifecycleService._close_previous_client_async(iface, previous_client)
+        BLELifecycleService._close_previous_client_async(
+            iface, cast(Any, previous_client)
+        )
     finally:
         iface.close()
 
@@ -2195,7 +2209,9 @@ def test_lifecycle_remaining_invalidation_and_state_helper_branches(
         )
 
         client_member = SimpleNamespace(_is_connected=True)
-        assert BLELifecycleService._client_is_connected(client_member) is True
+        assert (
+            BLELifecycleService._client_is_connected(cast(Any, client_member)) is True
+        )
 
         iface._sorted_address_keys = lambda *_keys: ["key-a", "key-b"]
         iface._mark_address_keys_disconnected = MagicMock()
@@ -2203,7 +2219,7 @@ def test_lifecycle_remaining_invalidation_and_state_helper_branches(
         with pytest.raises(iface.BLEError):
             BLELifecycleService._raise_for_invalidated_connect_result(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "dev",
                 "alias",
                 is_closing=False,
@@ -2276,7 +2292,7 @@ def test_lifecycle_remaining_verify_finalize_and_shutdown_branches(
         with pytest.raises(iface.BLEError, match="invalid"):
             BLELifecycleService._verify_and_publish_connected(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "dev",
                 "alias",
                 restore_address=None,
@@ -2303,7 +2319,7 @@ def test_lifecycle_remaining_verify_finalize_and_shutdown_branches(
         )
         BLELifecycleService._finalize_connection_gates(
             iface,
-            DummyClient(),
+            cast(Any, DummyClient()),
             "dev",
             "alias",
         )
@@ -2445,7 +2461,7 @@ def test_receive_service_remaining_payload_read_branches(
             controller,
             "_read_and_handle_payload",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                BleakDBusError("err", "dbus")
+                BleakDBusError("err", ["dbus"])
             ),
         )
         iface._handle_read_loop_disconnect = lambda *_args, **_kwargs: False
@@ -2574,7 +2590,7 @@ def test_receive_service_remaining_recovery_and_empty_read_branches(
             BLEReceiveRecoveryService._recover_receive_thread(iface, "reason")
 
         client = DummyClient()
-        client.read_gatt_char = lambda *_args, **_kwargs: b""
+        cast(Any, client).read_gatt_char = lambda *_args, **_kwargs: b""
         iface._retry_policy_get_delay = lambda _policy, _attempt: 0.01
         iface._empty_read_policy = object()
         empty_read_warning_calls: list[str] = []
@@ -2731,7 +2747,7 @@ def test_lifecycle_remaining_invalidation_paths(
             )
             BLELifecycleService._discard_invalidated_connected_client(
                 iface,
-                tracked_client,
+                cast(Any, tracked_client),
                 restore_address="AA:BB",
                 restore_last_connection_request="AA:BB",
             )
@@ -2752,7 +2768,7 @@ def test_lifecycle_remaining_invalidation_paths(
             )
             BLELifecycleService._discard_invalidated_connected_client(
                 iface,
-                pending_client,
+                cast(Any, pending_client),
                 restore_address="CC:DD",
                 restore_last_connection_request="CC:DD",
             )
@@ -2767,7 +2783,7 @@ def test_lifecycle_remaining_invalidation_paths(
         with pytest.raises(iface.BLEError):
             BLELifecycleService._raise_for_invalidated_connect_result(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "device-key",
                 "alias-key",
                 is_closing=False,
@@ -2800,7 +2816,7 @@ def test_lifecycle_remaining_invalidation_paths(
         with pytest.raises(iface.BLEError, match="invalidated"):
             BLELifecycleService._verify_and_publish_connected(
                 iface,
-                DummyClient(),
+                cast(Any, DummyClient()),
                 "device-key",
                 "alias-key",
                 restore_address=None,
@@ -2825,7 +2841,7 @@ def test_lifecycle_remaining_invalidation_paths(
         )
         BLELifecycleService._finalize_connection_gates(
             iface,
-            DummyClient(),
+            cast(Any, DummyClient()),
             "closing-device",
             "closing-alias",
         )
@@ -2968,7 +2984,7 @@ def test_shutdown_disconnect_client_skips_legacy_fallback_with_finite_timeout(
             )
         calls.append((client, {"timeout": timeout}))
 
-    iface._disconnect_and_close_client = _disconnect_and_close_client  # type: ignore[assignment]
+    iface._disconnect_and_close_client = _disconnect_and_close_client
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",
@@ -3004,7 +3020,7 @@ def test_shutdown_disconnect_client_legacy_fallback_without_timeout(
             )
         calls.append((client, {"timeout": timeout}))
 
-    iface._disconnect_and_close_client = _disconnect_and_close_client  # type: ignore[assignment]
+    iface._disconnect_and_close_client = _disconnect_and_close_client
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",
@@ -3036,7 +3052,7 @@ def test_shutdown_disconnect_client_propagates_unrelated_type_error(
         del timeout
         raise TypeError("disconnect broke for another reason")
 
-    iface._disconnect_and_close_client = _disconnect_and_close_client  # type: ignore[assignment]
+    iface._disconnect_and_close_client = _disconnect_and_close_client
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",
@@ -3070,7 +3086,7 @@ def test_shutdown_wait_for_disconnect_notifications_skips_legacy_fallback_with_f
             )
         calls.append({"timeout": timeout})
 
-    iface._wait_for_disconnect_notifications = _wait_for_disconnect_notifications  # type: ignore[assignment]
+    iface._wait_for_disconnect_notifications = _wait_for_disconnect_notifications
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",
@@ -3104,7 +3120,7 @@ def test_shutdown_wait_for_disconnect_notifications_legacy_fallback_without_time
             )
         calls.append({"timeout": timeout})
 
-    iface._wait_for_disconnect_notifications = _wait_for_disconnect_notifications  # type: ignore[assignment]
+    iface._wait_for_disconnect_notifications = _wait_for_disconnect_notifications
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",
@@ -3134,7 +3150,7 @@ def test_shutdown_wait_for_disconnect_notifications_propagates_unrelated_type_er
         del timeout
         raise TypeError("takes 1 positional argument but 2 were given")
 
-    iface._wait_for_disconnect_notifications = _raise_unrelated  # type: ignore[assignment]
+    iface._wait_for_disconnect_notifications = _raise_unrelated
     monkeypatch.setattr(
         coordinator,
         "_await_management_shutdown",

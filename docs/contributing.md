@@ -266,7 +266,7 @@ Alternatively, run each check individually:
 uv run --locked pytest --cov=meshtastic --cov-report=xml
 uv run --locked pylint meshtastic examples/
 .trunk/trunk check --filter=ruff meshtastic/tests tests
-uv run --locked mypy meshtastic/ examples/ --strict
+uv run --locked mypy meshtastic/ examples/ tests/ --strict
 ```
 
 To run the `meshtasticd` simulator integration lane locally (same flow as CI):

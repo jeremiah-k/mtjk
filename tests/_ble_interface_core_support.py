@@ -276,7 +276,7 @@ def _capture_management_wait_event(
 
 def _clear_management_handler(iface: BLEInterface) -> None:
     """Reset cached management-command handler for collaborator-refresh tests."""
-    iface._management_command_handler = None
+    cast(Any, iface)._management_command_handler = None
 
 
 if TYPE_CHECKING:

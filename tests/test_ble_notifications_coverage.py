@@ -6,7 +6,7 @@ protocol-specific handling, and malformed packet scenarios.
 
 import struct
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -98,10 +98,10 @@ def test_multiple_subscriptions_same_characteristic(
     """Test that multiple subscriptions to same characteristic are tracked."""
     manager = notification_manager
 
-    def callback1(_s, _d):
+    def callback1(_s: object, _d: object) -> None:
         return None
 
-    def callback2(_s, _d):
+    def callback2(_s: object, _d: object) -> None:
         return None
 
     token1 = manager._subscribe("char-1", callback1)
@@ -137,7 +137,7 @@ def test_unsubscribe_all_with_partial_failures(
     client = FailingClient()
 
     with patch("meshtastic.interfaces.ble.notifications.logger") as mock_logger:
-        manager._unsubscribe_all(client, timeout=1.0)
+        manager._unsubscribe_all(cast(Any, client), timeout=1.0)
 
         # Should log warning after UNSUBSCRIBE_FAILURE_WARNING_THRESHOLD failures
         assert mock_logger.warning.called
@@ -166,16 +166,16 @@ def test_resubscribe_failure_counting(
     client = FailingClient()
 
     # First resubscribe attempt
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
     assert manager._resubscribe_failures.get("char-1", 0) == 1
 
     # Second resubscribe attempt
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
     assert manager._resubscribe_failures.get("char-1", 0) == 2
 
     # Third attempt should trigger warning
     with patch("meshtastic.interfaces.ble.notifications.logger") as mock_logger:
-        manager._resubscribe_all(client, timeout=1.0)
+        manager._resubscribe_all(cast(Any, client), timeout=1.0)
         warning_calls = [
             call
             for call in mock_logger.warning.call_args_list
@@ -207,12 +207,12 @@ def test_resubscribe_success_clears_failure_count(
     client = ToggleClient()
 
     # First two attempts fail
-    manager._resubscribe_all(client, timeout=1.0)
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
     assert manager._resubscribe_failures.get("char-1", 0) == 2
 
     # Third succeeds, clears failure count
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
     assert "char-1" not in manager._resubscribe_failures
 
 
@@ -242,7 +242,7 @@ def test_resubscribe_stale_epoch_rollback(
 
     client = EpochChangingClient(manager)
 
-    manager._resubscribe_all(client, timeout=1.0)
+    manager._resubscribe_all(cast(Any, client), timeout=1.0)
 
     # Should have attempted rollback
     assert FROMNUM_UUID not in client.stop_calls  # FROMNUM is skipped
@@ -1102,6 +1102,6 @@ def test_unsubscribe_all_empty_characteristics(
     client = MockClient()
 
     # Should complete without error and without calling stop_notify
-    manager._unsubscribe_all(client, timeout=1.0)
+    manager._unsubscribe_all(cast(Any, client), timeout=1.0)
 
     assert len(manager) == 0

@@ -27,6 +27,7 @@ from meshtastic.interfaces.ble.constants import (
     ERROR_MANAGEMENT_AWAIT_TIMEOUT_INVALID,
     ERROR_MANAGEMENT_TARGET_CHANGED,
 )
+from meshtastic.interfaces.ble.management_state import BLEManagementState
 from meshtastic.interfaces.ble.state import BLEStateManager, ConnectionState
 from tests._ble_interface_core_support import (
     _capture_management_wait_event,
@@ -59,14 +60,16 @@ def test_get_management_state_repairs_invalid_state_once_under_concurrency(
     """Concurrent partial-object repair should converge on one management state."""
     iface = object.__new__(BLEInterface)
     iface.__dict__["_management_state"] = object()
-    real_state_type = ble_interface_mod.BLEManagementState
+    real_state_type = BLEManagementState
     first_constructor_entered = threading.Event()
     second_constructor_entered = threading.Event()
     release_first_constructor = threading.Event()
     constructor_count = 0
     constructor_count_lock = threading.Lock()
 
-    class _BlockingManagementState(real_state_type):
+    real_state_base: Any = real_state_type
+
+    class _BlockingManagementState(real_state_base):  # type: ignore[misc]
         def __init__(self) -> None:
             nonlocal constructor_count
             with constructor_count_lock:
@@ -305,7 +308,7 @@ def test_get_management_command_handler_preserves_injected_handler(
     try:
         injected_handler = SimpleNamespace(name="injected-handler")
         iface._management_command_handler = cast(Any, injected_handler)
-        assert iface._get_management_command_handler() is injected_handler
+        assert iface._get_management_command_handler() is cast(Any, injected_handler)
     finally:
         _clear_management_handler(iface)
         iface.close()
@@ -679,12 +682,14 @@ def test_ble_interface_management_rejects_temp_client_when_target_owned_elsewher
         probe_result: list[tuple[bool, bool]] = []
 
         def _probe_lock_ownership() -> None:
-            connect_lock_was_free = iface._connect_lock.acquire(blocking=False)
+            connect_lock = cast(Any, iface._connect_lock)
+            connect_lock_was_free = connect_lock.acquire(blocking=False)
             if connect_lock_was_free:
-                iface._connect_lock.release()
-            management_lock_was_free = iface._management_lock.acquire(blocking=False)
+                connect_lock.release()
+            management_lock = cast(Any, iface._management_lock)
+            management_lock_was_free = management_lock.acquire(blocking=False)
             if management_lock_was_free:
-                iface._management_lock.release()
+                management_lock.release()
             probe_result.append((connect_lock_was_free, management_lock_was_free))
             probe_done.set()
 

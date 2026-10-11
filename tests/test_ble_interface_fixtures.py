@@ -735,9 +735,9 @@ def _build_interface(
         `connect`, and `_connect_stub_kwargs` recording keyword arguments.
     """
     ble_mod = _get_ble_module()
-    BaseBleInterfaceClass = cast(type["BLEInterface"], ble_mod.BLEInterface)
+    base_interface_class: Any = ble_mod.BLEInterface
 
-    class _TestBLEInterface(BaseBleInterfaceClass):
+    class _TestBLEInterface(base_interface_class):  # type: ignore[misc]
         """Per-build BLEInterface subclass to isolate monkeypatched methods."""
 
     connect_calls: list[str | None] = []
@@ -792,7 +792,7 @@ def _build_interface(
             _self._last_connection_request = ble_mod.sanitize_address(
                 requested_identifier
             )
-            _self.client = client
+            _self.client = cast(Any, client)
             _self._disconnect_notified = False
             _self._client_publish_pending = False
             _self._state_manager._transition_to(ble_mod.ConnectionState.CONNECTED)

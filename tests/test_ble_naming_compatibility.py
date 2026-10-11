@@ -2,6 +2,7 @@
 
 import asyncio
 import warnings
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -67,8 +68,8 @@ def test_ble_client_legacy_async_aliases_delegate() -> None:
     client = object.__new__(BLEClient)
     async_await_mock = MagicMock(return_value="await-ok")
     async_run_mock = MagicMock(return_value="run-ok")
-    client._async_await = async_await_mock  # type: ignore[attr-defined]
-    client._async_run = async_run_mock  # type: ignore[attr-defined]
+    cast(Any, client)._async_await = async_await_mock
+    cast(Any, client)._async_run = async_run_mock
 
     coro_await = asyncio.sleep(0)
     try:
@@ -84,7 +85,7 @@ def test_ble_client_legacy_async_aliases_delegate() -> None:
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            assert client.async_run(coro_run) == "run-ok"
+            assert cast(Any, client.async_run(coro_run)) == "run-ok"
         assert not any(issubclass(w.category, DeprecationWarning) for w in caught)
         async_run_mock.assert_called_once_with(coro_run)
     finally:
@@ -101,9 +102,9 @@ def test_ble_interface_legacy_handler_aliases_delegate() -> None:
     log_mock = MagicMock()
     legacy_log_mock = MagicMock()
 
-    iface._from_num_handler = from_num_mock  # type: ignore[attr-defined]
-    iface._log_radio_handler = log_mock  # type: ignore[attr-defined]
-    iface._legacy_log_radio_handler = legacy_log_mock  # type: ignore[attr-defined]
+    cast(Any, iface)._from_num_handler = from_num_mock
+    cast(Any, iface)._log_radio_handler = log_mock
+    cast(Any, iface)._legacy_log_radio_handler = legacy_log_mock
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -128,7 +129,7 @@ def test_ble_find_device_shim_is_silent_and_delegates() -> None:
     """find_device should remain callable, delegate to findDevice, and stay silent."""
     iface = object.__new__(BLEInterface)
     delegate = MagicMock(return_value=object())
-    iface.findDevice = delegate  # type: ignore[attr-defined]
+    cast(Any, iface).findDevice = delegate
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

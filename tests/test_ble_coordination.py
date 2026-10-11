@@ -21,7 +21,7 @@ def test_join_all_joins_tracked_alive_threads() -> None:
     tracked.is_alive.return_value = True
 
     with coordinator._lock:
-        coordinator._threads = [tracked]  # type: ignore[assignment]
+        coordinator._threads = [tracked]
 
     coordinator._join_all(timeout=0.25)
 
