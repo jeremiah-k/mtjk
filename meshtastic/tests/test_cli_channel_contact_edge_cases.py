@@ -78,12 +78,12 @@ def _context(interface: Any, **overrides: Any) -> CliContext:
 
 def _interface_double() -> MagicMock:
     """Return an autospecced connected-interface double."""
-    return create_autospec(MeshInterface, instance=True)
+    return cast(MagicMock, create_autospec(MeshInterface, instance=True))
 
 
 def _node_double() -> MagicMock:
     """Return an autospecced node double for configured node behavior."""
-    return create_autospec(Node, instance=True)
+    return cast(MagicMock, create_autospec(Node, instance=True))
 
 
 def _interface_with_node() -> tuple[MagicMock, MagicMock]:

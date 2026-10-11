@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from meshtastic._branding import PRIMARY_CLI_NAME
 from meshtastic.tests import cli_test_utils
 
 
@@ -29,7 +30,7 @@ def test_host_cli_bounds_device_waits(
     monkeypatch.setattr(cli_test_utils, "run_cli_argv_with_timeout", run)
     assert cli_test_utils._run_host_cli("localhost:4403", *args) == (0, "ok")
     run.assert_called_once_with(
-        [cli_test_utils.PRIMARY_CLI_NAME, "--host", "localhost:4403", *expected, *args],
+        [PRIMARY_CLI_NAME, "--host", "localhost:4403", *expected, *args],
         timeout=30,
     )
 

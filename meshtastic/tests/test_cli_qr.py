@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 import math
 import os
+import shutil
 import sys
 
 import pytest
@@ -38,7 +40,7 @@ def test_load_segno_returns_none_when_optional_dependency_is_missing(
         assert name == "segno"
         raise ModuleNotFoundError("segno unavailable", name="segno")
 
-    monkeypatch.setattr(cli_qr.importlib, "import_module", missing_segno)
+    monkeypatch.setattr(importlib, "import_module", missing_segno)
 
     assert cli_qr._load_segno() is None
 
@@ -53,7 +55,7 @@ def test_load_segno_does_not_hide_broken_transitive_import(
         assert name == "segno"
         raise ModuleNotFoundError("dependency unavailable", name="segno_dependency")
 
-    monkeypatch.setattr(cli_qr.importlib, "import_module", broken_segno)
+    monkeypatch.setattr(importlib, "import_module", broken_segno)
 
     with pytest.raises(ModuleNotFoundError, match="dependency unavailable"):
         cli_qr._load_segno()
@@ -194,7 +196,7 @@ def test_qr_selects_highest_error_correction_that_fits(
         width = 200
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(
-        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((width, rows))
+        shutil, "get_terminal_size", lambda: os.terminal_size((width, rows))
     )
     rendered = cli_qr.renderTerminalQr(value)
     expected = io.StringIO()
@@ -212,7 +214,7 @@ def test_qr_explains_when_no_complete_code_fits(
     """A tiny terminal should get a usable instruction instead of wrapped modules."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(
-        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((10, 10))
+        shutil, "get_terminal_size", lambda: os.terminal_size((10, 10))
     )
     rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
     assert "Widen" in rendered
@@ -227,7 +229,7 @@ def test_qr_falls_back_for_ascii_output(monkeypatch: pytest.MonkeyPatch) -> None
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        cli_qr.sys, "stdout", SimpleNamespace(encoding="ascii", isatty=lambda: False)
+        sys, "stdout", SimpleNamespace(encoding="ascii", isatty=lambda: False)
     )
     rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
     assert "\x1b[" in rendered
@@ -266,7 +268,7 @@ def test_qr_retries_lower_error_correction_after_capacity_overflow(
     monkeypatch.setattr(cli_qr, "segno", _CapacityLimitedSegno())
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(
-        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((80, 40))
+        shutil, "get_terminal_size", lambda: os.terminal_size((80, 40))
     )
     assert cli_qr.renderTerminalQr("dense-value") == "<lower-level-qr>\n"
     assert calls == ["H", "Q", "M"]
@@ -290,7 +292,7 @@ def test_qr_preserves_overflow_when_lowest_error_correction_cannot_encode(
     monkeypatch.setattr(cli_qr, "segno", _AlwaysOverflowSegno())
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(
-        cli_qr.shutil, "get_terminal_size", lambda: os.terminal_size((200, 200))
+        shutil, "get_terminal_size", lambda: os.terminal_size((200, 200))
     )
     with pytest.raises(ValueError, match="Data too large"):
         cli_qr.renderTerminalQr("too-large")

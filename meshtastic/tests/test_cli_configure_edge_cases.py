@@ -9,6 +9,7 @@ import os
 import stat
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -120,7 +121,7 @@ def _interface(connected: bool = True) -> MagicMock:
     if connected:
         iface.isConnected.set()
     iface.waitForConfig = MagicMock()
-    return iface
+    return cast(MagicMock, iface)
 
 
 def _install_clock(
@@ -130,7 +131,7 @@ def _install_clock(
     sleep: Callable[[float], None] | None = None,
 ) -> None:
     """Install a configure-runtime clock without changing shared time functions."""
-    current_time = configure_actions.time
+    current_time = time
     monkeypatch.setattr(
         configure_actions,
         "time",
@@ -1137,7 +1138,7 @@ def test_configure_result_reporting_handles_future_verification_result(
         raise SystemExit(return_value)
 
     hooks = _hooks(
-        cli_exit=cast(CliExit, _printing_exit),
+        cli_exit=_printing_exit,
         post_configure_reconnect_and_verify=MagicMock(return_value="future-result"),
     )
 

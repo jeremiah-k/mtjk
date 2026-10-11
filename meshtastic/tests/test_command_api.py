@@ -17,7 +17,13 @@ from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.commands import CommandResult, executeCommand, getCommandCapabilities
 from meshtastic.errors import RequestRejectedError, RequestTimeoutError
 from meshtastic.mesh_interface import MeshInterface
-from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2, portnums_pb2
+from meshtastic.protobuf import (
+    admin_pb2,
+    channel_pb2,
+    config_pb2,
+    mesh_pb2,
+    portnums_pb2,
+)
 
 pytestmark = pytest.mark.unit
 

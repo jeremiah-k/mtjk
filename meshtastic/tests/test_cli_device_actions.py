@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from pubsub import pub
 
-from meshtastic import key_verification
+from meshtastic import key_verification, ota, serial_interface, tcp_interface
 from meshtastic.cli import device_actions
-from meshtastic.cli.context import ActionOutcome, CliContext, CliExit
+from meshtastic.cli.context import ActionOutcome, CliExit, CliContext
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.protobuf import mesh_pb2
 
 
 class _DummyTCPInterface:
@@ -101,7 +105,7 @@ def _install_clock(
     sleep: Callable[[float], None] | None = None,
 ) -> None:
     """Install a device-runtime clock without changing the shared ``time`` module."""
-    current_time = device_actions.time
+    current_time = time
     monkeypatch.setattr(
         device_actions,
         "time",
@@ -149,9 +153,9 @@ def _prepare_ota(
 ) -> _DummyTCPInterface:
     """Install OTA seams and return a compatible TCP-interface test double."""
     monkeypatch.setattr(
-        device_actions.meshtastic.tcp_interface, "TCPInterface", _DummyTCPInterface
+        tcp_interface, "TCPInterface", _DummyTCPInterface
     )
-    monkeypatch.setattr(device_actions.meshtastic.ota, "ESP32WiFiOTA", ota_factory)
+    monkeypatch.setattr(ota, "ESP32WiFiOTA", ota_factory)
     _install_clock(monkeypatch, sleep=lambda _seconds: None)
     return _DummyTCPInterface()
 
@@ -230,7 +234,7 @@ def test_ota_constructor_guard_rejects_returning_cli_exit(
     """OTA setup failure must not continue with an unbound OTA client."""
 
     def _raise_ota_error(*_args: object, **_kwargs: object) -> None:
-        raise device_actions.meshtastic.ota.OTAError("invalid image")
+        raise ota.OTAError("invalid image")
 
     interface = _prepare_ota(monkeypatch, _raise_ota_error)
 
@@ -242,28 +246,28 @@ def test_ota_constructor_guard_rejects_returning_cli_exit(
 @pytest.mark.parametrize(
     "failure",
     [
-        device_actions.meshtastic.ota.OTAError("invalid"),
-        device_actions.meshtastic.ota.OTATransportError("lost"),
+        ota.OTAError("invalid"),
+        ota.OTATransportError("lost"),
     ],
 )
 def test_ota_update_guards_reject_returning_cli_exit(
     monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
     """OTA update failures must not fall through to the success path."""
-    ota = MagicMock()
-    ota.hash_bytes.return_value = b"hash"
-    ota.update.side_effect = failure
-    interface = _prepare_ota(monkeypatch, MagicMock(return_value=ota))
+    ota_client = MagicMock()
+    ota_client.hash_bytes.return_value = b"hash"
+    ota_client.update.side_effect = failure
+    interface = _prepare_ota(monkeypatch, MagicMock(return_value=ota_client))
 
     with pytest.raises(AssertionError, match="cli_exit returned unexpectedly"):
         _run_ota(interface)
 
     expected_calls = (
         device_actions.OTA_MAX_RETRIES
-        if isinstance(failure, device_actions.meshtastic.ota.OTATransportError)
+        if isinstance(failure, ota.OTATransportError)
         else 1
     )
-    assert ota.update.call_count == expected_calls
+    assert ota_client.update.call_count == expected_calls
 
 
 @pytest.mark.unit
@@ -303,7 +307,7 @@ def test_lockdown_confirmation_mismatch_guard_rejects_returning_cli_exit(
 ) -> None:
     """Mismatched provisioning secrets must not continue into validation."""
     monkeypatch.setattr(
-        device_actions.getpass, "getpass", MagicMock(side_effect=["a", "b"])
+        getpass, "getpass", MagicMock(side_effect=["a", "b"])
     )
     args = SimpleNamespace(
         lockdown_passphrase_file=None,
@@ -353,7 +357,7 @@ def test_lockdown_passphrase_reports_closed_stdin(
     exit_mock = MagicMock()
     validate = MagicMock(return_value=b"secret")
     monkeypatch.setattr(
-        device_actions.getpass,
+        getpass,
         "getpass",
         MagicMock(side_effect=EOFError("closed stdin")),
     )
@@ -663,7 +667,7 @@ def test_factory_reset_probe_logs_close_failures(
 
     serial = SerialDouble()
     monkeypatch.setattr(
-        device_actions.meshtastic.serial_interface, "SerialInterface", SerialDouble
+        serial_interface, "SerialInterface", SerialDouble
     )
     ticks = iter([0.0, 0.1])
     _install_clock(monkeypatch, monotonic=lambda: next(ticks, 0.1))
@@ -679,8 +683,8 @@ def test_factory_reset_accepts_implicit_ack_in_scoped_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An uncorrelated implicit ACK must accept the scoped wait without transport loss."""
-    monkeypatch.setattr(device_actions.pub, "subscribe", MagicMock())
-    monkeypatch.setattr(device_actions.pub, "unsubscribe", MagicMock())
+    monkeypatch.setattr(pub, "subscribe", MagicMock())
+    monkeypatch.setattr(pub, "unsubscribe", MagicMock())
     iface = MagicMock()
     raise_wait_error = MagicMock()
 
@@ -716,7 +720,7 @@ def test_factory_reset_legacy_acknowledgment_rejects_nak(
 ) -> None:
     """Legacy acknowledgment state should turn a received NAK into a reset error."""
     iface = MagicMock()
-    iface.MeshInterfaceError = device_actions.MeshInterface.MeshInterfaceError
+    iface.MeshInterfaceError = MeshInterface.MeshInterfaceError
     iface._wait_for_request_ack = None
     iface._raise_wait_error_if_present = None
     iface._acknowledgment.receivedAck = False
@@ -724,11 +728,11 @@ def test_factory_reset_legacy_acknowledgment_rejects_nak(
     iface._acknowledgment.receivedNak = True
     node = MagicMock(iface=iface)
     node.factoryReset.return_value = SimpleNamespace(id=1)
-    monkeypatch.setattr(device_actions.pub, "subscribe", MagicMock())
-    monkeypatch.setattr(device_actions.pub, "unsubscribe", MagicMock())
+    monkeypatch.setattr(pub, "subscribe", MagicMock())
+    monkeypatch.setattr(pub, "unsubscribe", MagicMock())
 
     with pytest.raises(
-        device_actions.MeshInterface.MeshInterfaceError, match="rejected"
+        MeshInterface.MeshInterfaceError, match="rejected"
     ):
         device_actions._send_local_factory_reset_and_wait(
             node, full=False, cli_print=MagicMock(), timeout=1.0
@@ -750,8 +754,8 @@ def test_factory_reset_transport_change_checks_scoped_error(
     iface.isConnected.is_set.return_value = False
     node = MagicMock(iface=iface)
     node.factoryReset.return_value = SimpleNamespace(id=0)
-    monkeypatch.setattr(device_actions.pub, "subscribe", MagicMock())
-    monkeypatch.setattr(device_actions.pub, "unsubscribe", MagicMock())
+    monkeypatch.setattr(pub, "subscribe", MagicMock())
+    monkeypatch.setattr(pub, "unsubscribe", MagicMock())
     _install_clock(monkeypatch, sleep=lambda _seconds: None)
 
     result = device_actions._send_local_factory_reset_and_wait(
@@ -785,10 +789,10 @@ def test_factory_reset_scoped_wait_checks_error_before_return_and_retires_reques
     iface._raise_wait_error_if_present = raise_wait_error
     iface._retire_wait_request = retire_wait
     node = MagicMock(iface=iface)
-    request = SimpleNamespace(id=73)
+    request = cast(mesh_pb2.MeshPacket, SimpleNamespace(id=73))
     node.factoryReset.return_value = request
-    monkeypatch.setattr(device_actions.pub, "subscribe", MagicMock())
-    monkeypatch.setattr(device_actions.pub, "unsubscribe", MagicMock())
+    monkeypatch.setattr(pub, "subscribe", MagicMock())
+    monkeypatch.setattr(pub, "unsubscribe", MagicMock())
 
     result = device_actions._send_local_factory_reset_and_wait(
         node, full=False, cli_print=MagicMock(), timeout=1.0
@@ -814,7 +818,7 @@ def test_factory_reset_timeout_checks_scoped_error_and_tolerates_unsubscribe_fai
 ) -> None:
     """Budget expiry should probe scoped error state and never mask unsubscribe failure."""
     iface = MagicMock()
-    iface.MeshInterfaceError = device_actions.MeshInterface.MeshInterfaceError
+    iface.MeshInterfaceError = MeshInterface.MeshInterfaceError
     iface._wait_for_request_ack = None
     raise_wait_error = MagicMock()
     iface._raise_wait_error_if_present = raise_wait_error
@@ -828,9 +832,9 @@ def test_factory_reset_timeout_checks_scoped_error_and_tolerates_unsubscribe_fai
     # wait times out instead of polling on a frozen clock.
     ticks = iter([0.0, 0.0, 2.0])
     _install_clock(monkeypatch, monotonic=lambda: next(ticks, 2.0))
-    monkeypatch.setattr(device_actions.pub, "subscribe", MagicMock())
+    monkeypatch.setattr(pub, "subscribe", MagicMock())
     monkeypatch.setattr(
-        device_actions.pub,
+        pub,
         "unsubscribe",
         MagicMock(side_effect=RuntimeError("unsubscribe")),
     )

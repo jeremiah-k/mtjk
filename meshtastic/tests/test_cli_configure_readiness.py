@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock
@@ -39,7 +40,7 @@ def _recording_exit(exits: list[str]) -> CliExit:
         exits.append(message)
         raise SystemExit(return_value)
 
-    return cast(CliExit, _exit)
+    return _exit
 
 
 def _hooks(**overrides: Any) -> ConfigureHooks:
@@ -75,7 +76,7 @@ def _install_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         configure_actions,
         "time",
         SimpleNamespace(
-            monotonic=configure_actions.time.monotonic,
+            monotonic=time.monotonic,
             sleep=sleeps.append,
         ),
     )
@@ -93,8 +94,8 @@ def _config_node() -> MagicMock:
 
 
 def _prepared(
-    config_sections: dict[str, dict] | None = None,
-    module_config_sections: dict[str, dict] | None = None,
+    config_sections: dict[str, dict[str, Any]] | None = None,
+    module_config_sections: dict[str, dict[str, Any]] | None = None,
 ) -> configure_actions._PreparedConfigureDocument:
     """Build a prepared configure document carrying only section mappings."""
     return configure_actions._PreparedConfigureDocument(
