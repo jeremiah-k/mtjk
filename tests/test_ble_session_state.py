@@ -3,8 +3,9 @@
 import logging
 import threading
 import time
+from collections.abc import Callable
 from types import SimpleNamespace, TracebackType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from bleak.exc import BleakError
@@ -14,7 +15,7 @@ from meshtastic.interfaces.ble.interface import BLEInterface
 from meshtastic.interfaces.ble.lifecycle_controller_runtime import (
     BLELifecycleController,
 )
-from meshtastic.interfaces.ble.ports import _BLESessionStatePort
+from meshtastic.interfaces.ble.ports import _BLESessionStatePort, _LockPort
 from meshtastic.interfaces.ble.session_state import (
     LEGACY_SESSION_STATE_CACHE_ERROR,
     BLESessionState,
@@ -120,7 +121,9 @@ def test_lazy_session_state_creation_converges_across_racing_callers(
 
     iface = BLEInterface.__new__(BLEInterface)
     rendezvous = threading.Barrier(2)
-    original_get_declared_lock = session_state_module._get_declared_lock
+    original_get_declared_lock: Callable[[object | None, str], _LockPort | None] = vars(
+        session_state_module
+    )["_get_declared_lock"]
 
     def _racing_get_declared_lock(target: object, name: str) -> object | None:
         if target is None and name == "lock":
@@ -163,9 +166,8 @@ def test_legacy_session_state_resolution_is_atomic(
 
     iface = SimpleNamespace()
     rendezvous = threading.Barrier(2)
-    original_adapter = session_state_module._LegacyBLESessionStateAdapter
 
-    class _RacingAdapter(original_adapter):
+    class _RacingAdapter(_LegacyBLESessionStateAdapter):
         def __init__(self, target: object) -> None:
             super().__init__(target)
             rendezvous.wait(timeout=2.0)
@@ -253,10 +255,11 @@ def test_lazy_session_state_ignores_dynamically_synthesized_lock() -> None:
     iface._state_manager = dynamic_manager
 
     state = iface._get_session_state()
+    session_lock = cast(Any, state.lock)
 
-    assert state.lock is not dynamic_manager
-    assert state.lock.acquire(blocking=False)
-    state.lock.release()
+    assert session_lock is not dynamic_manager
+    assert session_lock.acquire(blocking=False)
+    session_lock.release()
 
 
 def test_legacy_session_state_adapter_implements_reset_contract() -> None:
@@ -411,10 +414,10 @@ def test_disconnect_reconnect_scheduler_missing_on_partial_interface() -> None:
     )
 
     state = BLESessionState(lock=RLock())
-    iface = SimpleNamespace(auto_reconnect=True, _shutdown_event=Event())
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
+    iface = cast(
+        BLEInterface, SimpleNamespace(auto_reconnect=True, _shutdown_event=Event())
     )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
 
     with pytest.raises(AttributeError) as exc_info:
         coordinator.schedule_auto_reconnect(is_closing_getter=lambda: False)
@@ -430,8 +433,9 @@ def test_receive_lifecycle_uses_explicit_session_pending_markers() -> None:
 
     state_manager = BLEStateManager()
     state = BLESessionState(lock=state_manager.lock)
-    pending_thread = SimpleNamespace(
-        name="PendingReceive", ident=None, is_alive=lambda: False
+    pending_thread = cast(
+        ThreadLike,
+        SimpleNamespace(name="PendingReceive", ident=None, is_alive=lambda: False),
     )
     state.receive_thread = pending_thread
     state.receive_start_pending = True
@@ -439,22 +443,23 @@ def test_receive_lifecycle_uses_explicit_session_pending_markers() -> None:
 
     # Deliberately contradictory legacy fields prove the coordinator reads the
     # explicit session owner rather than compatibility fields on the interface.
-    iface = SimpleNamespace(
-        _receive_start_pending=False,
-        _receive_start_pending_since=None,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            _receive_start_pending=False,
+            _receive_start_pending_since=None,
+        ),
     )
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEReceiveLifecycleCoordinator(iface, session_state=state)
 
-    def _unexpected_create(**_kwargs: object) -> object:
+    def _unexpected_create(**_kwargs: object) -> ThreadLike:
         raise AssertionError("pending session state should suppress thread creation")
 
     created, recovery_attempts = (
         coordinator._check_receive_start_conditions(  # noqa: SLF001
             name="PendingReceive",
             reset_recovery=False,
-            create_runtime_thread=_unexpected_create,  # type: ignore[arg-type]
+            create_runtime_thread=_unexpected_create,
         )
     )
 
@@ -469,9 +474,9 @@ def test_receive_controller_reads_ever_connected_from_explicit_session() -> None
 
     state_manager = BLEStateManager()
     state = BLESessionState(lock=state_manager.lock, ever_connected=True)
-    iface = SimpleNamespace(_ever_connected=False)
+    iface = cast(BLEInterface, SimpleNamespace(_ever_connected=False))
 
-    controller = BLEReceiveRecoveryController(iface, session_state=state)  # type: ignore[arg-type]
+    controller = BLEReceiveRecoveryController(iface, session_state=state)
 
     assert controller._has_ever_connected_session() is True  # noqa: SLF001
 
@@ -486,12 +491,15 @@ def test_receive_controller_invalid_lifecycle_results_fall_back_to_session() -> 
         _has_ever_connected_session=lambda: None,
         _is_connection_closing=lambda: object(),
     )
-    iface = SimpleNamespace(
-        _get_lifecycle_controller=lambda: lifecycle,
-        _state_manager=None,
-        _is_connection_closing=False,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            _get_lifecycle_controller=lambda: lifecycle,
+            _state_manager=None,
+            _is_connection_closing=False,
+        ),
     )
-    controller = BLEReceiveRecoveryController(iface, session_state=state)  # type: ignore[arg-type]
+    controller = BLEReceiveRecoveryController(iface, session_state=state)
 
     assert controller._has_ever_connected_session() is True  # noqa: SLF001
     assert controller._is_connection_closing() is True  # noqa: SLF001
@@ -522,18 +530,20 @@ def test_transient_retry_revalidates_concurrent_counter_reset(
             return first_decision
         return True
 
-    iface = SimpleNamespace(
-        _transient_read_policy=object(),
-        _retry_policy_should_retry=_should_retry,
-        _retry_policy_get_delay=lambda _policy, attempt: (
-            delay_attempts.append(attempt) or 0.0
+    def _get_delay(_policy: object, attempt: int) -> float:
+        delay_attempts.append(attempt)
+        return 0.0
+
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            _transient_read_policy=object(),
+            _retry_policy_should_retry=_should_retry,
+            _retry_policy_get_delay=_get_delay,
+            BLEError=RuntimeError,
         ),
-        BLEError=RuntimeError,
     )
-    controller = BLEReceiveRecoveryController(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    controller = BLEReceiveRecoveryController(iface, session_state=state)
     monkeypatch.setattr(receive_service_module, "_sleep", lambda _delay: None)
 
     controller.handle_transient_read_error(BleakError("transient"))
@@ -553,14 +563,13 @@ def test_receive_lifecycle_schedules_inconclusive_restart_outside_session_lock()
 
     lock = _TrackingRLock()
     state = BLESessionState(lock=lock)
-    existing = SimpleNamespace(
-        name="InconclusiveReceive", ident=None, is_alive=lambda: False
+    existing = cast(
+        ThreadLike,
+        SimpleNamespace(name="InconclusiveReceive", ident=None, is_alive=lambda: False),
     )
-    state.receive_thread = existing  # type: ignore[assignment]
-    iface = SimpleNamespace(_receive_from_radio_impl=lambda: None)
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    state.receive_thread = existing
+    iface = cast(BLEInterface, SimpleNamespace(_receive_from_radio_impl=lambda: None))
+    coordinator = BLEReceiveLifecycleCoordinator(iface, session_state=state)
     scheduled: list[tuple[object, bool]] = []
 
     def _capture_schedule(**kwargs: object) -> None:
@@ -658,22 +667,21 @@ def test_receive_lifecycle_thread_probes_run_outside_session_lock() -> None:
             return False
 
     existing = _ExistingThread()
-    state.receive_thread = existing  # type: ignore[assignment]
+    state.receive_thread = cast(ThreadLike, existing)
     state.receive_start_pending = True
     state.receive_start_pending_since = 0.0
-    iface = SimpleNamespace(_receive_from_radio_impl=lambda: None)
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
-    staged = SimpleNamespace(
-        name="ReplacementReceive", ident=None, is_alive=lambda: False
+    iface = cast(BLEInterface, SimpleNamespace(_receive_from_radio_impl=lambda: None))
+    coordinator = BLEReceiveLifecycleCoordinator(iface, session_state=state)
+    staged = cast(
+        ThreadLike,
+        SimpleNamespace(name="ReplacementReceive", ident=None, is_alive=lambda: False),
     )
 
     created, recovery_attempts = (
         coordinator._check_receive_start_conditions(  # noqa: SLF001
             name="ReplacementReceive",
             reset_recovery=False,
-            create_runtime_thread=lambda **_kwargs: staged,  # type: ignore[return-value]
+            create_runtime_thread=lambda **_kwargs: staged,
         )
     )
 
@@ -709,9 +717,9 @@ def test_receive_lifecycle_thread_diagnostics_run_outside_session_lock() -> None
             return "<NamelessReceive>"
 
     existing = _NamelessThread()
-    state.receive_thread = existing  # type: ignore[assignment]
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(_receive_from_radio_impl=lambda: None),
+    state.receive_thread = cast(ThreadLike, existing)
+    coordinator = BLEReceiveLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace(_receive_from_radio_impl=lambda: None)),
         session_state=state,
     )
 
@@ -745,14 +753,14 @@ def test_receive_recovery_reset_probes_thread_outside_session_lock() -> None:
             probe_lock_states.append(lock.held)
             return True
 
-    thread = _Thread()
-    state.receive_thread = thread  # type: ignore[assignment]
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(), session_state=state
+    thread = cast(ThreadLike, _Thread())
+    state.receive_thread = thread
+    coordinator = BLEReceiveLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace()), session_state=state
     )
 
     coordinator._maybe_reset_receive_recovery(  # noqa: SLF001
-        thread=thread,  # type: ignore[arg-type]
+        thread=thread,
         recovery_attempts_before_start=2,
     )
 
@@ -772,19 +780,19 @@ def test_disconnect_plan_reads_epoch_from_explicit_session_state() -> None:
         client_publish_pending=True,
         connection_session_epoch=9,
     )
-    iface = SimpleNamespace(
-        auto_reconnect=False,
-        client=None,
-        address="AA:BB:CC:DD:EE:FF",
-        _connection_session_epoch=1,
-        _shutdown_event=threading.Event(),
-        _extract_client_address=lambda _client: None,
-        _sorted_address_keys=lambda *keys: [key for key in keys if key],
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            auto_reconnect=False,
+            client=None,
+            address="AA:BB:CC:DD:EE:FF",
+            _connection_session_epoch=1,
+            _shutdown_event=threading.Event(),
+            _extract_client_address=lambda _client: None,
+            _sorted_address_keys=lambda *keys: [key for key in keys if key],
+        ),
     )
-    coordinator = BLEDisconnectLifecycleCoordinator(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
 
     plan = coordinator._resolve_disconnect_target(  # noqa: SLF001
         "explicit-session",
@@ -823,10 +831,10 @@ def test_disconnect_source_write_uses_session_lock() -> None:
             self._last_disconnect_source = value
 
     session = _Session()
-    iface = SimpleNamespace(client=None)
+    iface = cast(BLEInterface, SimpleNamespace(client=None))
     coordinator = BLEDisconnectLifecycleCoordinator(
         iface,
-        session_state=session,  # type: ignore[arg-type]
+        session_state=cast(_BLESessionStatePort, session),
     )
     plan = _DisconnectPlan(
         early_return=False,
@@ -852,29 +860,29 @@ def test_ownership_cleanup_reads_explicit_session_state() -> None:
         BLEConnectionOwnershipLifecycleCoordinator,
     )
 
-    client = object()
+    client: Any = object()
     state_manager = BLEStateManager()
     state = BLESessionState(
         lock=state_manager.lock,
         client_publish_pending=True,
-        connected_publish_inflight_client=client,  # type: ignore[arg-type]
+        connected_publish_inflight_client=client,
         connection_session_epoch=9,
     )
-    iface = SimpleNamespace(
-        client=None,
-        address="legacy-address",
-        _last_connection_request="legacy-request",
-        _client_publish_pending=False,
-        _connected_publish_inflight_client=None,
-        _connection_session_epoch=1,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            client=None,
+            address="legacy-address",
+            _last_connection_request="legacy-request",
+            _client_publish_pending=False,
+            _connected_publish_inflight_client=None,
+            _connection_session_epoch=1,
+        ),
     )
-    coordinator = BLEConnectionOwnershipLifecycleCoordinator(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    coordinator = BLEConnectionOwnershipLifecycleCoordinator(iface, session_state=state)
 
     coordinator._discard_invalidated_connected_client(  # noqa: SLF001
-        client,  # type: ignore[arg-type]
+        client,
         restore_address="AA:BB:CC:DD:EE:FF",
         restore_last_connection_request="restored",
         is_closing_getter=lambda: False,
@@ -911,19 +919,22 @@ def test_receive_start_resnapshot_loop_is_bounded_under_continuous_churn() -> No
             nonlocal probe_count
             probe_count += 1
             with state.lock:
-                state.receive_thread = _ChurningThread()  # type: ignore[assignment]
+                state.receive_thread = cast(ThreadLike, _ChurningThread())
             return False
 
-    state.receive_thread = _ChurningThread()  # type: ignore[assignment]
-    coordinator = BLEReceiveLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(), session_state=state
+    state.receive_thread = cast(ThreadLike, _ChurningThread())
+    coordinator = BLEReceiveLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace()), session_state=state
     )
     created_threads: list[object] = []
+
+    def _unexpected_create(**_kwargs: object) -> ThreadLike:
+        raise AssertionError("receive thread creation must not happen under churn")
 
     result = coordinator._check_receive_start_conditions(  # noqa: SLF001
         name="Receive",
         reset_recovery=False,
-        create_runtime_thread=lambda **_kwargs: created_threads.append(object()),  # type: ignore[return-value]
+        create_runtime_thread=_unexpected_create,
     )
 
     assert result == (None, None)
@@ -945,10 +956,11 @@ def test_shutdown_closing_probe_runs_outside_session_lock() -> None:
         probe_lock_states.append(lock.held)
         return False
 
-    iface = SimpleNamespace(_state_manager=SimpleNamespace(is_closing=_is_closing))
-    coordinator = BLEShutdownLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(_state_manager=SimpleNamespace(is_closing=_is_closing)),
     )
+    coordinator = BLEShutdownLifecycleCoordinator(iface, session_state=state)
 
     assert coordinator.is_connection_closing() is False
     assert probe_lock_states == [False]
@@ -961,21 +973,21 @@ def test_ownership_invalidation_closing_probe_runs_outside_session_lock() -> Non
     )
 
     lock = _TrackingRLock()
-    client = object()
+    client: Any = object()
     state = BLESessionState(
         lock=lock,
         client_publish_pending=True,
-        connected_publish_inflight_client=client,  # type: ignore[arg-type]
+        connected_publish_inflight_client=client,
     )
-    iface = SimpleNamespace(
-        client=None,
-        address="legacy-address",
-        _last_connection_request="legacy-request",
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            client=None,
+            address="legacy-address",
+            _last_connection_request="legacy-request",
+        ),
     )
-    coordinator = BLEConnectionOwnershipLifecycleCoordinator(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    coordinator = BLEConnectionOwnershipLifecycleCoordinator(iface, session_state=state)
     probe_lock_states: list[bool] = []
 
     def _is_closing() -> bool:
@@ -983,7 +995,7 @@ def test_ownership_invalidation_closing_probe_runs_outside_session_lock() -> Non
         return False
 
     coordinator._discard_invalidated_connected_client(  # noqa: SLF001
-        client,  # type: ignore[arg-type]
+        client,
         restore_address="AA:BB:CC:DD:EE:FF",
         restore_last_connection_request="restored",
         is_closing_getter=_is_closing,
@@ -1003,13 +1015,12 @@ def test_ownership_status_probes_run_outside_session_lock() -> None:
     )
 
     lock = _TrackingRLock()
-    client = object()
+    client: Any = object()
     state = BLESessionState(lock=lock)
-    iface = SimpleNamespace(client=client, _state_manager=SimpleNamespace())
-    coordinator = BLEConnectionOwnershipLifecycleCoordinator(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
+    iface = cast(
+        BLEInterface, SimpleNamespace(client=client, _state_manager=SimpleNamespace())
     )
+    coordinator = BLEConnectionOwnershipLifecycleCoordinator(iface, session_state=state)
     probe_lock_states: list[tuple[str, bool]] = []
 
     def _probe(name: str) -> bool:
@@ -1017,7 +1028,7 @@ def test_ownership_status_probes_run_outside_session_lock() -> None:
         return True
 
     assert coordinator._get_connected_client_status(  # noqa: SLF001
-        client,  # type: ignore[arg-type]
+        client,
         is_closing_getter=lambda: not _probe("closing"),
         state_connected_getter=lambda: _probe("state"),
         client_connected_getter=lambda _client: _probe("client"),
@@ -1036,17 +1047,17 @@ def test_ownership_status_provider_revalidates_session_epoch() -> None:
     )
 
     lock = _TrackingRLock()
-    client = object()
+    client: Any = object()
     state = BLESessionState(lock=lock, connection_session_epoch=4)
-    iface = SimpleNamespace(
-        client=client,
-        _state_manager=SimpleNamespace(),
-        _has_lost_gate_ownership=lambda *_keys: False,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            client=client,
+            _state_manager=SimpleNamespace(),
+            _has_lost_gate_ownership=lambda *_keys: False,
+        ),
     )
-    coordinator = BLEConnectionOwnershipLifecycleCoordinator(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    coordinator = BLEConnectionOwnershipLifecycleCoordinator(iface, session_state=state)
 
     def _racing_status(_client: object) -> tuple[bool, bool]:
         assert lock.held is False
@@ -1055,10 +1066,10 @@ def test_ownership_status_provider_revalidates_session_epoch() -> None:
         return True, False
 
     snapshot = coordinator._verify_ownership_snapshot(  # noqa: SLF001
-        client,  # type: ignore[arg-type]
+        client,
         "device-key",
         "alias-key",
-        get_connected_client_status_locked=_racing_status,  # type: ignore[arg-type]
+        get_connected_client_status_locked=_racing_status,
     )
 
     assert snapshot.still_owned is False
@@ -1081,17 +1092,17 @@ def test_receive_snapshot_compatibility_probes_run_outside_session_lock() -> Non
         probe_lock_states.append(("closing", lock.held))
         return False
 
-    iface = SimpleNamespace(
-        client=None,
-        _state_manager=SimpleNamespace(
-            is_connecting=_is_connecting,
-            is_closing=_is_closing,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            client=None,
+            _state_manager=SimpleNamespace(
+                is_connecting=_is_connecting,
+                is_closing=_is_closing,
+            ),
         ),
     )
-    controller = BLEReceiveRecoveryController(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    controller = BLEReceiveRecoveryController(iface, session_state=state)
 
     assert controller._snapshot_client_state() == (
         None,
@@ -1110,7 +1121,7 @@ def test_disconnect_planning_runs_address_helpers_outside_session_lock() -> None
 
     lock = _TrackingRLock()
     state = BLESessionState(lock=lock)
-    previous_client = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
+    previous_client: Any = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
     helper_lock_states: list[tuple[str, bool]] = []
 
     def _extract_client_address(_client: object) -> str:
@@ -1121,20 +1132,21 @@ def test_disconnect_planning_runs_address_helpers_outside_session_lock() -> None
         helper_lock_states.append(("sort", lock.held))
         return [key for key in keys if key]
 
-    iface = SimpleNamespace(
-        auto_reconnect=False,
-        client=previous_client,
-        address="AA:BB:CC:DD:EE:FF",
-        _extract_client_address=_extract_client_address,
-        _sorted_address_keys=_sorted_address_keys,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            auto_reconnect=False,
+            client=previous_client,
+            address="AA:BB:CC:DD:EE:FF",
+            _extract_client_address=_extract_client_address,
+            _sorted_address_keys=_sorted_address_keys,
+        ),
     )
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
 
     plan = coordinator._resolve_disconnect_target(  # noqa: SLF001
         "test",
-        client=previous_client,  # type: ignore[arg-type]
+        client=previous_client,
         bleak_client=None,
         current_state_getter=lambda: ConnectionState.CONNECTED,
         is_closing_getter=lambda: False,
@@ -1155,7 +1167,7 @@ def test_disconnect_compatibility_state_callbacks_run_outside_session_lock() -> 
 
     lock = _TrackingRLock()
     state = BLESessionState(lock=lock)
-    previous_client = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
+    previous_client: Any = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
     state.connection_alias_key = "AA:BB:CC:DD:EE:FF"
     callback_lock_states: list[tuple[str, bool]] = []
     current_states = iter((ConnectionState.CONNECTED, ConnectionState.ERROR))
@@ -1172,20 +1184,21 @@ def test_disconnect_compatibility_state_callbacks_run_outside_session_lock() -> 
         callback_lock_states.append(("reset", lock.held))
         return False
 
-    iface = SimpleNamespace(
-        auto_reconnect=False,
-        client=previous_client,
-        address="AA:BB:CC:DD:EE:FF",
-        _extract_client_address=lambda _client: "AA:BB:CC:DD:EE:FF",
-        _sorted_address_keys=lambda *keys: [key for key in keys if key],
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            auto_reconnect=False,
+            client=previous_client,
+            address="AA:BB:CC:DD:EE:FF",
+            _extract_client_address=lambda _client: "AA:BB:CC:DD:EE:FF",
+            _sorted_address_keys=lambda *keys: [key for key in keys if key],
+        ),
     )
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
 
     plan = coordinator._resolve_disconnect_target(  # noqa: SLF001
         "test",
-        client=previous_client,  # type: ignore[arg-type]
+        client=previous_client,
         bleak_client=None,
         current_state_getter=_current_state,
         is_closing_getter=lambda: False,
@@ -1212,28 +1225,33 @@ def test_disconnect_canonical_state_manager_keeps_state_and_session_atomic() -> 
     assert state_manager.transition_to(ConnectionState.CONNECTING)
     assert state_manager.transition_to(ConnectionState.CONNECTED)
     state = BLESessionState(lock=state_manager.lock)
-    previous_client = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
-    iface = SimpleNamespace(
-        auto_reconnect=False,
-        client=previous_client,
-        address="AA:BB:CC:DD:EE:FF",
-        _state_manager=state_manager,
-        _extract_client_address=lambda _client: "AA:BB:CC:DD:EE:FF",
-        _sorted_address_keys=lambda *keys: [key for key in keys if key],
+    previous_client: Any = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            auto_reconnect=False,
+            client=previous_client,
+            address="AA:BB:CC:DD:EE:FF",
+            _state_manager=state_manager,
+            _extract_client_address=lambda _client: "AA:BB:CC:DD:EE:FF",
+            _sorted_address_keys=lambda *keys: [key for key in keys if key],
+        ),
     )
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
     coordinator._state_access.current_state = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]  # noqa: SLF001
         AssertionError("canonical state read must not use compatibility dispatch")
     )
-    coordinator._state_access.transition_to = lambda _state: (_ for _ in ()).throw(  # type: ignore[method-assign]  # noqa: SLF001
-        AssertionError("canonical transition must not use compatibility dispatch")
+
+    def _fail_transition(_state: ConnectionState) -> bool:
+        raise AssertionError("canonical transition must not use compatibility dispatch")
+
+    coordinator._state_access.transition_to = cast(  # type: ignore[method-assign]  # noqa: SLF001
+        Any, _fail_transition
     )
 
     plan = coordinator._resolve_disconnect_target(  # noqa: SLF001
         "test",
-        client=previous_client,  # type: ignore[arg-type]
+        client=previous_client,
         bleak_client=None,
     )
 
@@ -1265,18 +1283,20 @@ def test_transient_retry_revalidation_is_bounded_under_continuous_churn(
             state.read_retry_count += 1
         return True
 
-    iface = SimpleNamespace(
-        _transient_read_policy=object(),
-        _retry_policy_should_retry=_should_retry,
-        _retry_policy_get_delay=lambda _policy, attempt: (
-            delay_attempts.append(attempt) or 0.0
+    def _get_delay(_policy: object, attempt: int) -> float:
+        delay_attempts.append(attempt)
+        return 0.0
+
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            _transient_read_policy=object(),
+            _retry_policy_should_retry=_should_retry,
+            _retry_policy_get_delay=_get_delay,
+            BLEError=RuntimeError,
         ),
-        BLEError=RuntimeError,
     )
-    controller = BLEReceiveRecoveryController(
-        iface,
-        session_state=state,  # type: ignore[arg-type]
-    )
+    controller = BLEReceiveRecoveryController(iface, session_state=state)
     monkeypatch.setattr(receive_service_module, "_sleep", lambda _delay: None)
     caplog.set_level(
         logging.WARNING, logger="meshtastic.interfaces.ble.receive_service"
@@ -1303,14 +1323,17 @@ def test_disconnect_reconnect_closing_probe_runs_outside_session_lock() -> None:
         probe_lock_states.append(lock.held)
         return True
 
-    iface = SimpleNamespace(
-        auto_reconnect=True,
-        _shutdown_event=threading.Event(),
-        _reconnect_scheduler=SimpleNamespace(schedule_reconnect=lambda *_args: None),
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            auto_reconnect=True,
+            _shutdown_event=threading.Event(),
+            _reconnect_scheduler=SimpleNamespace(
+                schedule_reconnect=lambda *_args: None
+            ),
+        ),
     )
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEDisconnectLifecycleCoordinator(iface, session_state=state)
 
     coordinator.schedule_auto_reconnect(is_closing_getter=_is_closing)
 
@@ -1326,14 +1349,15 @@ def test_shutdown_start_does_not_probe_closing_after_terminal_close() -> None:
     state_manager = BLEStateManager()
     state = BLESessionState(lock=state_manager.lock, closed=True)
     management_lock = threading.RLock()
-    iface = SimpleNamespace(
-        _management_lock=management_lock,
-        _management_idle_condition=threading.Condition(management_lock),
-        _management_inflight=0,
+    iface = cast(
+        BLEInterface,
+        SimpleNamespace(
+            _management_lock=management_lock,
+            _management_idle_condition=threading.Condition(management_lock),
+            _management_inflight=0,
+        ),
     )
-    coordinator = BLEShutdownLifecycleCoordinator(  # type: ignore[arg-type]
-        iface, session_state=state
-    )
+    coordinator = BLEShutdownLifecycleCoordinator(iface, session_state=state)
 
     result = coordinator._await_management_shutdown(  # noqa: SLF001
         management_shutdown_wait_timeout=0.01,
@@ -1362,13 +1386,13 @@ def test_disconnect_client_closer_falls_back_when_timeout_keyword_is_unsupported
     def _legacy_closer(client: object) -> None:
         calls.append(client)
 
-    client = object()
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(),
+    client: Any = object()
+    coordinator = BLEDisconnectLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace()),
         client_closer=_legacy_closer,
     )
 
-    coordinator.disconnect_and_close_client(client, timeout=2.0)  # type: ignore[arg-type]
+    coordinator.disconnect_and_close_client(client, timeout=2.0)
 
     assert calls == [client]
 
@@ -1385,13 +1409,13 @@ def test_disconnect_client_closer_propagates_internal_type_error() -> None:
         _ = disconnect_timeout
         raise TypeError("closer implementation failed")
 
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(),
+    coordinator = BLEDisconnectLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace()),
         client_closer=_broken_closer,
     )
 
     with pytest.raises(TypeError, match="closer implementation failed"):
-        coordinator.disconnect_and_close_client(object(), timeout=2.0)  # type: ignore[arg-type]
+        coordinator.disconnect_and_close_client(cast(Any, object()), timeout=2.0)
 
 
 def test_disconnect_client_closer_requires_cleanup_capability() -> None:
@@ -1400,9 +1424,9 @@ def test_disconnect_client_closer_requires_cleanup_capability() -> None:
         BLEDisconnectLifecycleCoordinator,
     )
 
-    coordinator = BLEDisconnectLifecycleCoordinator(  # type: ignore[arg-type]
-        SimpleNamespace(),
+    coordinator = BLEDisconnectLifecycleCoordinator(
+        cast(BLEInterface, SimpleNamespace()),
     )
 
     with pytest.raises(AttributeError, match="client cleanup capability"):
-        coordinator.disconnect_and_close_client(object())  # type: ignore[arg-type]
+        coordinator.disconnect_and_close_client(cast(Any, object()))
