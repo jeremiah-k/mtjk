@@ -95,7 +95,7 @@ def _setup_lock_mock(iface: MagicMock) -> None:
 @pytest.fixture
 def mock_interface() -> MagicMock:
     """Create a fully mocked interface suitable for local node tests."""
-    iface = create_autospec(MeshInterface, instance=True)
+    iface: MagicMock = create_autospec(MeshInterface, instance=True)
     iface.myInfo = MagicMock()
     iface.myInfo.my_node_num = 1234567890
     iface.metadata = None
@@ -126,7 +126,7 @@ def mock_interface_with_local_node() -> tuple[MagicMock, Node]:
 @pytest.fixture
 def mock_remote_interface() -> MagicMock:
     """Create a mocked interface with a localNode different from the test node."""
-    iface = create_autospec(MeshInterface, instance=True)
+    iface: MagicMock = create_autospec(MeshInterface, instance=True)
     iface.myInfo = MagicMock()
     iface.myInfo.my_node_num = 1234567890
     iface.metadata = None
@@ -141,7 +141,7 @@ def mock_remote_interface() -> MagicMock:
 @pytest.fixture
 def mock_interface_with_metadata() -> MagicMock:
     """Create a mocked interface with populated metadata."""
-    iface = create_autospec(MeshInterface, instance=True)
+    iface: MagicMock = create_autospec(MeshInterface, instance=True)
     iface.myInfo = MagicMock()
     iface.myInfo.my_node_num = 1234567890
     # Setup metadata
@@ -205,7 +205,7 @@ def test_channel_mutate_then_write_workflow(mock_interface: MagicMock) -> None:
     # Setup mocks for the workflow
     node.ensureSessionKey = MagicMock()  # type: ignore[method-assign]
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -249,7 +249,7 @@ def test_channel_mutate_with_admin_index_workflow(mock_interface: MagicMock) -> 
     # Setup mocks
     captured: dict[str, object] = {}
     node.ensureSessionKey = MagicMock()  # type: ignore[method-assign]
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         captured=captured, return_packet=MagicMock()
     )
 
@@ -371,7 +371,7 @@ def test_requestConfig_wait_behavior(mock_interface: MagicMock) -> None:
 
     # Capture sent messages
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -401,7 +401,7 @@ def test_requestConfig_with_adminIndex(mock_remote_interface: MagicMock) -> None
 
     # Capture sent messages
     captured: dict[str, object] = {}
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         captured=captured, return_packet=MagicMock()
     )
 
@@ -440,7 +440,7 @@ def test_ensureSessionKey_workflow(
 
     # Capture sent messages
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -471,7 +471,7 @@ def test_ensureSessionKey_with_adminIndex(
     node._timeout.waitForSet.return_value = True
 
     captured: dict[str, object] = {}
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         captured=captured, return_packet=MagicMock()
     )
 
@@ -501,7 +501,7 @@ def test_startOTA_old_signature_compat(mock_interface: MagicMock) -> None:
 
     # Capture sent messages
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -529,7 +529,7 @@ def test_startOTA_new_signature_compat(mock_interface: MagicMock) -> None:
 
     # Capture sent messages
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -588,7 +588,7 @@ def test_get_set_canned_message_workflow(mock_interface: MagicMock) -> None:
 
     # Test 2: Set canned message
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -620,7 +620,7 @@ def test_get_canned_message_requests_when_not_cached(mock_interface: MagicMock) 
     response_raw.get_canned_message_module_messages_response = "fetched from device"
 
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages,
         expected_want_response=True,
         response_payload={"decoded": {"admin": {"raw": response_raw}}},
@@ -664,7 +664,7 @@ def test_get_set_ringtone_workflow(mock_interface: MagicMock) -> None:
     response_raw = admin_pb2.AdminMessage()
     response_raw.get_ringtone_response = "fetch:ringtone:data"
 
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
 
@@ -677,7 +677,7 @@ def test_get_set_ringtone_workflow(mock_interface: MagicMock) -> None:
 
     # Test getRingtone requests from device
     sent_messages.clear()
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages,
         expected_want_response=True,
         response_payload={"decoded": {"admin": {"raw": response_raw}}},
@@ -717,7 +717,7 @@ def test_snake_case_set_canned_message_compat(mock_interface: MagicMock) -> None
     node = _create_local_node_mock(mock_interface)
 
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
     node.ensureSessionKey = MagicMock()  # type: ignore[method-assign]
@@ -746,7 +746,7 @@ def test_snake_case_set_ringtone_compat(mock_interface: MagicMock) -> None:
     node.module_available = MagicMock(return_value=True)  # type: ignore[method-assign]
 
     sent_messages: list[admin_pb2.AdminMessage] = []
-    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign,assignment]
+    node._send_admin = _make_fake_send_admin(  # type: ignore[method-assign]
         sent_messages=sent_messages, return_packet=MagicMock()
     )
     node.ensureSessionKey = MagicMock()  # type: ignore[method-assign]

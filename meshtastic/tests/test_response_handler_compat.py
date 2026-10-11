@@ -10,6 +10,8 @@ IMPORTANT: ResponseHandler has 2 fields (callback, ackPermitted) and
 This pattern works correctly and is the expected behavior.
 """
 
+from typing import Any
+
 from meshtastic import ResponseHandler
 
 
@@ -22,7 +24,7 @@ def test_response_handler_two_element_unpacking_works() -> None:
     Should work correctly with the 2-field ResponseHandler.
     """
 
-    def dummy_callback(_response: dict) -> None:
+    def dummy_callback(_response: dict[str, Any]) -> None:
         pass
 
     handler = ResponseHandler(callback=dummy_callback, ackPermitted=True)
@@ -36,7 +38,7 @@ def test_response_handler_two_element_unpacking_works() -> None:
 def test_response_handler_fields_can_be_accessed_by_name() -> None:
     """Verify ResponseHandler fields can be accessed by name."""
 
-    def dummy_callback(_response: dict) -> None:
+    def dummy_callback(_response: dict[str, Any]) -> None:
         pass
 
     handler = ResponseHandler(callback=dummy_callback, ackPermitted=False)
@@ -49,7 +51,7 @@ def test_response_handler_fields_can_be_accessed_by_name() -> None:
 def test_response_handler_iteration_yields_all_field_values() -> None:
     """Verify that iterating over ResponseHandler yields all 2 field values."""
 
-    def dummy_callback(_response: dict) -> None:
+    def dummy_callback(_response: dict[str, Any]) -> None:
         pass
 
     handler = ResponseHandler(callback=dummy_callback, ackPermitted=True)
@@ -64,7 +66,7 @@ def test_response_handler_iteration_yields_all_field_values() -> None:
 def test_response_handler_length_is_two() -> None:
     """Verify len() returns 2 (all fields including defaults)."""
 
-    def dummy_callback(_response: dict) -> None:
+    def dummy_callback(_response: dict[str, Any]) -> None:
         pass
 
     handler = ResponseHandler(callback=dummy_callback, ackPermitted=True)

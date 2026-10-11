@@ -5,6 +5,7 @@
 import logging
 import threading
 from base64 import b64encode
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1033,7 +1034,7 @@ class TestEnrichPacketIdentity:
             67890: {"user": {"id": "!6789"}},
         }
 
-        packet_dict = {"from": 12345, "to": 67890}
+        packet_dict: dict[str, Any] = {"from": 12345, "to": 67890}
 
         receive_pipeline._enrich_packet_identity(packet_dict)
 
@@ -1460,7 +1461,7 @@ class TestNodeStatusRetentionHandler:
     ) -> None:
         """Successful decode should set node["status"] to the decoded status string."""
         iface = iface_with_nodes
-        packet: dict = {
+        packet: dict[str, Any] = {
             "from": 4808675309,
             "decoded": {"nodestatus": {"status": "Bravo: solar powered"}},
         }
@@ -1482,7 +1483,7 @@ class TestNodeStatusRetentionHandler:
         node = iface._get_or_create_by_num(4808675309)
         with iface._node_db_lock:
             node["status"] = "Alpha: baseline status"
-        packet: dict = {
+        packet: dict[str, Any] = {
             "from": 4808675309,
             "decoded": {"nodestatus": {DECODE_ERROR_KEY: "decode-failed: malformed"}},
         }
@@ -1664,7 +1665,7 @@ class TestTelemetrySubviewRetention:
     """
 
     @staticmethod
-    def _build_telemetry_packet(variant: str, payload: dict) -> dict:
+    def _build_telemetry_packet(variant: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a packet dict containing a decoded telemetry payload for `variant`."""
         return {
             "from": 4808675309,

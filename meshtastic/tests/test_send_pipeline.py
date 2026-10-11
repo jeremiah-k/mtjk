@@ -12,6 +12,7 @@ import pytest
 from meshtastic import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
 from meshtastic.mesh_interface_runtime.ports import _SendPipelinePort
 from meshtastic.mesh_interface_runtime.request_wait import (
+    LEGACY_UNSCOPED_WAIT_ATTR_BY_PORTNUM,
     WAIT_ATTR_NAK,
     WAIT_ATTR_POSITION,
     WAIT_ATTR_TELEMETRY,
@@ -20,7 +21,6 @@ from meshtastic.mesh_interface_runtime.request_wait import (
 )
 from meshtastic.mesh_interface_runtime.send_pipeline import (
     HEX_NODE_ID_TAIL_CHARS,
-    LEGACY_UNSCOPED_WAIT_ATTR_BY_PORTNUM,
     LORA_CONFIG_WAIT_SECONDS,
     MISSING_NODE_NUM_ERROR_TEMPLATE,
     NODE_NOT_FOUND_DB_UNAVAILABLE_ERROR_TEMPLATE,

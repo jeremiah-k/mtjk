@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import threading
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -322,7 +323,7 @@ def test_expired_awaiting_queue_status_id_is_treated_as_unexpected(
         ]
     )
     monkeypatch.setattr(
-        queue_send_module.time,
+        time,
         "monotonic",
         lambda: next(monotonic_values),
     )
@@ -438,7 +439,7 @@ def test_send_to_radio_times_out_when_queue_status_never_recovers(
     packet.packet.id = 901
     monotonic_values = iter((10.0, 11.1))
     monkeypatch.setattr(
-        queue_send_module.time,
+        time,
         "monotonic",
         lambda: next(monotonic_values),
     )
