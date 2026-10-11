@@ -82,7 +82,8 @@ def wait_for_config_sections(
     probe = ConfigSectionProbe(
         [(config.HasField, config_type.name) for config, config_type in sections]
     )
-    return wait_for_set(probe, attrs=("is_set",))
+    confirmed: bool = wait_for_set(probe, attrs=("is_set",))
+    return confirmed
 
 
 def ensure_config_sections_loaded(

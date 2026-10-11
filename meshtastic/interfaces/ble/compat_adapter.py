@@ -65,11 +65,12 @@ def _get_declared_member(
     except AttributeError:
         return default
     try:
-        return type(target).__getattribute__(  # pylint: disable=unnecessary-dunder-call
+        resolved: object | T | None = type(target).__getattribute__(  # pylint: disable=unnecessary-dunder-call
             target, name
         )
     except AttributeError:
         return default
+    return resolved
 
 
 def _get_declared_callable(

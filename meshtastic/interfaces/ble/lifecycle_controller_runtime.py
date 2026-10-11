@@ -40,6 +40,7 @@ from meshtastic.interfaces.ble.state import ConnectionState
 if TYPE_CHECKING:
     from meshtastic.interfaces.ble.client import BLEClient
     from meshtastic.interfaces.ble.interface import BLEInterface
+    from meshtastic.interfaces.ble.lifecycle_compat_service import BLELifecycleService
 
 _HookT = TypeVar("_HookT", bound=Callable[..., object])
 
@@ -178,7 +179,11 @@ class BLELifecycleController:
                     device_key: str | None,
                     alias_key: str | None,
                 ) -> _OwnershipSnapshot:
-                    return lifecycle_service_mod.BLELifecycleService._verify_ownership_snapshot(  # noqa: E501
+                    service = cast(
+                        "type[BLELifecycleService]",
+                        lifecycle_service_mod.BLELifecycleService,
+                    )
+                    return service._verify_ownership_snapshot(
                         self._iface,
                         client,
                         device_key,
@@ -191,7 +196,11 @@ class BLELifecycleController:
                 def _compat_get_status_locked(
                     client: "BLEClient",
                 ) -> tuple[bool, bool]:
-                    return lifecycle_service_mod.BLELifecycleService._get_connected_client_status_locked(  # noqa: E501
+                    service = cast(
+                        "type[BLELifecycleService]",
+                        lifecycle_service_mod.BLELifecycleService,
+                    )
+                    return service._get_connected_client_status_locked(
                         self._iface,
                         client,
                     )
@@ -238,33 +247,41 @@ class BLELifecycleController:
 
         def _fallback_is_closing() -> Callable[[], bool]:
             def is_closing() -> bool:
-                return (
-                    lifecycle_service_mod.BLELifecycleService._state_manager_is_closing(
-                        iface
-                    )
+                service = cast(
+                    "type[BLELifecycleService]",
+                    lifecycle_service_mod.BLELifecycleService,
                 )
+                return service._state_manager_is_closing(iface)
 
             return is_closing
 
         def _fallback_reset_to_disconnected() -> Callable[[], bool]:
             def reset_to_disconnected() -> bool:
-                return lifecycle_service_mod.BLELifecycleService._state_manager_reset_to_disconnected(  # noqa: E501
-                    iface
+                service = cast(
+                    "type[BLELifecycleService]",
+                    lifecycle_service_mod.BLELifecycleService,
                 )
+                return service._state_manager_reset_to_disconnected(iface)
 
             return reset_to_disconnected
 
         def _fallback_current_state() -> Callable[[], ConnectionState]:
             def current_state() -> ConnectionState:
-                return lifecycle_service_mod.BLELifecycleService._state_manager_current_state(  # noqa: E501
-                    iface
+                service = cast(
+                    "type[BLELifecycleService]",
+                    lifecycle_service_mod.BLELifecycleService,
                 )
+                return service._state_manager_current_state(iface)
 
             return current_state
 
         def _fallback_transition_to_state() -> Callable[[ConnectionState], bool]:
             def transition_to_state(state: ConnectionState) -> bool:
-                return lifecycle_service_mod.BLELifecycleService._state_manager_transition_to(  # noqa: E501
+                service = cast(
+                    "type[BLELifecycleService]",
+                    lifecycle_service_mod.BLELifecycleService,
+                )
+                return service._state_manager_transition_to(
                     iface,
                     state,
                 )
@@ -378,9 +395,11 @@ class BLELifecycleController:
                 "meshtastic.interfaces.ble.lifecycle_service"
             )
 
-            return lifecycle_service_mod.BLELifecycleService._is_owned_connected_client(
-                self._iface, client
+            service = cast(
+                "type[BLELifecycleService]",
+                lifecycle_service_mod.BLELifecycleService,
             )
+            return service._is_owned_connected_client(self._iface, client)
         return self._connection_ownership._is_owned_connected_client(client)
 
     def _has_ever_connected_session(self) -> bool:

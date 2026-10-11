@@ -458,8 +458,9 @@ class _LegacyBLESessionStateAdapter:
                     and _get_declared_callable(raw_lock_type, "__exit__") is not None
                 ):
                     return cast(_LockPort, raw_legacy_lock)
+            fallback_lock = self._fallback_lock
             if current_state is self:
-                return self._fallback_lock
+                return fallback_lock
         declared_lock = _get_declared_lock(iface, mapped)
         return self._fallback_lock if declared_lock is None else declared_lock
 

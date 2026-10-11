@@ -139,7 +139,7 @@ class BLEReceiveRecoveryController:
         )
         if get_lifecycle_controller_fn is not None:
             try:
-                controller = get_lifecycle_controller_fn()
+                controller: object | None = get_lifecycle_controller_fn()
             except Exception:  # noqa: BLE001 - compatibility probe falls back
                 _log_ble_failure(
                     _BLEFailureDisposition.COMPATIBILITY_FALLBACK,

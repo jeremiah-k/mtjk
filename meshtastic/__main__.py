@@ -33,6 +33,7 @@ import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
 import meshtastic.cli.preference_runtime as cli_preference_runtime
 import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
+import meshtastic.cli.values as cli_values
 import meshtastic.ota
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
@@ -739,7 +740,7 @@ def checkChannel(interface: MeshInterface, channelIndex: int) -> bool:
 
 
 _normalize_pref_name = cli_preference_runtime.normalize_pref_name
-_parse_bitfield_value = cli_preference_runtime.parse_bitfield_value
+_parse_bitfield_value = cli_values.parse_bitfield_value
 
 
 def _display_pref_name(comp_name: str) -> str:

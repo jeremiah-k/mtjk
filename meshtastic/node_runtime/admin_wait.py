@@ -134,7 +134,7 @@ def _send_admin_with_ack_scope(
 
 def _get_bound_interface_helper(node: "Node", name: str) -> Callable[..., Any] | None:
     """Return a real bound interface helper, excluding loose mock attributes."""
-    helper = getattr(node.iface, name, None)
+    helper: Callable[..., Any] | None = getattr(node.iface, name, None)
     if callable(helper) and getattr(helper, "__self__", None) is node.iface:
         return helper
     return None
