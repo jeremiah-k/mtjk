@@ -357,14 +357,18 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             publishing_thread_provider=self._get_publishing_thread,
         )
 
-        self._management_command_handler = BLEManagementCommandHandler(
-            self,
-            ble_client_factory=BLEClient,
-            connected_elsewhere=self._connected_elsewhere_late_bound,
-            session_state=self._session_state,
-            management_state=self._get_management_state(),
-            connect_lock=self._connect_lock,
-            client_closer=self._client_manager_safe_close_client,
+        # Lazily recreatable collaborator: management flows may clear it to
+        # None to force re-creation through _get_management_command_handler.
+        self._management_command_handler: BLEManagementCommandHandler | None = (
+            BLEManagementCommandHandler(
+                self,
+                ble_client_factory=BLEClient,
+                connected_elsewhere=self._connected_elsewhere_late_bound,
+                session_state=self._session_state,
+                management_state=self._get_management_state(),
+                connect_lock=self._connect_lock,
+                client_closer=self._client_manager_safe_close_client,
+            )
         )
 
         # Event coordination for reconnection and read operations
