@@ -261,7 +261,9 @@ def test_logset_symlink_fails_silently(
     monkeypatch.setattr(slog_module, "PowerLogger", lambda *args, **kwargs: mock_power)
 
     # Make symlink fail
-    def failing_symlink(self: Path, target: str, target_is_directory: bool = False) -> None:
+    def failing_symlink(
+        self: Path, target: str, target_is_directory: bool = False
+    ) -> None:
         raise OSError("Symlink not supported")
 
     monkeypatch.setattr(Path, "symlink_to", failing_symlink)

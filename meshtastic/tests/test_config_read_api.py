@@ -12,8 +12,8 @@ from google.protobuf.struct_pb2 import Struct
 
 import meshtastic._deadline as _deadline_module
 import meshtastic.mesh_interface as _mesh_interface_module
-from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic import ResponseHandler
+from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic._deadline import _operation_deadline, _remaining_timeout
 from meshtastic.admin_response import (
     _CONFIG_RESPONSE_SUBTYPE_BY_REQUEST,

@@ -5,6 +5,7 @@
 import logging
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import IO, Any, cast
@@ -14,8 +15,6 @@ import pytest
 import yaml
 
 import meshtastic.__main__ as main_module
-import time
-from meshtastic.protobuf import admin_pb2
 from meshtastic import mt_config
 from meshtastic.__main__ import (
     _create_power_meter,
@@ -24,6 +23,7 @@ from meshtastic.__main__ import (
     printConfig,
     tunnelMain,
 )
+from meshtastic.protobuf import admin_pb2
 
 # from ..ble_interface import BLEInterface
 from ..node import Node

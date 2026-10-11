@@ -1665,7 +1665,9 @@ class TestTelemetrySubviewRetention:
     """
 
     @staticmethod
-    def _build_telemetry_packet(variant: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _build_telemetry_packet(
+        variant: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Build a packet dict containing a decoded telemetry payload for `variant`."""
         return {
             "from": 4808675309,

@@ -165,7 +165,9 @@ def test_capabilities_help_and_version_have_the_same_supported_options(
 
 
 def test_get_uses_fresh_response_and_captures_quiet_preference_output(
-    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     client.localNode.localConfig.lora.hop_limit = 7
     packets: list[mesh_pb2.MeshPacket] = []

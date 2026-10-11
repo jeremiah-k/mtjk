@@ -17,7 +17,7 @@ import sys
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import IO, TYPE_CHECKING, Any, NoReturn, cast
+from typing import IO, TYPE_CHECKING, Any, NoReturn
 
 import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
@@ -30,7 +30,7 @@ from meshtastic.mesh_interface import MeshInterface
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from meshtastic.serial_interface import SerialInterface
+    pass
 
 
 @dataclass(frozen=True, slots=True)

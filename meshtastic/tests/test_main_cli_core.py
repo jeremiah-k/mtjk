@@ -15,7 +15,6 @@ import pytest
 
 import meshtastic.__main__ as main_module
 from meshtastic import mt_config
-from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.__main__ import (
     _normalize_pref_name,
     _parse_host_port,
@@ -24,10 +23,9 @@ from meshtastic.__main__ import (
     support_info,
 )
 from meshtastic._branding import PRIMARY_CLI_NAME, UPSTREAM_PRODUCT_NAME
-from meshtastic.cli.values import (
-    is_local_destination as _is_local_destination,
-    parse_modem_preset_name,
-)
+from meshtastic._core_constants import BROADCAST_ADDR
+from meshtastic.cli.values import is_local_destination as _is_local_destination
+from meshtastic.cli.values import parse_modem_preset_name
 from meshtastic.version import get_active_version
 
 # from ..radioconfig_pb2 import UserPreferences

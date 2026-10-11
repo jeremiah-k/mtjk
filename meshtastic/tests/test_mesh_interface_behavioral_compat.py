@@ -91,7 +91,9 @@ def mock_interface() -> Generator[MeshInterface, None, None]:
 class TestSendTextSendDataWorkflow:
     """Test sendText() and sendData() workflows with various destinations."""
 
-    def test_sendText_broadcast_destination(self, mock_interface: MeshInterface) -> None:
+    def test_sendText_broadcast_destination(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify sendText() to broadcast queues correct packet."""
         iface = mock_interface
 
@@ -154,7 +156,9 @@ class TestSendTextSendDataWorkflow:
         assert packet.decoded.payload == binary_data
         assert packet.decoded.portnum == portnums_pb2.PortNum.PRIVATE_APP
 
-    def test_sendData_with_ack_and_response(self, mock_interface: MeshInterface) -> None:
+    def test_sendData_with_ack_and_response(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify sendData() with wantAck and wantResponse flags."""
         iface = mock_interface
 
@@ -188,7 +192,9 @@ class TestSendTextSendDataWorkflow:
 class TestWaitForPositionWorkflow:
     """Test waitForPosition() workflow with timeout and request_id."""
 
-    def test_waitForPosition_sets_up_wait_state(self, mock_interface: MeshInterface) -> None:
+    def test_waitForPosition_sets_up_wait_state(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForPosition() sets up correct wait state."""
         iface = mock_interface
 
@@ -210,7 +216,9 @@ class TestWaitForPositionWorkflow:
         # Verify request was registered
         assert request_id != 0
 
-    def test_waitForPosition_new_signature_with_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForPosition_new_signature_with_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForPosition() works with request_id parameter."""
         iface = mock_interface
 
@@ -227,7 +235,9 @@ class TestWaitForPositionWorkflow:
             assert call_args[0][0] == "receivedPosition"
             assert call_args[0][1] == 12345
 
-    def test_waitForPosition_legacy_signature_no_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForPosition_legacy_signature_no_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForPosition() works without request_id (legacy)."""
         iface = mock_interface
 
@@ -239,7 +249,9 @@ class TestWaitForPositionWorkflow:
 
             mock_legacy_wait.assert_called_once()
 
-    def test_waitForPosition_raises_on_timeout(self, mock_interface: MeshInterface) -> None:
+    def test_waitForPosition_raises_on_timeout(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForPosition() raises MeshInterfaceError on timeout."""
         iface = mock_interface
 
@@ -260,12 +272,16 @@ class TestWaitForPositionWorkflow:
 class TestWaitForTelemetryWorkflow:
     """Test waitForTelemetry() workflow with telemetry types and request_id."""
 
-    def test_waitForTelemetry_exists_and_accepts_parameters(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTelemetry_exists_and_accepts_parameters(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTelemetry() exists and accepts parameters."""
         iface = mock_interface
 
         # Set up telemetry in nodesByNum for device_metrics path
-        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164]["deviceMetrics"] = {
+        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164][
+            "deviceMetrics"
+        ] = {
             "batteryLevel": 85,
             "voltage": 3.7,
             "channelUtilization": 10.5,
@@ -281,7 +297,9 @@ class TestWaitForTelemetryWorkflow:
             # Verify the method exists and accepts parameters
             assert hasattr(iface, "waitForTelemetry")
 
-    def test_waitForTelemetry_new_signature_with_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTelemetry_new_signature_with_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTelemetry() works with request_id parameter."""
         iface = mock_interface
 
@@ -296,7 +314,9 @@ class TestWaitForTelemetryWorkflow:
             assert call_args[0][0] == "receivedTelemetry"
             assert call_args[0][1] == 54321
 
-    def test_waitForTelemetry_legacy_signature_no_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTelemetry_legacy_signature_no_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTelemetry() works without request_id (legacy)."""
         iface = mock_interface
 
@@ -308,7 +328,9 @@ class TestWaitForTelemetryWorkflow:
 
             mock_legacy_wait.assert_called_once()
 
-    def test_waitForTelemetry_raises_on_timeout(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTelemetry_raises_on_timeout(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTelemetry() raises MeshInterfaceError on timeout."""
         iface = mock_interface
 
@@ -329,7 +351,9 @@ class TestWaitForTelemetryWorkflow:
 class TestWaitForTraceRouteWorkflow:
     """Test waitForTraceRoute() workflow with waitFactor and request_id."""
 
-    def test_waitForTraceRoute_uses_wait_factor(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTraceRoute_uses_wait_factor(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTraceRoute() uses waitFactor for timeout calculation."""
         iface = mock_interface
 
@@ -345,7 +369,9 @@ class TestWaitForTraceRouteWorkflow:
             expected_timeout = iface._timeout.expireTimeout * 3.0
             assert call_args[1]["timeout_seconds"] == expected_timeout
 
-    def test_waitForTraceRoute_new_signature_with_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTraceRoute_new_signature_with_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTraceRoute() works with request_id parameter."""
         iface = mock_interface
 
@@ -360,7 +386,9 @@ class TestWaitForTraceRouteWorkflow:
             assert call_args[0][0] == "receivedTraceRoute"
             assert call_args[0][1] == 22222
 
-    def test_waitForTraceRoute_legacy_signature_no_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTraceRoute_legacy_signature_no_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTraceRoute() works without request_id (legacy)."""
         iface = mock_interface
 
@@ -372,7 +400,9 @@ class TestWaitForTraceRouteWorkflow:
 
             mock_legacy_wait.assert_called_once_with(2.0, iface._acknowledgment)
 
-    def test_waitForTraceRoute_raises_on_timeout(self, mock_interface: MeshInterface) -> None:
+    def test_waitForTraceRoute_raises_on_timeout(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForTraceRoute() raises MeshInterfaceError on timeout."""
         iface = mock_interface
 
@@ -393,7 +423,9 @@ class TestWaitForTraceRouteWorkflow:
 class TestWaitForWaypointWorkflow:
     """Test waitForWaypoint() workflow with request_id parameter."""
 
-    def test_waitForWaypoint_new_signature_with_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForWaypoint_new_signature_with_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForWaypoint() works with request_id parameter."""
         iface = mock_interface
 
@@ -408,7 +440,9 @@ class TestWaitForWaypointWorkflow:
             assert call_args[0][0] == "receivedWaypoint"
             assert call_args[0][1] == 33333
 
-    def test_waitForWaypoint_legacy_signature_no_request_id(self, mock_interface: MeshInterface) -> None:
+    def test_waitForWaypoint_legacy_signature_no_request_id(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForWaypoint() works without request_id (legacy)."""
         iface = mock_interface
 
@@ -420,7 +454,9 @@ class TestWaitForWaypointWorkflow:
 
             mock_legacy_wait.assert_called_once()
 
-    def test_waitForWaypoint_raises_on_timeout(self, mock_interface: MeshInterface) -> None:
+    def test_waitForWaypoint_raises_on_timeout(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify waitForWaypoint() raises MeshInterfaceError on timeout."""
         iface = mock_interface
 
@@ -441,7 +477,9 @@ class TestWaitForWaypointWorkflow:
 class TestShowNodesShowInfoWorkflow:
     """Test showNodes() and showInfo() return proper output formats."""
 
-    def test_showNodes_returns_formatted_table(self, mock_interface: MeshInterface) -> None:
+    def test_showNodes_returns_formatted_table(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify showNodes() returns formatted node list."""
         iface = mock_interface
 
@@ -452,7 +490,9 @@ class TestShowNodesShowInfoWorkflow:
         assert isinstance(output, str)
         assert len(output) > 0
 
-    def test_showNodes_include_self_parameter(self, mock_interface: MeshInterface) -> None:
+    def test_showNodes_include_self_parameter(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify showNodes() accepts includeSelf parameter without error."""
         iface = mock_interface
 
@@ -476,7 +516,9 @@ class TestShowNodesShowInfoWorkflow:
         # Output should contain node data
         assert len(output) > 0
 
-    def test_showInfo_returns_interface_metadata(self, mock_interface: MeshInterface) -> None:
+    def test_showInfo_returns_interface_metadata(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify showInfo() returns interface metadata."""
         iface = mock_interface
 
@@ -504,7 +546,9 @@ class TestShowNodesShowInfoWorkflow:
             or "nodes" in summary.lower()
         )
 
-    def test_showInfo_handles_nodes_without_user_dict(self, mock_interface: MeshInterface) -> None:
+    def test_showInfo_handles_nodes_without_user_dict(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify showInfo() handles malformed node data gracefully."""
         iface = mock_interface
 
@@ -531,7 +575,9 @@ class TestShowNodesShowInfoWorkflow:
 class TestGetNodeWorkflow:
     """Test getNode() workflow with various node identifiers."""
 
-    def test_getNode_by_string_id_returns_node(self, mock_interface: MeshInterface) -> None:
+    def test_getNode_by_string_id_returns_node(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify getNode() returns a Node for string ID."""
         iface = mock_interface
 
@@ -549,7 +595,9 @@ class TestGetNodeWorkflow:
             call_args = MockNode.call_args
             assert call_args[0][0] == iface
 
-    def test_getNode_by_node_number_returns_node(self, mock_interface: MeshInterface) -> None:
+    def test_getNode_by_node_number_returns_node(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify getNode() returns a Node for node number."""
         iface = mock_interface
 
@@ -565,7 +613,9 @@ class TestGetNodeWorkflow:
             assert node is not None
             MockNode.assert_called_once()
 
-    def test_getNode_local_addr_returns_local_node(self, mock_interface: MeshInterface) -> None:
+    def test_getNode_local_addr_returns_local_node(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify getNode(LOCAL_ADDR) returns localNode."""
         iface = mock_interface
 
@@ -573,7 +623,9 @@ class TestGetNodeWorkflow:
 
         assert node == iface.localNode
 
-    def test_getNode_with_requestChannels_false(self, mock_interface: MeshInterface) -> None:
+    def test_getNode_with_requestChannels_false(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify getNode() respects requestChannels=False (no channel requests)."""
         iface = mock_interface
 
@@ -588,7 +640,9 @@ class TestGetNodeWorkflow:
             # Verify requestChannels was not called on the node
             mock_node_instance.requestChannels.assert_not_called()
 
-    def test_getNode_not_found_raises_error(self, mock_interface: MeshInterface) -> None:
+    def test_getNode_not_found_raises_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify getNode() raises error when channel request times out."""
         iface = mock_interface
 
@@ -612,7 +666,9 @@ class TestGetNodeWorkflow:
 class TestSendTelemetrySemanticDeprecation:
     """Test sendTelemetry() semantic deprecation warnings."""
 
-    def test_sendTelemetry_unsupported_type_emits_warning(self, mock_interface: MeshInterface) -> None:
+    def test_sendTelemetry_unsupported_type_emits_warning(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify unsupported telemetryType values emit deprecation warning."""
         iface = mock_interface
 
@@ -647,7 +703,9 @@ class TestSendTelemetrySemanticDeprecation:
             telemetry_arg = call_args[0][0]
             assert isinstance(telemetry_arg, telemetry_pb2.Telemetry)
 
-    def test_sendTelemetry_supported_types_no_warning(self, mock_interface: MeshInterface, caplog: pytest.LogCaptureFixture) -> None:
+    def test_sendTelemetry_supported_types_no_warning(
+        self, mock_interface: MeshInterface, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verify supported telemetryType values don't emit warnings."""
         iface = mock_interface
 
@@ -665,11 +723,15 @@ class TestSendTelemetrySemanticDeprecation:
                 telemetry_type not in caplog.text
             ), f"Unexpected warning for supported type {telemetry_type}"
 
-    def test_sendTelemetry_with_wantResponse(self, mock_interface: MeshInterface) -> None:
+    def test_sendTelemetry_with_wantResponse(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify sendTelemetry() with wantResponse=True sets up wait."""
         iface = mock_interface
 
-        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164]["deviceMetrics"] = {
+        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164][
+            "deviceMetrics"
+        ] = {
             "batteryLevel": 85,
             "voltage": 3.7,
         }
@@ -701,7 +763,9 @@ class TestSendTelemetrySemanticDeprecation:
 class TestIntegrationWorkflows:
     """Integration-style tests for complete workflows."""
 
-    def test_complete_send_and_wait_workflow(self, mock_interface: MeshInterface) -> None:
+    def test_complete_send_and_wait_workflow(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify complete send + wait workflow functions correctly."""
         iface = mock_interface
 
@@ -713,7 +777,9 @@ class TestIntegrationWorkflows:
         assert packet.to == 11259375
         assert packet.decoded.payload == b"Integration test"
 
-    def test_multiple_sends_queue_correctly(self, mock_interface: MeshInterface) -> None:
+    def test_multiple_sends_queue_correctly(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Verify multiple send operations queue correctly."""
         iface = mock_interface
 
@@ -859,7 +925,9 @@ class TestSendWaitEdgeCases:
     # 1. ACK received before response
     # -------------------------------------------------------------------------
 
-    def test_ack_received_before_response_completes_correctly(self, mock_interface: MeshInterface) -> None:
+    def test_ack_received_before_response_completes_correctly(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that when an ACK arrives before the actual response,
         the wait completes correctly when the response arrives."""
         iface = mock_interface
@@ -893,7 +961,9 @@ class TestSendWaitEdgeCases:
         # The ACK is only consumed when wait_for_request_ack actually returns
         # (it discards the ACK after detecting it)
 
-    def test_ack_before_response_with_response_handler(self, mock_interface: MeshInterface) -> None:
+    def test_ack_before_response_with_response_handler(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that response handler is still called even if ACK arrives first."""
         iface = mock_interface
 
@@ -939,7 +1009,9 @@ class TestSendWaitEdgeCases:
     # 2. Response received without ACK
     # -------------------------------------------------------------------------
 
-    def test_response_without_ack_completes_via_mark_acknowledged(self, mock_interface: MeshInterface) -> None:
+    def test_response_without_ack_completes_via_mark_acknowledged(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that response alone (via onResponse handler) completes wait
         without requiring a separate routing ACK."""
         iface = mock_interface
@@ -967,7 +1039,9 @@ class TestSendWaitEdgeCases:
         # Verify no error was set
         assert (acknowledgment_attr, request_id) not in iface._response_wait_errors
 
-    def test_routing_response_without_app_response_sets_error(self, mock_interface: MeshInterface) -> None:
+    def test_routing_response_without_app_response_sets_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that a routing response without the actual app-level response
         properly records an error."""
         iface = mock_interface
@@ -998,7 +1072,9 @@ class TestSendWaitEdgeCases:
     # 3. Timeout after handler registration
     # -------------------------------------------------------------------------
 
-    def test_timeout_after_handler_registration_raises_error(self, mock_interface: MeshInterface) -> None:
+    def test_timeout_after_handler_registration_raises_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that if a handler is registered but no response arrives
         within timeout, it raises/cleans up properly."""
         iface = mock_interface
@@ -1039,7 +1115,9 @@ class TestSendWaitEdgeCases:
         )
         assert request_id in retired_ids
 
-    def test_timeout_cleanup_removes_all_state(self, mock_interface: MeshInterface) -> None:
+    def test_timeout_cleanup_removes_all_state(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that timeout properly cleans up all wait state."""
         iface = mock_interface
 
@@ -1078,7 +1156,9 @@ class TestSendWaitEdgeCases:
     # 4. Duplicate response handling (idempotency)
     # -------------------------------------------------------------------------
 
-    def test_duplicate_response_handled_idempotently(self, mock_interface: MeshInterface) -> None:
+    def test_duplicate_response_handled_idempotently(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that duplicate responses for the same request_id don't cause issues.
         The second response should be ignored (handler already consumed)."""
         iface = mock_interface
@@ -1134,7 +1214,9 @@ class TestSendWaitEdgeCases:
         # Handler should NOT have been called again
         assert handler_call_count == 1
 
-    def test_duplicate_ack_does_not_cause_error(self, mock_interface: MeshInterface) -> None:
+    def test_duplicate_ack_does_not_cause_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that duplicate ACKs for the same request are handled gracefully."""
         iface = mock_interface
 
@@ -1170,7 +1252,9 @@ class TestSendWaitEdgeCases:
     # 5. Request ID mismatches
     # -------------------------------------------------------------------------
 
-    def test_response_with_wrong_request_id_ignored(self, mock_interface: MeshInterface) -> None:
+    def test_response_with_wrong_request_id_ignored(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that responses with mismatched request_id are ignored
         for the specific wait, but may match other waits."""
         iface = mock_interface
@@ -1212,7 +1296,9 @@ class TestSendWaitEdgeCases:
         # Handler should still be registered for expected_request_id
         assert expected_request_id in iface.responseHandlers
 
-    def test_mismatched_request_id_in_wait_for_request_ack(self, mock_interface: MeshInterface) -> None:
+    def test_mismatched_request_id_in_wait_for_request_ack(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test wait_for_request_ack with non-matching request_id times out."""
         iface = mock_interface
 
@@ -1255,7 +1341,9 @@ class TestSendWaitEdgeCases:
     # 6. Concurrent outstanding waits
     # -------------------------------------------------------------------------
 
-    def test_multiple_simultaneous_waits_different_request_ids(self, mock_interface: MeshInterface) -> None:
+    def test_multiple_simultaneous_waits_different_request_ids(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that multiple simultaneous waits with different request_ids
         work independently without interference."""
         iface = mock_interface
@@ -1326,7 +1414,9 @@ class TestSendWaitEdgeCases:
             assert request_id_1 in active_ids
             # request_id_2's handler was consumed, but it's still in active waits
 
-    def test_concurrent_waits_isolation_across_different_types(self, mock_interface: MeshInterface) -> None:
+    def test_concurrent_waits_isolation_across_different_types(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that waits for different response types are completely isolated."""
         iface = mock_interface
 
@@ -1365,7 +1455,9 @@ class TestSendWaitEdgeCases:
     # 7. sendTelemetry edge cases
     # -------------------------------------------------------------------------
 
-    def test_sendTelemetry_with_invalid_type_logs_warning(self, mock_interface: MeshInterface, caplog: pytest.LogCaptureFixture) -> None:
+    def test_sendTelemetry_with_invalid_type_logs_warning(
+        self, mock_interface: MeshInterface, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Test that sendTelemetry with invalid type logs a warning and falls back."""
         iface = mock_interface
 
@@ -1395,12 +1487,16 @@ class TestSendWaitEdgeCases:
         assert "invalid_type_xyz" in caplog.text
         assert "device_metrics" in caplog.text
 
-    def test_sendTelemetry_with_wantResponse_registers_handler(self, mock_interface: MeshInterface) -> None:
+    def test_sendTelemetry_with_wantResponse_registers_handler(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that sendTelemetry with wantResponse=True registers a response handler."""
         iface = mock_interface
 
         # Set up device metrics in node DB
-        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164]["deviceMetrics"] = {
+        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164][
+            "deviceMetrics"
+        ] = {
             "batteryLevel": 85,
             "voltage": 3.7,
         }
@@ -1423,7 +1519,9 @@ class TestSendWaitEdgeCases:
                 assert call_kwargs.get("wantResponse") is True
                 assert call_kwargs.get("onResponse") is not None
 
-    def test_sendTelemetry_all_valid_types_no_error(self, mock_interface: MeshInterface) -> None:
+    def test_sendTelemetry_all_valid_types_no_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that all valid telemetry types work without errors."""
         iface = mock_interface
 
@@ -1444,7 +1542,9 @@ class TestSendWaitEdgeCases:
                 telemetry_arg = call_args[0][0]
                 assert isinstance(telemetry_arg, telemetry_pb2.Telemetry)
 
-    def test_sendTelemetry_with_local_device_metrics_populated(self, mock_interface: MeshInterface) -> None:
+    def test_sendTelemetry_with_local_device_metrics_populated(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that device_metrics telemetry is populated from local node DB."""
         iface = mock_interface
 
@@ -1452,7 +1552,9 @@ class TestSendWaitEdgeCases:
         iface.localNode.nodeNum = 2475227164
 
         # Set up complete device metrics
-        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164]["deviceMetrics"] = {
+        cast("dict[int, dict[str, Any]]", iface.nodesByNum)[2475227164][
+            "deviceMetrics"
+        ] = {
             "batteryLevel": 75,
             "voltage": 4.1,
             "channelUtilization": 15.5,
@@ -1488,7 +1590,9 @@ class TestSendWaitEdgeCases:
     # 8. sendWaypoint edge cases
     # -------------------------------------------------------------------------
 
-    def test_sendWaypoint_generates_unique_id_when_none_provided(self, mock_interface: MeshInterface) -> None:
+    def test_sendWaypoint_generates_unique_id_when_none_provided(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that sendWaypoint generates a unique ID when waypoint_id is None."""
         iface = mock_interface
 
@@ -1544,7 +1648,9 @@ class TestSendWaitEdgeCases:
         # Verify the provided ID was used
         assert waypoint.id == provided_id
 
-    def test_sendWaypoint_with_wantResponse_registers_handler(self, mock_interface: MeshInterface) -> None:
+    def test_sendWaypoint_with_wantResponse_registers_handler(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that sendWaypoint with wantResponse=True sets up wait properly."""
         iface = mock_interface
 
@@ -1572,7 +1678,9 @@ class TestSendWaitEdgeCases:
                 assert call_kwargs.get("onResponse") is not None
                 assert call_kwargs.get("response_wait_attr") == "receivedWaypoint"
 
-    def test_sendWaypoint_delete_waypoint_flow(self, mock_interface: MeshInterface) -> None:
+    def test_sendWaypoint_delete_waypoint_flow(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test deleteWaypoint flow sets expire=0 correctly."""
         iface = mock_interface
 
@@ -1597,7 +1705,9 @@ class TestSendWaitEdgeCases:
     # 9. Traceroute response edge cases
     # -------------------------------------------------------------------------
 
-    def test_traceroute_with_routing_error_records_wait_error(self, mock_interface: MeshInterface) -> None:
+    def test_traceroute_with_routing_error_records_wait_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that traceroute routing error is properly recorded as wait error."""
         iface = mock_interface
 
@@ -1628,7 +1738,9 @@ class TestSendWaitEdgeCases:
         error_msg = iface._response_wait_errors[(acknowledgment_attr, request_id)]
         assert "firmware 2.1.22" in error_msg
 
-    def test_traceroute_malformed_payload_sets_error(self, mock_interface: MeshInterface) -> None:
+    def test_traceroute_malformed_payload_sets_error(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that malformed traceroute payload sets appropriate wait error."""
         iface = mock_interface
 
@@ -1659,7 +1771,9 @@ class TestSendWaitEdgeCases:
         error_msg = iface._response_wait_errors[(acknowledgment_attr, request_id)]
         assert "Failed to parse" in error_msg
 
-    def test_sendTraceRoute_calculates_wait_factor_from_nodes(self, mock_interface: MeshInterface) -> None:
+    def test_sendTraceRoute_calculates_wait_factor_from_nodes(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that sendTraceRoute calculates waitFactor based on node count."""
         iface = mock_interface
 
@@ -1680,7 +1794,9 @@ class TestSendWaitEdgeCases:
                 # With 2 nodes, waitFactor should be min(1, 6) = 1
                 assert call_args[0][0] == 1.0  # waitFactor
 
-    def test_traceroute_valid_response_completes_wait(self, mock_interface: MeshInterface) -> None:
+    def test_traceroute_valid_response_completes_wait(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that valid traceroute response properly completes the wait."""
         iface = mock_interface
 
@@ -1718,7 +1834,9 @@ class TestSendWaitEdgeCases:
         # Verify no error was set
         assert (acknowledgment_attr, request_id) not in iface._response_wait_errors
 
-    def test_traceroute_response_with_route_back(self, mock_interface: MeshInterface) -> None:
+    def test_traceroute_response_with_route_back(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test traceroute response containing route back data."""
         iface = mock_interface
 
@@ -1765,7 +1883,9 @@ class TestSendWaitEdgeCases:
 class TestRequestIdExtractionEdgeCases:
     """Test edge cases for request ID extraction from packets."""
 
-    def test_extract_request_id_from_packet_valid_int(self, mock_interface: MeshInterface) -> None:
+    def test_extract_request_id_from_packet_valid_int(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test extraction of valid integer request_id from packet."""
         iface = mock_interface
 
@@ -1774,7 +1894,9 @@ class TestRequestIdExtractionEdgeCases:
         result = iface._send_pipeline._extract_request_id_from_packet(packet)
         assert result == 12345
 
-    def test_extract_request_id_from_packet_string_digits(self, mock_interface: MeshInterface) -> None:
+    def test_extract_request_id_from_packet_string_digits(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test extraction of string request_id that is numeric."""
         iface = mock_interface
 
@@ -1783,7 +1905,9 @@ class TestRequestIdExtractionEdgeCases:
         result = iface._send_pipeline._extract_request_id_from_packet(packet)
         assert result == 67890
 
-    def test_extract_request_id_from_packet_zero_returns_none(self, mock_interface: MeshInterface) -> None:
+    def test_extract_request_id_from_packet_zero_returns_none(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that request_id of 0 returns None (invalid)."""
         iface = mock_interface
 
@@ -1792,7 +1916,9 @@ class TestRequestIdExtractionEdgeCases:
         result = iface._send_pipeline._extract_request_id_from_packet(packet)
         assert result is None
 
-    def test_extract_request_id_from_packet_bool_returns_none(self, mock_interface: MeshInterface) -> None:
+    def test_extract_request_id_from_packet_bool_returns_none(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that boolean request_id returns None."""
         iface = mock_interface
 
@@ -1801,7 +1927,9 @@ class TestRequestIdExtractionEdgeCases:
         result = iface._send_pipeline._extract_request_id_from_packet(packet)
         assert result is None
 
-    def test_extract_request_id_from_packet_missing_returns_none(self, mock_interface: MeshInterface) -> None:
+    def test_extract_request_id_from_packet_missing_returns_none(
+        self, mock_interface: MeshInterface
+    ) -> None:
         """Test that missing requestId returns None."""
         iface = mock_interface
 

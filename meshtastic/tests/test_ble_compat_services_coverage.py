@@ -1100,11 +1100,15 @@ class TestBLECompatServicesIntegration:
                 """Mock start management phase."""
                 return _ManagementStartContext(None, address, False)
 
-            def resolve_management_target(self, address: Any, _context: Any) -> tuple[Any, None]:
+            def resolve_management_target(
+                self, address: Any, _context: Any
+            ) -> tuple[Any, None]:
                 """Mock resolve management target."""
                 return (address, None)
 
-            def acquire_client_for_target(self, **_kwargs: Any) -> tuple[MagicMock, None]:
+            def acquire_client_for_target(
+                self, **_kwargs: Any
+            ) -> tuple[MagicMock, None]:
                 """Mock acquire client for target."""
                 mock_client = MagicMock(spec=BLEClient)
                 return (mock_client, None)
@@ -1125,7 +1129,9 @@ class TestBLECompatServicesIntegration:
                 """Mock validate trust timeout."""
                 return float(timeout)
 
-            def validate_connect_timeout_override(self, _timeout: Any, _pair_on_connect: Any) -> None:
+            def validate_connect_timeout_override(
+                self, _timeout: Any, _pair_on_connect: Any
+            ) -> None:
                 """Mock validate connect timeout override."""
                 return None
 
@@ -1191,7 +1197,9 @@ class TestBLECompatServicesIntegration:
         class RealisticController:
             """Realistic controller mock with complete receive recovery API surface."""
 
-            def handle_read_loop_disconnect(self, _error_message: Any, _previous_client: Any) -> bool:
+            def handle_read_loop_disconnect(
+                self, _error_message: Any, _previous_client: Any
+            ) -> bool:
                 """Mock handle read loop disconnect."""
                 return True
 
@@ -1211,11 +1219,15 @@ class TestBLECompatServicesIntegration:
                 """Mock reset recovery after stability."""
                 return None
 
-            def _read_and_handle_payload(self, _client: Any, _poll_without_notify: Any) -> bool:
+            def _read_and_handle_payload(
+                self, _client: Any, _poll_without_notify: Any
+            ) -> bool:
                 """Mock read and handle payload."""
                 return True
 
-            def _handle_payload_read(self, _client: Any, _poll_without_notify: Any) -> tuple[bool, bool]:
+            def _handle_payload_read(
+                self, _client: Any, _poll_without_notify: Any
+            ) -> tuple[bool, bool]:
                 """Mock handle payload read."""
                 return (False, False)
 
@@ -1231,7 +1243,9 @@ class TestBLECompatServicesIntegration:
                 """Mock recover receive thread."""
                 return None
 
-            def read_from_radio_with_retries(self, _client: Any, _retry_on_empty: Any) -> bytes:
+            def read_from_radio_with_retries(
+                self, _client: Any, _retry_on_empty: Any
+            ) -> bytes:
                 """Mock read from radio with retries."""
                 return b"data"
 
@@ -1304,7 +1318,9 @@ class TestBLELifecycleServiceGuardedDispatch:
 
         disconnect_and_close.assert_called_once_with(client, timeout=7.5)
 
-    def test_disconnect_and_close_client_skips_timeout_for_legacy_callable(self) -> None:
+    def test_disconnect_and_close_client_skips_timeout_for_legacy_callable(
+        self,
+    ) -> None:
         """Legacy callee without timeout parameter must be called without it."""
         iface = MagicMock()
         client = MagicMock(spec=BLEClient)

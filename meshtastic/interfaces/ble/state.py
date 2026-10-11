@@ -16,7 +16,7 @@ Lock Ordering Note:
 
 from enum import Enum
 from threading import RLock
-from typing import ClassVar, TypeGuard, cast
+from typing import ClassVar, TypeGuard
 
 from meshtastic.interfaces.ble.constants import logger
 

@@ -953,9 +953,7 @@ def test_main_configure_preview_wrapper_forwards_snapshot(
         module_config=localonly_pb2.LocalModuleConfig(),
     )
     monkeypatch.setattr(main_module, "_configure_hooks", lambda: hooks)
-    monkeypatch.setattr(
-        configure_actions, "_preview_configure_command", preview
-    )
+    monkeypatch.setattr(configure_actions, "_preview_configure_command", preview)
 
     main_module._run_configure_preview(iface, args, {"timeout": 1}, snapshot)
 

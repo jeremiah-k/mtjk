@@ -213,9 +213,7 @@ def test_qr_explains_when_no_complete_code_fits(
 ) -> None:
     """A tiny terminal should get a usable instruction instead of wrapped modules."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(
-        shutil, "get_terminal_size", lambda: os.terminal_size((10, 10))
-    )
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda: os.terminal_size((10, 10)))
     rendered = cli_qr.renderTerminalQr("https://meshtastic.org/e/#abc")
     assert "Widen" in rendered
     assert "URL" in rendered
@@ -267,9 +265,7 @@ def test_qr_retries_lower_error_correction_after_capacity_overflow(
 
     monkeypatch.setattr(cli_qr, "segno", _CapacityLimitedSegno())
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(
-        shutil, "get_terminal_size", lambda: os.terminal_size((80, 40))
-    )
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda: os.terminal_size((80, 40)))
     assert cli_qr.renderTerminalQr("dense-value") == "<lower-level-qr>\n"
     assert calls == ["H", "Q", "M"]
 

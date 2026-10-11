@@ -331,7 +331,9 @@ class TestNodeAPIAgainstBaseline:
             msg += "\n\nTo accept these changes, run: uv run --locked pytest meshtastic/tests/test_api_baseline_comparison.py -v --update-baselines"
             pytest.fail(msg)
 
-    def test_node_critical_methods_present(self, current_baseline: dict[str, Any]) -> None:
+    def test_node_critical_methods_present(
+        self, current_baseline: dict[str, Any]
+    ) -> None:
         """Verify critical Node methods are always present regardless of baseline.
 
         This is a safety net to ensure core functionality isn't broken.

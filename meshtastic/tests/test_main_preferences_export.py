@@ -3,6 +3,7 @@
 # pylint: disable=W0613,R0917
 
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,7 +15,6 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from google.protobuf.json_format import MessageToDict
 
 import meshtastic.__main__ as main_module
-import time
 from meshtastic import mt_config
 from meshtastic.__main__ import (
     _prefix_base64_bytes_fields,

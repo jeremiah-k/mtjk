@@ -322,9 +322,7 @@ class TestShutdownStateProbeLocking:
             probe_lock_states.append(lock.held)
             return ConnectionState.DISCONNECTED
 
-        coordinator = BLEShutdownLifecycleCoordinator(
-            iface, session_state=session
-        )
+        coordinator = BLEShutdownLifecycleCoordinator(iface, session_state=session)
 
         result = coordinator._await_management_shutdown(  # noqa: SLF001
             management_shutdown_wait_timeout=0.1,

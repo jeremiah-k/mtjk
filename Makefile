@@ -1,4 +1,4 @@
-.PHONY: all clean test ci ci-strict ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
+.PHONY: all clean test ci ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
 
 UV_RUN := uv run --locked
 API_BASELINE_FILE := meshtastic/tests/api_baselines/api_baseline.json
@@ -24,7 +24,7 @@ ci-base:
 
 ci:
 	$(MAKE) ci-base
-	$(UV_RUN) mypy meshtastic/
+	$(UV_RUN) mypy meshtastic/ --strict
 
 # generate the markdown configuration field reference
 field-reference:
@@ -39,11 +39,6 @@ api-baseline:
 # https://github.com/meshtastic/python.git)
 api-baseline-master:
 	./bin/generate_master_api_baseline.sh "$(API_BASELINE_REF)"
-
-# run CI checks with strict mypy (for maintainers)
-ci-strict:
-	$(MAKE) ci-base
-	$(UV_RUN) mypy meshtastic/ --strict
 
 # only run the smoke tests against the virtual device
 virt:

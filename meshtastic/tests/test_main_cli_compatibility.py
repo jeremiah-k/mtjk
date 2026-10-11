@@ -63,9 +63,7 @@ def test_verify_config_sections_compat_wrapper_delegates(
 ) -> None:
     """The verification wrapper should preserve verified-fields forwarding."""
     delegate = MagicMock(return_value=True)
-    monkeypatch.setattr(
-        cli_configure_actions, "_verify_config_sections", delegate
-    )
+    monkeypatch.setattr(cli_configure_actions, "_verify_config_sections", delegate)
     verified: list[str] = []
     proto_config = object()
 

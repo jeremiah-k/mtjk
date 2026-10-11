@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from meshtastic._core_constants import LOCAL_ADDR
 import meshtastic.__main__ as main_module
+from meshtastic._core_constants import LOCAL_ADDR
 from meshtastic.tests._main_legacy_support import (
     _build_configure_interface,
     _patch_fast_monotonic,

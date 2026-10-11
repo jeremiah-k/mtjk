@@ -885,9 +885,7 @@ def test_local_factory_reset_resends_while_acceptance_pending() -> None:
 
             def _disconnect_after_resend() -> None:
                 time.sleep(0.02)
-                pub.sendMessage(
-                    "meshtastic.connection.lost", interface=iface
-                )
+                pub.sendMessage("meshtastic.connection.lost", interface=iface)
 
             threading.Thread(target=_disconnect_after_resend, daemon=True).start()
         return request

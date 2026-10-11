@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import meshtastic.__main__ as main_module
-import meshtastic.cli.device_actions as cli_device_actions
 import meshtastic.cli.config_io as cli_config_io
+import meshtastic.cli.device_actions as cli_device_actions
 from meshtastic import mt_config
 from meshtastic.__main__ import (
     _display_pref_name,

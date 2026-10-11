@@ -65,9 +65,9 @@ def _get_declared_member(
     except AttributeError:
         return default
     try:
-        resolved: object | T | None = type(target).__getattribute__(  # pylint: disable=unnecessary-dunder-call
-            target, name
-        )
+        resolved: object | T | None = type(  # pylint: disable=unnecessary-dunder-call
+            target
+        ).__getattribute__(target, name)
     except AttributeError:
         return default
     return resolved

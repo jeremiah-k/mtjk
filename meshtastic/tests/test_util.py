@@ -102,10 +102,10 @@ class _TempPort:
 @pytest.mark.unit
 def test_util_preserves_port_discovery_monkeypatch_modules() -> None:
     """Legacy tests can still patch module objects through meshtastic.util."""
-    assert getattr(util_module, "glob") is glob
-    assert getattr(util_module, "platform") is platform
-    assert getattr(util_module, "subprocess") is subprocess
-    assert getattr(util_module, "serial").tools.list_ports is serial.tools.list_ports
+    assert vars(util_module)["glob"] is glob
+    assert vars(util_module)["platform"] is platform
+    assert vars(util_module)["subprocess"] is subprocess
+    assert vars(util_module)["serial"].tools.list_ports is serial.tools.list_ports
 
 
 @pytest.mark.unit

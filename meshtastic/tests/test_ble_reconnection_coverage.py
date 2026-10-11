@@ -490,7 +490,6 @@ class TestReconnectWorkerShouldAbortReconnect:
 class TestReconnectWorkerValidateNextAttempt:
     """Tests for next_attempt validation."""
 
-
     @pytest.mark.unit
     def test_validate_valid_tuple(self) -> None:
         """Valid tuple returns NextAttempt."""
@@ -503,7 +502,6 @@ class TestReconnectWorkerValidateNextAttempt:
         assert result.delay == 1.5
         assert result.should_retry is True
 
-
     @pytest.mark.unit
     def test_validate_invalid_not_tuple(self) -> None:
         """Non-tuple returns None."""
@@ -512,7 +510,6 @@ class TestReconnectWorkerValidateNextAttempt:
             reconnect_policy=ReconnectPolicy(max_retries=None),
         )
         assert worker._validate_next_attempt("invalid") is None
-
 
     @pytest.mark.unit
     def test_validate_invalid_wrong_length(self) -> None:
@@ -524,7 +521,6 @@ class TestReconnectWorkerValidateNextAttempt:
         assert worker._validate_next_attempt((1.0,)) is None
         assert worker._validate_next_attempt((1.0, True, "extra")) is None
 
-
     @pytest.mark.unit
     def test_validate_invalid_delay_type(self) -> None:
         """Invalid delay type returns None."""
@@ -533,7 +529,6 @@ class TestReconnectWorkerValidateNextAttempt:
             reconnect_policy=ReconnectPolicy(max_retries=None),
         )
         assert worker._validate_next_attempt(("delay", True)) is None
-
 
     @pytest.mark.unit
     def test_validate_invalid_delay_bool(self) -> None:
@@ -544,7 +539,6 @@ class TestReconnectWorkerValidateNextAttempt:
         )
         assert worker._validate_next_attempt((True, True)) is None
 
-
     @pytest.mark.unit
     def test_validate_invalid_retry_type(self) -> None:
         """Invalid should_retry type returns None."""
@@ -553,7 +547,6 @@ class TestReconnectWorkerValidateNextAttempt:
             reconnect_policy=ReconnectPolicy(max_retries=None),
         )
         assert worker._validate_next_attempt((1.0, "yes")) is None
-
 
     @pytest.mark.unit
     def test_validate_non_finite_delay(self) -> None:
@@ -565,7 +558,6 @@ class TestReconnectWorkerValidateNextAttempt:
         assert worker._validate_next_attempt((float("inf"), True)) is None
         assert worker._validate_next_attempt((float("nan"), True)) is None
 
-
     @pytest.mark.unit
     def test_validate_negative_delay(self) -> None:
         """Negative delay returns None."""
@@ -574,7 +566,6 @@ class TestReconnectWorkerValidateNextAttempt:
             reconnect_policy=ReconnectPolicy(max_retries=None),
         )
         assert worker._validate_next_attempt((-1.0, True)) is None
-
 
     @pytest.mark.unit
     def test_validate_delay_exceeds_timeout_max(self) -> None:
@@ -1278,7 +1269,6 @@ class TestReconnectWorkerErrorPaths:
         def failing_connect(_addr: str) -> None:
             raise MockBLEError("BLE connection failed")
 
-
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1317,7 +1307,6 @@ class TestReconnectWorkerErrorPaths:
                 interface._is_connection_closing = True
             raise MockBLEError("BLE connection failed")
 
-
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1343,7 +1332,6 @@ class TestReconnectWorkerErrorPaths:
 
         def failing_connect(_addr: str) -> None:
             raise ValueError("Unexpected error")
-
 
         interface.connect = failing_connect
 
@@ -1375,7 +1363,6 @@ class TestReconnectWorkerErrorPaths:
                 calls.append(True)
                 interface.auto_reconnect = False  # Disable after first attempt
             raise ValueError("Unexpected error")
-
 
         interface.connect = failing_connect
 
@@ -1504,7 +1491,6 @@ class TestReconnectWorkerBleakErrors:
         def failing_connect(_addr: str) -> None:
             raise BleakDBusError("org.bluez.Error.Failed", 1)  # type: ignore[arg-type]
 
-
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1532,7 +1518,6 @@ class TestReconnectWorkerBleakErrors:
 
         def failing_connect(_addr: str) -> None:
             raise BleakError("Generic BLE error")
-
 
         interface.connect = failing_connect
 
@@ -1562,7 +1547,6 @@ class TestReconnectWorkerBleakErrors:
         def failing_connect(_addr: str) -> None:
             raise BleakDeviceNotFoundError("Device not found")
 
-
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=1, initial_delay=0.01)
@@ -1589,13 +1573,11 @@ class TestReconnectWorkerBleakErrors:
             address="AA:BB:CC:DD:EE:FF",
         )
 
-
         def failing_connect(_addr: str) -> None:
             if len(calls) == 0:
                 calls.append(True)
                 interface._is_connection_closing = True
             raise BleakDBusError("org.bluez.Error.Failed", 1)  # type: ignore[arg-type]
-
 
         interface.connect = failing_connect
 
@@ -1628,7 +1610,6 @@ class TestReconnectWorkerBleakErrors:
                 calls.append(True)
                 interface.auto_reconnect = False
             raise BleakError("Generic BLE error")
-
 
         interface.connect = failing_connect
 
@@ -1665,7 +1646,6 @@ class TestReconnectWorkerPreSleepAbort:
                 interface._is_connection_closing = True
             raise ValueError("Connection failed")
 
-
         interface.connect = failing_connect
 
         policy = ReconnectPolicy(max_retries=5, initial_delay=0.01)
@@ -1698,7 +1678,6 @@ class TestReconnectWorkerPreSleepAbort:
                 # Disable auto_reconnect after first failure
                 interface.auto_reconnect = False
             raise ValueError("Connection failed")
-
 
         interface.connect = failing_connect
 

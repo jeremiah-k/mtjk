@@ -119,7 +119,7 @@ jobs:
       - *setup_uv_step
       - *install_local_step
       - name: Check types with mypy
-        run: uv run --locked mypy meshtastic/
+        run: uv run --locked mypy meshtastic/ --strict
   docs:
     name: Docs generation (py3.13)
     runs-on: ubuntu-latest

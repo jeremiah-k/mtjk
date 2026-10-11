@@ -24,10 +24,10 @@ from unittest.mock import MagicMock, create_autospec, patch
 import pytest
 
 import meshtastic.__main__ as main_module
-from meshtastic.configure_verify import LocalApplyStatus
 from meshtastic import mt_config
 from meshtastic.__main__ import main
 from meshtastic.cli import configure_actions as cli_configure_actions
+from meshtastic.configure_verify import LocalApplyStatus
 from meshtastic.node import Node
 from meshtastic.protobuf import admin_pb2, config_pb2, localonly_pb2
 from meshtastic.serial_interface import SerialInterface

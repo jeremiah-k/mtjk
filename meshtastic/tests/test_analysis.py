@@ -648,9 +648,7 @@ def test_main_uses_default_slog_when_not_provided(
 ) -> None:
     """main() should use default slog path when --slog is not provided."""
     parser_default_slog = create_argparser().parse_args([]).slog
-    expected_slog = parser_default_slog or os.path.join(
-        rootDir(), "latest"
-    )
+    expected_slog = parser_default_slog or os.path.join(rootDir(), "latest")
     captured: dict[str, str] = {}
 
     class _FakeApp:

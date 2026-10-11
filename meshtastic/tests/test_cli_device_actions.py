@@ -15,7 +15,7 @@ from pubsub import pub
 
 from meshtastic import key_verification, ota, serial_interface, tcp_interface
 from meshtastic.cli import device_actions
-from meshtastic.cli.context import ActionOutcome, CliExit, CliContext
+from meshtastic.cli.context import ActionOutcome, CliContext, CliExit
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import mesh_pb2
 
@@ -152,9 +152,7 @@ def _prepare_ota(
     monkeypatch: pytest.MonkeyPatch, ota_factory: Any
 ) -> _DummyTCPInterface:
     """Install OTA seams and return a compatible TCP-interface test double."""
-    monkeypatch.setattr(
-        tcp_interface, "TCPInterface", _DummyTCPInterface
-    )
+    monkeypatch.setattr(tcp_interface, "TCPInterface", _DummyTCPInterface)
     monkeypatch.setattr(ota, "ESP32WiFiOTA", ota_factory)
     _install_clock(monkeypatch, sleep=lambda _seconds: None)
     return _DummyTCPInterface()
@@ -306,9 +304,7 @@ def test_lockdown_confirmation_mismatch_guard_rejects_returning_cli_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Mismatched provisioning secrets must not continue into validation."""
-    monkeypatch.setattr(
-        getpass, "getpass", MagicMock(side_effect=["a", "b"])
-    )
+    monkeypatch.setattr(getpass, "getpass", MagicMock(side_effect=["a", "b"]))
     args = SimpleNamespace(
         lockdown_passphrase_file=None,
         lockdown_passphrase=None,
@@ -666,9 +662,7 @@ def test_factory_reset_probe_logs_close_failures(
             self.connect = MagicMock()
 
     serial = SerialDouble()
-    monkeypatch.setattr(
-        serial_interface, "SerialInterface", SerialDouble
-    )
+    monkeypatch.setattr(serial_interface, "SerialInterface", SerialDouble)
     ticks = iter([0.0, 0.1])
     _install_clock(monkeypatch, monotonic=lambda: next(ticks, 0.1))
 
@@ -731,9 +725,7 @@ def test_factory_reset_legacy_acknowledgment_rejects_nak(
     monkeypatch.setattr(pub, "subscribe", MagicMock())
     monkeypatch.setattr(pub, "unsubscribe", MagicMock())
 
-    with pytest.raises(
-        MeshInterface.MeshInterfaceError, match="rejected"
-    ):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="rejected"):
         device_actions._send_local_factory_reset_and_wait(
             node, full=False, cli_print=MagicMock(), timeout=1.0
         )

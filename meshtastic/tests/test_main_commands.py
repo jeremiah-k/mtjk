@@ -17,11 +17,11 @@ import pytest
 import yaml
 
 import meshtastic.__main__ as main_module
-from meshtastic.mesh_interface import MeshInterface
 from meshtastic import mt_config
 from meshtastic.__main__ import (
     main,
 )
+from meshtastic.mesh_interface import MeshInterface
 
 # from ..ble_interface import BLEInterface
 from ..node import Node
@@ -1156,9 +1156,7 @@ def test_get_pref_preserves_request_failure(
     )
     lines: list[str] = []
 
-    with pytest.raises(
-        MeshInterface.MeshInterfaceError, match="NOT_AUTHORIZED"
-    ):
+    with pytest.raises(MeshInterface.MeshInterfaceError, match="NOT_AUTHORIZED"):
         main_module.getPref(pref_node, "lora.region", cli_print=lines.append)
 
     assert lines == []
