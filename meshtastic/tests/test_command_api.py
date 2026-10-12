@@ -260,6 +260,7 @@ def test_command_scope_records_only_valid_routing_rejections(
         (["--get-ui-config"], "get_ui_config_request"),
         (["--request-connection-status"], "get_device_connection_status_request"),
         (["--reboot"], "command"),
+        (["--reset-nodedb"], "command"),
         (["--get-canned-message"], "command"),
         (["--get-ringtone"], "command"),
     ],
@@ -991,3 +992,39 @@ def test_command_scope_callback_after_cleanup_is_noop() -> None:
 
     assert invoke({"decoded": {}}) is None
     callback.assert_not_called()
+
+
+@pytest.mark.parametrize("reply", ["NONE", "NOT_AUTHORIZED", None])
+def test_remote_reset_nodedb_owns_ack_before_finalization(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch, reply: str | None
+) -> None:
+    """A reset returns its own remote outcome without a second shared wait."""
+    shared_wait = Mock(side_effect=AssertionError("unexpected shared ACK wait"))
+    monkeypatch.setattr(client, "waitForAckNak", shared_wait)
+
+    def send(envelope: mesh_pb2.ToRadio) -> None:
+        if reply is not None:
+            deliver(
+                client,
+                {
+                    "from": 2,
+                    "decoded": {
+                        "requestId": envelope.packet.id,
+                        "routing": {"errorReason": reply},
+                    },
+                },
+            )
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(
+        client, ["--dest", "!00000002", "--reset-nodedb"], timeout=0.05
+    )
+    assert result.succeeded is (reply == "NONE")
+    if reply == "NOT_AUTHORIZED":
+        assert isinstance(result.error, RequestRejectedError)
+        assert result.error.reason == reply
+    elif reply is None:
+        assert result.error is not None
+    shared_wait.assert_not_called()
+    assert client.responseHandlers == {}
+    cast(Mock, client.close).assert_not_called()
