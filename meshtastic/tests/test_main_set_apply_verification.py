@@ -750,3 +750,35 @@ def test_local_set_connected_reload_failure_skips_reconnect_fallback(
     assert "did not return the power configuration section(s) within" in captured
     assert "reconnect" not in captured
     assert "Verified:" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_partial_set_reload_preserves_a_known_failed_write(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unavailable LoRa section cannot hide a returned power mismatch."""
+    local = localonly_pb2.LocalConfig()
+    local.power.ls_secs = 100
+    local.lora.region = config_pb2.Config.LoRaConfig.EU_433
+    iface, node, _calls = _build_local_set_interface(
+        device_local=local, drop_writes=True
+    )
+    send = node._send_admin.side_effect
+
+    def respond(message: Any, **kwargs: Any) -> None:
+        if message.get_config_request != admin_pb2.AdminMessage.LORA_CONFIG:
+            send(message, **kwargs)
+
+    node._send_admin = MagicMock(side_effect=respond)
+    with pytest.raises(SystemExit) as error:
+        _run_main_set(
+            ["--set", "power.ls_secs", "222", "--set", "lora.region", "US"],
+            iface,
+            monkeypatch,
+        )
+    assert error.value.code != 0
+    captured = "".join(capsys.readouterr())
+    assert "power.ls_secs" in captured
+    assert "different values" in captured
+    assert "sent, not verified" not in captured

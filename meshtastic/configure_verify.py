@@ -134,7 +134,8 @@ class LocalApplyVerification:
     mismatched_fields : tuple[str, ...]
         Dotted paths of requested fields whose fresh device value differs
         from the requested value (field names in snake_case, section prefix
-        as requested). Populated only for ``MISMATCH``.
+        as requested). Retained for ``RELOAD_FAILED`` when another section
+        is unavailable, so callers can distinguish unknown from rejected.
     missing_sections : tuple[str, ...]
         Requested section names that were not freshly repopulated within
         the operation budget. Populated only for ``RELOAD_FAILED``.
@@ -1190,8 +1191,8 @@ def verify_local_config_apply(
         is present but at least one requested value differs; ``RELOAD_FAILED``
         with ``missing_sections`` when any requested section could not be
         freshly repopulated within the budget (or was no longer present at
-        comparison time; this status takes precedence;
-        ``mismatched_fields`` is then empty).
+        comparison time; this status takes precedence while
+        ``mismatched_fields`` retains mismatches from available sections).
 
     Raises
     ------
@@ -1333,17 +1334,16 @@ def verify_local_config_apply(
             wait_for_section=_wait_bounded,
             sent_request_ids=sent_request_ids,
         )
-        if not_repopulated:
-            return LocalApplyVerification(
-                LocalApplyStatus.RELOAD_FAILED, (), tuple(not_repopulated)
-            )
-
         mismatches: list[str] = []
-        absent_sections: list[str] = []
+        absent_sections: list[str] = list(not_repopulated)
         if config_fields:
             mismatches.extend(
                 _collect_section_mismatches(
-                    config_fields,
+                    {
+                        section: values
+                        for section, values in config_fields.items()
+                        if section not in not_repopulated
+                    },
                     readback_roots["localConfig"],
                     absent_sections=absent_sections,
                 )
@@ -1351,7 +1351,11 @@ def verify_local_config_apply(
         if module_config_fields:
             mismatches.extend(
                 _collect_section_mismatches(
-                    module_config_fields,
+                    {
+                        section: values
+                        for section, values in module_config_fields.items()
+                        if section not in not_repopulated
+                    },
                     readback_roots["moduleConfig"],
                     absent_sections=absent_sections,
                 )
@@ -1359,7 +1363,7 @@ def verify_local_config_apply(
         if absent_sections:
             return LocalApplyVerification(
                 LocalApplyStatus.RELOAD_FAILED,
-                (),
+                tuple(dict.fromkeys(mismatches)),
                 tuple(dict.fromkeys(absent_sections)),
             )
         if mismatches:

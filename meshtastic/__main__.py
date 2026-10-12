@@ -1515,7 +1515,10 @@ def _verify_local_set_apply(
     if verification.status == LocalApplyStatus.VERIFIED:
         _cli_print("Verified: fresh device state matches the requested --set values.")
         return
-    if verification.status == LocalApplyStatus.MISMATCH:
+    if (
+        verification.status == LocalApplyStatus.MISMATCH
+        or verification.mismatched_fields
+    ):
         fields_text = ", ".join(verification.mismatched_fields)
         _terminate_cli(
             _cli_exit,
