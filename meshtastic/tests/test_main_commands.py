@@ -743,7 +743,7 @@ def test_main_set_valid(
             main()
             out, err = capsys.readouterr()
             assert re.search(r"Connected to radio", out, re.MULTILINE)
-            assert re.search(r"Set network.wifi_ssid to <redacted>", out, re.MULTILINE)
+            assert re.search(r"Set network.wifi_ssid to foo", out, re.MULTILINE)
             assert err == ""
             mo.assert_called()
 
@@ -928,11 +928,11 @@ def test_get_pref_redacts_security_private_key(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_get_pref_redacts_security_section_values(
+def test_get_pref_redacts_private_key_but_shows_public_key(
     pref_node: SimpleNamespace,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Whole-field getPref() reads should redact secret values in each printed field."""
+    """Whole-field getPref() reads redact the private key, not the public key."""
     private_key = bytes(range(32))
     public_key = bytes(range(32, 64))
     pref_node.localConfig.security.private_key = private_key
@@ -941,9 +941,11 @@ def test_get_pref_redacts_security_section_values(
     assert main_module.getPref(pref_node, "security") is True
     out, err = capsys.readouterr()
     assert "security.private_key: <redacted>" in out
-    assert "security.public_key: <redacted>" in out
+    assert (
+        f"security.public_key: base64:{base64.b64encode(public_key).decode('utf-8')}"
+        in out
+    )
     assert base64.b64encode(private_key).decode("utf-8") not in out
-    assert base64.b64encode(public_key).decode("utf-8") not in out
     assert err == ""
 
 
@@ -963,6 +965,22 @@ def test_get_pref_shows_admin_key_values(
         f"security.admin_key: ['base64:{base64.b64encode(admin_key).decode('utf-8')}']"
     )
     assert expected in out
+    assert "<redacted>" not in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_shows_wifi_ssid(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The wifi SSID names the network (its PSK stays redacted); show it."""
+    pref_node.localConfig.network.wifi_ssid = "home-mesh"
+
+    assert main_module.getPref(pref_node, "network.wifi_ssid") is True
+    out, err = capsys.readouterr()
+    assert "network.wifi_ssid: home-mesh" in out
     assert "<redacted>" not in out
     assert err == ""
 
@@ -1010,7 +1028,6 @@ def test_get_pref_allow_secrets_shows_security_section_keys(
     assert base64.b64encode(private_key).decode("utf-8") in out
     assert base64.b64encode(public_key).decode("utf-8") in out
     assert base64.b64encode(private_key).decode("utf-8") not in caplog.text
-    assert base64.b64encode(public_key).decode("utf-8") not in caplog.text
     assert err == ""
 
 
@@ -1368,7 +1385,7 @@ def test_main_set_valid_camel_case(
             main()
             out, err = capsys.readouterr()
             assert re.search(r"Connected to radio", out, re.MULTILINE)
-            assert re.search(r"Set network.wifiSsid to <redacted>", out, re.MULTILINE)
+            assert re.search(r"Set network.wifiSsid to foo", out, re.MULTILINE)
             assert err == ""
             mo.assert_called()
 
