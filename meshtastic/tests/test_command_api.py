@@ -367,8 +367,14 @@ def test_remote_get_keeps_waiting_for_peer_after_unrelated_feedback(
 def test_remote_get_does_not_replace_timeout_with_a_late_routing_nak(
     client: MeshInterface, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Keep parser/setup time outside this request-lifecycle assertion. Advance
+    # the operation clock only once the real request has reached the transport.
+    now = time.monotonic()
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+
     def send(envelope: mesh_pb2.ToRadio) -> None:
-        time.sleep(0.03)
+        nonlocal now
+        now += 0.03
         packet = mesh_pb2.MeshPacket(to=1)
         setattr(packet, "from", 1)
         packet.decoded.portnum = portnums_pb2.PortNum.ROUTING_APP
