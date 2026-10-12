@@ -240,6 +240,15 @@ correlated admin-response wait, which is generous for a healthy local getter
 round trip while still failing a dead device within seconds.
 """
 
+PREFS_WITH_AVAILABILITY_CHANGES: frozenset[str] = frozenset({"lora.region"})
+"""Preference paths whose writes can interrupt local configuration readback.
+
+LoRa changes apply live on firmware 2.8; first-time region provisioning can
+also generate a PKI identity. Firmware 2.6/2.7 may reboot for radio changes.
+Attempt bounded verification first: an available response remains evidence
+of either a successful apply or a rejected/clamped request.
+"""
+
 SETURL_STABILITY_TIMEOUT_SECONDS = (
     cli_configure_actions.SETURL_STABILITY_TIMEOUT_SECONDS
 )
@@ -1453,6 +1462,34 @@ def _freeze_set_expected_values(
     return config_fields, module_config_fields
 
 
+def _availability_changing_set_fields(
+    config_fields: dict[str, dict[str, Any]],
+    module_config_fields: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    """Return requested ``--set`` leaf paths that can interrupt node availability.
+
+    Parameters
+    ----------
+    config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalConfig`` values by section.
+    module_config_fields : dict[str, dict[str, Any]]
+        Frozen requested ``LocalModuleConfig`` values by section.
+
+    Returns
+    -------
+    tuple[str, ...]
+        Dotted snake_case leaf paths (in request order, deduplicated) whose
+        write is in :data:`PREFS_WITH_AVAILABILITY_CHANGES`.
+    """
+    paths: list[str] = []
+    for fields in (config_fields, module_config_fields):
+        for section, values in fields.items():
+            paths.extend(_flatten_leaf_paths(section, values))
+    return tuple(
+        path for path in dict.fromkeys(paths) if path in PREFS_WITH_AVAILABILITY_CHANGES
+    )
+
+
 def _verify_local_set_apply(
     interface: MeshInterface,
     node: Any,
@@ -1494,6 +1531,10 @@ def _verify_local_set_apply(
     link (a commit-triggered reboot), one bounded reconnect-based
     re-verification using the existing ``--configure`` machinery gets the
     final word; a connection-alive reload failure still fails immediately.
+
+    Region writes retain bounded readback and mismatch detection. If no fresh
+    response arrives, report an unverified send because provisioning or a
+    radio restart can interrupt availability.
     """
     try:
         if not config_fields and not module_config_fields:
@@ -1526,6 +1567,16 @@ def _verify_local_set_apply(
             f"values for: {fields_text}. The device did not apply the requested "
             "value(s).",
         )
+    availability_fields = _availability_changing_set_fields(
+        config_fields, module_config_fields
+    )
+    if verification.status == LocalApplyStatus.RELOAD_FAILED and availability_fields:
+        _cli_print(
+            "Region write may interrupt node availability ("
+            f"{', '.join(availability_fields)}); read-back verification was "
+            "unavailable. Requested changes were sent, not verified."
+        )
+        return
     if verification.status == LocalApplyStatus.RELOAD_FAILED and (
         _link_dropped(interface)
         or _config_generation_changed(interface, pre_write_config_id)

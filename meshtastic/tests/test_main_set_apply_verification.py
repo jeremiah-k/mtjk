@@ -782,3 +782,95 @@ def test_partial_set_reload_preserves_a_known_failed_write(
     assert "power.ls_secs" in captured
     assert "different values" in captured
     assert "sent, not verified" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_local_set_region_unavailable_readback_reports_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--set lora.region reports an unverified send, not an assumed reboot.
+
+    The radio can reinitialize without a reboot, or older firmware may reboot.
+    In either case the silent device does not prove that the write took effect.
+    """
+    device_local = localonly_pb2.LocalConfig()
+    device_local.lora.hop_limit = 3
+    iface, _node, calls = _build_local_set_interface(
+        device_local=device_local, deliver_on_request=False
+    )
+
+    _run_main_set(["--set", "lora.region", "US"], iface, monkeypatch)
+
+    out, err = capsys.readouterr()
+    captured = out + err
+    assert calls == ["writeConfig:lora", "readback:lora"]
+    assert "Region write may interrupt node availability (lora.region)" in captured
+    assert "read-back verification was unavailable" in captured
+    assert "sent, not verified" in captured
+    assert "Verified:" not in captured
+    assert "could not be verified" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_local_set_region_in_batch_reports_unavailable_readback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A batch containing lora.region reports unavailable readback honestly.
+
+    The region write may make the node unavailable before the batch can be read
+    back, so unavailable readback does not claim verified success.
+    """
+    device_local = localonly_pb2.LocalConfig()
+    device_local.lora.hop_limit = 3
+    device_local.power.ls_secs = 100
+    iface, _node, calls = _build_local_set_interface(
+        device_local=device_local, deliver_on_request=False
+    )
+
+    _run_main_set(
+        ["--set", "lora.region", "US", "--set", "power.ls_secs", "222"],
+        iface,
+        monkeypatch,
+    )
+
+    out, err = capsys.readouterr()
+    captured = out + err
+    writes = [call for call in calls if call.startswith("writeConfig:")]
+    assert sorted(writes) == ["writeConfig:lora", "writeConfig:power"]
+    assert calls.count("beginSettingsTransaction") == 1
+    assert calls.count("commitSettingsTransaction") == 1
+    assert any(call.startswith("readback:") for call in calls)
+    assert "Region write may interrupt node availability (lora.region)" in captured
+    assert "read-back verification was unavailable" in captured
+    assert "sent, not verified" in captured
+    assert "Verified:" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.parametrize("drop_writes", [False, True])
+def test_local_set_region_checks_responsive_device(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    drop_writes: bool,
+) -> None:
+    """Live LoRa applies verify, and a refused region never reports success."""
+    device_local = localonly_pb2.LocalConfig()
+    device_local.lora.region = config_pb2.Config.LoRaConfig.EU_433
+    iface, _node, calls = _build_local_set_interface(
+        device_local=device_local, drop_writes=drop_writes
+    )
+    if drop_writes:
+        with pytest.raises(SystemExit) as error:
+            _run_main_set(["--set", "lora.region", "US"], iface, monkeypatch)
+        assert error.value.code != 0
+    else:
+        _run_main_set(["--set", "lora.region", "US"], iface, monkeypatch)
+    captured = "".join(capsys.readouterr())
+    assert "readback:lora" in calls
+    assert ("Verified:" in captured) is not drop_writes
+    assert "sent, not verified" not in captured
