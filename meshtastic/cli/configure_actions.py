@@ -1465,6 +1465,32 @@ def _channel_url_region_changes_device(
     return bool(channel_set.lora_config.region != local_config.lora.region)
 
 
+def _channel_url_region_write_strands_transaction(
+    target_node: Any, channel_url: str | None
+) -> bool:
+    """Return whether a region-writing URL could strand a settings transaction.
+
+    Applying a channel URL whose LoRa region differs from the device's
+    cached region can reconfigure the radio and interrupt the transport
+    before a following settings transaction is sent, leaving the document
+    partially applied. When the URL carries a LoRa section but the cached
+    region cannot be established, safety cannot be proven either, so the
+    combination is treated as unsafe (fail closed). A URL whose region
+    equals the cached device region does not reconfigure the radio and may
+    safely precede the transaction.
+    """
+    if not channel_url:
+        return False
+    channel_set = _parse_channel_set(channel_url)
+    if channel_set is None or not channel_set.HasField("lora_config"):
+        return False
+    local_config = getattr(target_node, "localConfig", None)
+    has_field = getattr(local_config, "HasField", None)
+    if local_config is None or not callable(has_field) or not has_field("lora"):
+        return True
+    return bool(channel_set.lora_config.region != local_config.lora.region)
+
+
 def _report_configure_result(
     hooks: ConfigureHooks,
     interface: MeshInterface,
@@ -1699,6 +1725,22 @@ def _execute_configure_plan(
         Named lifecycle flags describing requests sent by the execution.
     """
     prepared = plan.prepared
+    if plan.has_config_writes and _channel_url_region_write_strands_transaction(
+        target_node, prepared.direct_values.channel_url
+    ):
+        # setURL may reconfigure the active radio and interrupt the transport
+        # before the remaining settings transaction is sent, leaving the URL
+        # written and the other requested values unsent; moving the
+        # transaction earlier is not safe either, because setURL can
+        # overwrite fields the transaction just committed. Refuse the mixed
+        # document before any write instead of partially applying it.
+        _terminate_cli(
+            hooks.cli_exit,
+            "ERROR: channel_url changes the LoRa region and cannot be combined "
+            "with config/module_config writes. Apply the other settings in a "
+            "separate --configure invocation before the region-changing URL; "
+            "no configuration writes were sent.",
+        )
     if plan.has_config_writes:
         ensure_config_sections_loaded(
             target_node,

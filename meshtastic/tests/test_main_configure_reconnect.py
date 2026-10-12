@@ -471,6 +471,8 @@ def test_main_configure_region_unavailable_reload_reports_unverified(
     out, err = capsys.readouterr()
     captured = out + err
     target_node.writeConfig.assert_any_call("lora")
+    target_node.writeConfig.assert_any_call("power")
+    target_node.commitSettingsTransaction.assert_called_once()
     reconnect_spy.assert_called_once()
     assert "Region write may interrupt node availability (lora.region)" in captured
     assert "post-commit verification was unavailable" in captured
@@ -480,15 +482,22 @@ def test_main_configure_region_unavailable_reload_reports_unverified(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_main_configure_channel_url_region_change_reports_unavailable_reload(
+@pytest.mark.parametrize("device_lora_loaded", [True, False])
+def test_main_configure_channel_url_region_change_refuses_mixed_writes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    device_lora_loaded: bool,
 ) -> None:
-    """A channel URL region change reports unavailable verification.
+    """Refuse a region-changing URL combined with transactional writes.
 
-    The URL's embedded LoRa config writes the region. If the post-commit
-    reload is unavailable, the report names the URL as its source.
+    A URL whose LoRa region differs from the device region can make the
+    node unavailable before the remaining settings transaction is sent,
+    leaving the document partially applied. When the cached LoRa section
+    is not loaded the region cannot be compared, so the mixed document is
+    refused fail-closed as well. A URL whose region matches the cached
+    device region stays allowed and keeps following the verification
+    protocol.
     """
     channel_set = apponly_pb2.ChannelSet()
     channel_set.settings.add()
@@ -496,7 +505,7 @@ def test_main_configure_channel_url_region_change_reports_unavailable_reload(
     encoded = base64.urlsafe_b64encode(channel_set.SerializeToString()).decode()
     region_url = f"https://meshtastic.org/e/#{encoded.rstrip('=')}"
 
-    config_path = tmp_path / "url_region_reboot.yaml"
+    config_path = tmp_path / "url_region_mixed.yaml"
     config_path.write_text(
         yaml.safe_dump(
             {"channel_url": region_url, "config": {"power": {"ls_secs": 222}}}
@@ -505,15 +514,12 @@ def test_main_configure_channel_url_region_change_reports_unavailable_reload(
     )
     target_local = localonly_pb2.LocalConfig()
     target_local.power.ls_secs = 100
-    target_local.lora.region = config_pb2.Config.LoRaConfig.RegionCode.Value("EU_433")
+    if device_lora_loaded:
+        target_local.lora.region = config_pb2.Config.LoRaConfig.RegionCode.Value(
+            "EU_433"
+        )
     iface, target_node = _build_configure_interface(
         target_local, localonly_pb2.LocalModuleConfig()
-    )
-    iface.isConnected = threading.Event()
-    iface.isConnected.set()
-    iface.waitForConfig = MagicMock()
-    monkeypatch.setattr(
-        "meshtastic.__main__._post_seturl_stability_check", lambda *a, **k: True
     )
     reconnect_spy = MagicMock(
         return_value=cli_configure_actions.ConfigureReconnectResult.CONFIG_RELOAD_FAILED
@@ -523,19 +529,18 @@ def test_main_configure_channel_url_region_change_reports_unavailable_reload(
     )
     _patch_fast_monotonic(monkeypatch)
 
-    _run_main_configure_file(config_path, iface, monkeypatch)
+    with pytest.raises(SystemExit) as exit_info:
+        _run_main_configure_file(config_path, iface, monkeypatch)
 
     out, err = capsys.readouterr()
-    captured = out + err
-    target_node.setURL.assert_called_once()
-    reconnect_spy.assert_called_once()
-    assert (
-        "Region write may interrupt node availability (lora.region (channel URL))"
-        in captured
-    )
-    assert "post-commit verification was unavailable" in captured
-    assert "sent, not verified" in captured
-    assert "all requested settings were verified" not in captured
+    assert exit_info.value.code == 1
+    assert "cannot be combined" in out + err
+    assert "no configuration writes were sent" in out + err
+    target_node.setURL.assert_not_called()
+    target_node.beginSettingsTransaction.assert_not_called()
+    target_node.writeConfig.assert_not_called()
+    target_node.commitSettingsTransaction.assert_not_called()
+    reconnect_spy.assert_not_called()
 
 
 @pytest.mark.unit
