@@ -504,7 +504,7 @@ def test_silent_device_bounded_by_single_budget_not_per_section(
 def test_reload_failed_takes_precedence_over_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One silent section wins over another section's value mismatch."""
+    """Missing-section status retains an available section's mismatch."""
     node = _ScriptedLocalNode()
     lora = config_pb2.Config.LoRaConfig()
     lora.hop_limit = 3
@@ -520,7 +520,7 @@ def test_reload_failed_takes_precedence_over_mismatch(
 
     assert result.status is LocalApplyStatus.RELOAD_FAILED
     assert result.missing_sections == ("telemetry",)
-    assert result.mismatched_fields == ()
+    assert result.mismatched_fields == ("lora.hop_limit",)
 
 
 @pytest.mark.unit
@@ -925,3 +925,23 @@ def test_wrong_top_level_response_variant_is_not_readback_evidence(
     assert result.missing_sections == ("lora",)
     assert node.moduleConfig.HasField("mqtt")
     assert not node.localConfig.HasField("lora")
+
+
+@pytest.mark.unit
+def test_partial_reload_retains_observed_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A silent section cannot erase evidence that another write was rejected."""
+    node = _ScriptedLocalNode()
+    _install_clock(monkeypatch, node)
+    power = config_pb2.Config.PowerConfig(ls_secs=100)
+    node.queue_reply("localConfig", "power", power)
+    result = verify_local_config_apply(
+        node,
+        config_fields={"power": {"ls_secs": 222}, "lora": {"region": "US"}},
+        module_config_fields=None,
+        timeout_sec=0.2,
+    )
+    assert result.status is LocalApplyStatus.RELOAD_FAILED
+    assert result.missing_sections == ("lora",)
+    assert result.mismatched_fields == ("power.ls_secs",)
