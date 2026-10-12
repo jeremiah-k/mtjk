@@ -986,6 +986,10 @@ def _handle_node_database_actions(context: CliContext) -> None:
     if args.reset_nodedb:
         outcome.close_now = True
         outcome.wait_for_ack_nak = True
+        # A local reset disables Bluetooth before rebooting. Remote resets
+        # already await their request-scoped ACK/NAK inside resetNodeDb(),
+        # so neither path should enter a second shared finalization wait.
+        outcome.skip_ack_wait = True
         interface.getNode(args.dest, False, **kwargs).resetNodeDb()
 
 

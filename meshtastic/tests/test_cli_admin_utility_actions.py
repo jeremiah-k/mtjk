@@ -195,6 +195,23 @@ def test_toggle_muted_node_uses_nodedb_action_path() -> None:
 
 
 @pytest.mark.unit
+def test_reset_nodedb_skips_final_ack_wait() -> None:
+    """A node DB reset reboots the device, so no final ACK wait is enrolled.
+
+    Firmware schedules the reboot while handling the reset request (and drops
+    Bluetooth immediately), so the shared finalize-time ACK wait would time
+    out instead of observing the reset's completion.
+    """
+    interface = _interface()
+    context = _context(interface, {"reset_nodedb": True})
+    device_actions._handle_node_database_actions(context)
+    interface.getNode.return_value.resetNodeDb.assert_called_once_with()
+    assert context.outcome.close_now is True
+    assert context.outcome.wait_for_ack_nak is True
+    assert context.outcome.skip_ack_wait is True
+
+
+@pytest.mark.unit
 def test_connection_status_prints_each_transport() -> None:
     """The status printer reports present transports with their details."""
     status = connection_status_pb2.DeviceConnectionStatus()
