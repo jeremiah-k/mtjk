@@ -56,11 +56,8 @@ analysis = [
   "parse>=1.20.2,<2.0.0",
   "platformdirs>=4.2.2,<5.0.0",
   "plotly>=7.0.0,<8.0.0",
-  # pandas 2.x publishes no cp315 wheels; Python 3.15+ resolves to pandas 3.
-  "pandas>=2.2.2,<3.0.0; python_version < '3.15'",
-  "pandas>=3.0.6,<4.0.0; python_version >= '3.15'",
-  "pandas-stubs>=2.3.3.260113,<3.0.0.0; python_version < '3.15'",
-  "pandas-stubs>=3.0.0.260204,<4.0.0.0; python_version >= '3.15'",
+  "pandas>=3.0.6,<4.0.0",
+  "pandas-stubs>=3.0.5.260914,<3.1.0.0",
   "pyarrow>=26.0.0,<26.1.0",
 ]
 
