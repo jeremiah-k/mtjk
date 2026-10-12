@@ -51,14 +51,16 @@ PREFERENCE_FIELD_ALIASES: dict[str, str] = {
     "display.use12h_clock": "display.use_12h_clock",
     "display.use12_h_clock": "display.use_12h_clock",
 }
-# security.admin_key entries are public keys authorized for admin access;
-# they stay unredacted so the configured list can be inspected and managed.
+# Redaction covers credentials and cryptographic secrets only; identifiers and
+# public material stay visible so configured values can be inspected and
+# managed: security.admin_key entries are public keys authorized for admin
+# access, security.public_key is broadcast in every node info, and
+# network.wifi_ssid names the network (its PSK stays redacted).
 SECRET_PREF_FIELDS: frozenset[str] = frozenset(
     {
         "psk",
         "channel_psk",
         "private_key",
-        "public_key",
         "session_passkey",
         "secret",
         "api_key",
@@ -67,7 +69,6 @@ SECRET_PREF_FIELDS: frozenset[str] = frozenset(
 )
 SECRET_PREF_PATHS: frozenset[str] = frozenset(
     {
-        "network.wifi_ssid",
         "network.wifi_psk",
         "mqtt.username",
         "mqtt.password",

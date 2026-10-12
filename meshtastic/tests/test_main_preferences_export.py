@@ -315,9 +315,10 @@ def test_set_pref_redacts_network_mqtt_and_pin_credentials(
     assert setPref(module_config, "mqtt.password", "private-password") is True
 
     out, err = capsys.readouterr()
-    assert out.count("<redacted>") == 5
+    # The SSID names the network and stays visible; the credentials redact.
+    assert out.count("<redacted>") == 4
+    assert "Set network.wifi_ssid to Private LAN" in out
     for secret in (
-        "Private LAN",
         "distinctive-passphrase",
         "123456",
         "private-user",
