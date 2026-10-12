@@ -240,14 +240,8 @@ correlated admin-response wait, which is generous for a healthy local getter
 round trip while still failing a dead device within seconds.
 """
 
-PREFS_WITH_AVAILABILITY_CHANGES: frozenset[str] = frozenset({"lora.region"})
-"""Preference paths whose writes can interrupt local configuration readback.
+PREFS_WITH_AVAILABILITY_CHANGES = cli_configure_actions.PREFS_WITH_AVAILABILITY_CHANGES
 
-LoRa changes apply live on firmware 2.8; first-time region provisioning can
-also generate a PKI identity. Firmware 2.6/2.7 may reboot for radio changes.
-Attempt bounded verification first: an available response remains evidence
-of either a successful apply or a rejected/clamped request.
-"""
 
 SETURL_STABILITY_TIMEOUT_SECONDS = (
     cli_configure_actions.SETURL_STABILITY_TIMEOUT_SECONDS

@@ -48,6 +48,7 @@ from meshtastic.configure_verify import (
 from meshtastic.configure_verify import _device_lora_config as _device_lora_config
 from meshtastic.configure_verify import _flatten_leaf_paths as _flatten_leaf_paths
 from meshtastic.configure_verify import _is_repeated_field as _is_repeated_field
+from meshtastic.configure_verify import _parse_channel_set as _parse_channel_set
 from meshtastic.configure_verify import (
     _refresh_no_disconnect_verify_state as _refresh_no_disconnect_verify_state,
 )
@@ -78,6 +79,16 @@ SETURL_STABILITY_MAX_ATTEMPTS = 3
 SETURL_STABILITY_WINDOW_SECONDS = 1.5
 SETURL_RECONNECT_WAIT_SECONDS = 10.0
 SETURL_STABILITY_POLL_SECONDS = 0.1
+
+PREFS_WITH_AVAILABILITY_CHANGES: frozenset[str] = frozenset({"lora.region"})
+"""Preference writes that can interrupt local readback without proving an apply.
+
+LoRa settings apply live on firmware 2.8; first-time region provisioning can
+also generate a PKI identity. Firmware 2.6/2.7 may reboot for radio changes.
+Bounded verification and mismatch detection remain required when the device
+responds. Only unavailable readback can be reported as an unverified send.
+"""
+
 CONFIGURE_DIRECT_SETTINGS_HEADER = (
     "Applying direct configuration values "
     "(channel URL updates may trigger reconnect/reboot)..."
@@ -1405,6 +1416,55 @@ def _apply_settings_transaction(
     return applied_config_sections, applied_module_config_sections
 
 
+def _snake_leaf_paths(prefix: str, values: dict[str, Any]) -> list[str]:
+    """Flatten one applied section mapping into dotted snake_case leaf paths."""
+    paths: list[str] = []
+    for key, value in values.items():
+        dotted = f"{prefix}.{meshtastic.util.camel_to_snake(key)}"
+        if isinstance(value, dict) and value:
+            paths.extend(_snake_leaf_paths(dotted, value))
+        else:
+            paths.append(dotted)
+    return paths
+
+
+def _availability_changing_configure_fields(
+    config_sections: dict[str, dict[str, Any]],
+    module_config_sections: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    """Return applied configure leaf paths whose write makes the node unavailable."""
+    paths: list[str] = []
+    for sections in (config_sections, module_config_sections):
+        for section, values in sections.items():
+            paths.extend(
+                _snake_leaf_paths(meshtastic.util.camel_to_snake(section), values)
+            )
+    return tuple(
+        path for path in dict.fromkeys(paths) if path in PREFS_WITH_AVAILABILITY_CHANGES
+    )
+
+
+def _channel_url_region_changes_device(
+    target_node: Any, channel_url: str | None
+) -> bool:
+    """Return whether applying the channel URL would change the LoRa region.
+
+    Evaluated against the target's cached LoRa section before any URL write.
+    When the section is not loaded the comparison is skipped (no region
+    change is claimed), so verification is never skipped on a guess.
+    """
+    if not channel_url:
+        return False
+    channel_set = _parse_channel_set(channel_url)
+    if channel_set is None or not channel_set.HasField("lora_config"):
+        return False
+    local_config = getattr(target_node, "localConfig", None)
+    has_field = getattr(local_config, "HasField", None)
+    if local_config is None or not callable(has_field) or not has_field("lora"):
+        return False
+    return bool(channel_set.lora_config.region != local_config.lora.region)
+
+
 def _report_configure_result(
     hooks: ConfigureHooks,
     interface: MeshInterface,
@@ -1416,13 +1476,14 @@ def _report_configure_result(
     channel_url: str | None,
     config_sections: dict[str, dict[str, Any]],
     module_config_sections: dict[str, dict[str, Any]],
+    channel_url_region_change: bool = False,
 ) -> None:
     """Report post-apply reconnect/verification status for one configure run.
 
-    A local transaction whose reconnect/verification outcome is not
-    ``VERIFIED`` terminates the CLI with a nonzero exit so a dropped or
-    unverifiable apply is never reported as success. Remote targets and
-    non-transaction paths keep their historical informational output.
+    A local transaction verifies fresh values and fails on mismatches. If a
+    region write interrupts reconnect or reload, report an unverified send.
+    Other verification failures terminate with a nonzero exit. Remote targets
+    and non-transaction paths keep their historical informational output.
 
     Parameters
     ----------
@@ -1444,6 +1505,10 @@ def _report_configure_result(
         LocalConfig fields that actually applied to the device.
     module_config_sections : dict[str, dict[str, Any]]
         LocalModuleConfig fields that actually applied to the device.
+    channel_url_region_change : bool
+        Whether the configured channel URL embeds a LoRa region different
+        from the device's cached region before applying it, including UNSET.
+        The write can interrupt availability but does not waive comparison.
     """
     if settings_transaction_started:
         if is_local_target:
@@ -1457,6 +1522,24 @@ def _report_configure_result(
             )
             if reconnect_result == ConfigureReconnectResult.VERIFIED:
                 hooks.cli_print(_configure_reconnect_message(reconnect_result))
+                return
+            availability_fields = _availability_changing_configure_fields(
+                config_sections, module_config_sections
+            )
+            if channel_url_region_change and "lora.region" not in availability_fields:
+                availability_fields = (
+                    *availability_fields,
+                    "lora.region (channel URL)",
+                )
+            if availability_fields and reconnect_result in (
+                ConfigureReconnectResult.RECONNECT_FAILED,
+                ConfigureReconnectResult.CONFIG_RELOAD_FAILED,
+            ):
+                hooks.cli_print(
+                    "Region write may interrupt node availability ("
+                    f"{', '.join(availability_fields)}); post-commit verification was "
+                    "unavailable. Requested changes were sent, not verified."
+                )
                 return
             _terminate_cli(
                 hooks.cli_exit,
@@ -1629,6 +1712,10 @@ def _execute_configure_plan(
             module_config_sections=prepared.module_config_sections,
         )
 
+    # Snapshot the URL region comparison before any URL write mutates the cache.
+    channel_url_region_change = _channel_url_region_changes_device(
+        target_node, prepared.direct_values.channel_url
+    )
     seturl_executed = _apply_direct_configuration(hooks, target_node, prepared)
     if seturl_executed and plan.has_config_writes and plan.is_local_target:
         if not hooks.post_seturl_stability_check(
@@ -1663,6 +1750,7 @@ def _execute_configure_plan(
         channel_url=prepared.direct_values.channel_url,
         config_sections=applied_config_sections,
         module_config_sections=applied_module_config_sections,
+        channel_url_region_change=channel_url_region_change,
     )
     return _ConfigureCommandResult(
         settings_transaction_started=plan.has_config_writes,
