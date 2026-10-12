@@ -935,19 +935,35 @@ def test_get_pref_redacts_security_section_values(
     """Whole-field getPref() reads should redact secret values in each printed field."""
     private_key = bytes(range(32))
     public_key = bytes(range(32, 64))
-    admin_key = bytes(range(64, 96))
     pref_node.localConfig.security.private_key = private_key
     pref_node.localConfig.security.public_key = public_key
-    pref_node.localConfig.security.admin_key.append(admin_key)
 
     assert main_module.getPref(pref_node, "security") is True
     out, err = capsys.readouterr()
     assert "security.private_key: <redacted>" in out
     assert "security.public_key: <redacted>" in out
-    assert re.search(r"security\.admin_key:.*<redacted>", out)
     assert base64.b64encode(private_key).decode("utf-8") not in out
     assert base64.b64encode(public_key).decode("utf-8") not in out
-    assert base64.b64encode(admin_key).decode("utf-8") not in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_shows_admin_key_values(
+    pref_node: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Admin keys are public keys; getPref() shows them so the list can be managed."""
+    admin_key = bytes(range(64, 96))
+    pref_node.localConfig.security.admin_key.append(admin_key)
+
+    assert main_module.getPref(pref_node, "security.admin_key") is True
+    out, err = capsys.readouterr()
+    expected = (
+        f"security.admin_key: ['base64:{base64.b64encode(admin_key).decode('utf-8')}']"
+    )
+    assert expected in out
+    assert "<redacted>" not in out
     assert err == ""
 
 

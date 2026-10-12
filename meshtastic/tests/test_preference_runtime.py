@@ -451,7 +451,7 @@ def test_invalid_element_diagnostic_redacts_secret_and_avoids_nested_repr() -> N
     assert preference_runtime._parse_repeated_message_value(
         repeated_message,
         '["element"]',
-        field_path="security.admin_key",
+        field_path="security.private_key",
         cli_print=reporter,
     ) == (False, [])
     secret_message = reported[-1]
@@ -467,6 +467,21 @@ def test_invalid_element_diagnostic_redacts_secret_and_avoids_nested_repr() -> N
     plain_message = reported[-1]
     assert '["element"] for mesh_beacon.broadcast_targets' in plain_message
     assert "'[\"element\"]'" not in plain_message
+
+
+@pytest.mark.unit
+def test_admin_key_add_echo_shows_value_not_redaction(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Admin keys are public keys; the list-add echo shows the added value."""
+    config = localonly_pb2.LocalConfig()
+
+    assert setPref(config, "security.admin_key", "base64:QUJDREVG") is True
+    assert list(config.security.admin_key) == [b"ABCDEF"]
+
+    out, err = capsys.readouterr()
+    assert "Adding 'base64:QUJDREVG' to the admin_key list" in out
+    assert "<redacted>" not in out + err
 
 
 @pytest.mark.unit

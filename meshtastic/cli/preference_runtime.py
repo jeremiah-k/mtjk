@@ -51,13 +51,14 @@ PREFERENCE_FIELD_ALIASES: dict[str, str] = {
     "display.use12h_clock": "display.use_12h_clock",
     "display.use12_h_clock": "display.use_12h_clock",
 }
+# security.admin_key entries are public keys authorized for admin access;
+# they stay unredacted so the configured list can be inspected and managed.
 SECRET_PREF_FIELDS: frozenset[str] = frozenset(
     {
         "psk",
         "channel_psk",
         "private_key",
         "public_key",
-        "admin_key",
         "session_passkey",
         "secret",
         "api_key",
