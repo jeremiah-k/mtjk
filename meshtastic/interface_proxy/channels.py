@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
@@ -13,6 +13,10 @@ from meshtastic.interfaces.ble.constants import (
     FROMRADIO_UUID,
     TORADIO_UUID,
 )
+from meshtastic.stream_interface import DEVICE_WAKE_DELAY, START2, WAKE_BYTE_COUNT
+
+if TYPE_CHECKING:
+    from bleak import BleakClient
 
 _LOG = logging.getLogger(__name__)
 _READ_CHUNK = 4096
@@ -63,10 +67,23 @@ class StreamChannel:
             await asyncio.wait_for(self.writer.wait_closed(), 2)
 
 
+class _SerialPort(Protocol):
+    """Operations needed from an opened pyserial port."""
+
+    def read(self, size: int) -> bytes:
+        """Read up to ``size`` bytes or return empty bytes on timeout."""
+
+    def write(self, data: bytes) -> int:
+        """Return the number of bytes written."""
+
+    def close(self) -> None:
+        """Release the underlying file handle."""
+
+
 class SerialChannel:
     """PySerial link with bounded blocking reads and explicit teardown."""
 
-    def __init__(self, serial_port: object) -> None:
+    def __init__(self, serial_port: _SerialPort) -> None:
         self._port = serial_port
         self._decoder = FrameDecoder()
         self._pending: list[bytes] = []
@@ -74,15 +91,15 @@ class SerialChannel:
     @classmethod
     async def open(cls, path: str) -> SerialChannel:
         """Open one serial port at 115200 baud without initializing MeshInterface."""
-        import serial  # optional at import time for pure framing tests
+        import serial  # type: ignore[import-untyped]  # pylint: disable=import-outside-toplevel  # optional at import time for pure framing tests
 
         port = await asyncio.to_thread(
             serial.Serial, path, 115200, timeout=0.2, write_timeout=5
         )
         try:
             # Match SerialInterface's wake/resynchronization behavior.
-            await asyncio.to_thread(port.write, b"\x00" * 32)
-            await asyncio.sleep(0.1)
+            await asyncio.to_thread(port.write, bytes([START2] * WAKE_BYTE_COUNT))
+            await asyncio.sleep(DEVICE_WAKE_DELAY)
         except BaseException:
             await asyncio.to_thread(port.close)
             raise
@@ -117,7 +134,7 @@ class BLECentralChannel:
     fallback handles firmware/backend notification loss. GATT payloads are raw.
     """
 
-    def __init__(self, client: object) -> None:
+    def __init__(self, client: BleakClient) -> None:
         self._client = client
         self._wake = asyncio.Event()
         self._pending: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
@@ -127,7 +144,7 @@ class BLECentralChannel:
     @classmethod
     async def open(cls, address: str) -> BLECentralChannel:
         """Connect to a BLE radio using the existing Bleak dependency."""
-        from bleak import BleakClient
+        from bleak import BleakClient  # pylint: disable=import-outside-toplevel
 
         link: BLECentralChannel | None = None
 
@@ -168,8 +185,6 @@ class BLECentralChannel:
                         break
                     validate_payload(payload)
                     self._pending.put_nowait(payload)
-        except asyncio.CancelledError:
-            raise
         except Exception:
             _LOG.exception("BLE upstream read stopped")
         finally:
@@ -228,13 +243,3 @@ def parse_tcp_endpoint(text: str) -> tuple[str, int]:
     if not 1 <= port <= 65535:
         raise ValueError("TCP port must be in range 1..65535")
     return host, port
-
-
-def reject_public_bind(host: str, *, allow_public: bool) -> None:
-    """Default to loopback; wide exposure allows unauthenticated radio control."""
-    if allow_public:
-        return
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        raise ValueError(
-            "non-loopback proxy listen requires --interface-proxy-allow-public"
-        )

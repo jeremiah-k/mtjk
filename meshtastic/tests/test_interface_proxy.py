@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from meshtastic.cli import bootstrap, parser as cli_parser
+from meshtastic.cli import bootstrap
+from meshtastic.cli import parser as cli_parser
 from meshtastic.interface_proxy.channels import BLECentralChannel
 from meshtastic.interface_proxy.endpoints import (
     BLEMailbox,
@@ -39,12 +40,18 @@ def test_fragmented_and_multiple_frames() -> None:
 
 
 def test_invalid_frame_lengths_rejected() -> None:
-    """Untrusted TCP clients cannot submit zero or oversized envelopes."""
+    """Invalid envelope lengths resynchronize instead of failing the stream."""
     for length in (0, 513, 65535):
-        with pytest.raises(ProxyProtocolError):
-            FrameDecoder().feed(b"\x94\xc3" + length.to_bytes(2, "big"))
+        assert FrameDecoder().feed(b"\x94\xc3" + length.to_bytes(2, "big")) == []
     with pytest.raises(ProxyProtocolError):
         frame(b"x" * 513)
+
+
+def test_decoder_resynchronizes_after_invalid_length() -> None:
+    """Stream noise before a valid header cannot poison the next frame."""
+    assert FrameDecoder().feed(b"\x94\xc3\xff\xff" + frame(b"\x08\x01")) == [
+        b"\x08\x01"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -92,86 +99,97 @@ class MemoryChannel:
         pass
 
 
-@pytest.mark.asyncio
-async def test_bridge_keeps_message_bytes_in_both_directions() -> None:
+def test_bridge_keeps_message_bytes_in_both_directions() -> None:
     """Admin/MQTT/raw protobuf bytes pass through without reserialization."""
-    upstream, downstream = MemoryChannel(), MemoryChannel()
-    bridge_task = asyncio.create_task(bridge(upstream, downstream))
-    radio_packet, app_packet = b"\x08\x90\x01", b"\x12\xff\x00\x99"
-    await upstream.incoming.put(radio_packet)
-    await downstream.incoming.put(app_packet)
-    assert await asyncio.wait_for(downstream.outgoing.get(), 1) == radio_packet
-    assert await asyncio.wait_for(upstream.outgoing.get(), 1) == app_packet
-    await downstream.incoming.put(None)
-    await asyncio.wait_for(bridge_task, 1)
+
+    async def scenario() -> None:
+        upstream, downstream = MemoryChannel(), MemoryChannel()
+        bridge_task = asyncio.create_task(bridge(upstream, downstream))
+        radio_packet, app_packet = b"\x08\x90\x01", b"\x12\xff\x00\x99"
+        await upstream.incoming.put(radio_packet)
+        await downstream.incoming.put(app_packet)
+        assert await asyncio.wait_for(downstream.outgoing.get(), 1) == radio_packet
+        assert await asyncio.wait_for(upstream.outgoing.get(), 1) == app_packet
+        await downstream.incoming.put(None)
+        await asyncio.wait_for(bridge_task, 1)
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_tcp_proxy_forwards_and_rejects_second_client(
+def test_tcp_proxy_forwards_and_rejects_second_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only one TCP client can claim a given radio session."""
-    from meshtastic.interface_proxy import server as module
 
-    upstream = MemoryChannel()
-    claimed = asyncio.Event()
+    async def scenario() -> None:
+        from meshtastic.interface_proxy import server as module
 
-    async def fake_connect(_uri: str) -> MemoryChannel:
-        claimed.set()
-        return upstream
+        upstream = MemoryChannel()
+        claimed = asyncio.Event()
 
-    monkeypatch.setattr(module, "connect_upstream", fake_connect)
-    # Acquire an ephemeral port without requiring a hard-coded test port.
-    import socket
+        async def fake_connect(_uri: str) -> MemoryChannel:
+            claimed.set()
+            return upstream
 
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = int(probe.getsockname()[1])
-    task = asyncio.create_task(
-        run_tcp_proxy(ProxyOptions("serial:/ignored", f"tcp:127.0.0.1:{port}"))
-    )
-    try:
-        for _ in range(50):
-            try:
-                reader, writer = await asyncio.open_connection("127.0.0.1", port)
-                break
-            except ConnectionRefusedError:
-                await asyncio.sleep(0.01)
-        else:
-            pytest.fail("TCP listener did not start")
-        await asyncio.wait_for(claimed.wait(), 1)
-        second_reader, second_writer = await asyncio.open_connection("127.0.0.1", port)
-        assert await asyncio.wait_for(second_reader.read(1), 1) == b""
-        second_writer.close()
-        await second_writer.wait_closed()
-        writer.write(frame(b"\x08\x03"))
-        await writer.drain()
-        assert await asyncio.wait_for(upstream.outgoing.get(), 1) == b"\x08\x03"
-        await upstream.incoming.put(b"\x10\x06")
-        result = await asyncio.wait_for(reader.readexactly(6), 1)
-        assert result == frame(b"\x10\x06")
-        writer.close()
-        await writer.wait_closed()
-    finally:
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        monkeypatch.setattr(module, "connect_upstream", fake_connect)
+        # Acquire an ephemeral port without requiring a hard-coded test port.
+        import socket
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+        task = asyncio.create_task(
+            run_tcp_proxy(ProxyOptions("serial:/ignored", f"tcp:127.0.0.1:{port}"))
+        )
+        try:
+            for _ in range(50):
+                try:
+                    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                    break
+                except ConnectionRefusedError:
+                    await asyncio.sleep(0.01)
+            else:
+                pytest.fail("TCP listener did not start")
+            await asyncio.wait_for(claimed.wait(), 1)
+            second_reader, second_writer = await asyncio.open_connection(
+                "127.0.0.1", port
+            )
+            assert await asyncio.wait_for(second_reader.read(1), 1) == b""
+            second_writer.close()
+            await second_writer.wait_closed()
+            writer.write(frame(b"\x08\x03"))
+            await writer.drain()
+            assert await asyncio.wait_for(upstream.outgoing.get(), 1) == b"\x08\x03"
+            await upstream.incoming.put(b"\x10\x06")
+            result = await asyncio.wait_for(reader.readexactly(6), 1)
+            assert result == frame(b"\x10\x06")
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
 @pytest.mark.skipif(os.name != "posix", reason="PTY is available on POSIX")
-async def test_pty_virtual_serial_roundtrip() -> None:
+def test_pty_virtual_serial_roundtrip() -> None:
     """A real PTY slave exposes the same framed Meshtastic wire protocol."""
-    channel = PTYChannel.create()
-    slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-    try:
-        os.write(slave, frame(b"\x08\x07"))
-        assert await asyncio.wait_for(channel.recv(), 1) == b"\x08\x07"
-        await channel.send(b"\x10\x08")
-        assert os.read(slave, 256) == frame(b"\x10\x08")
-    finally:
-        os.close(slave)
-        await channel.close()
+
+    async def scenario() -> None:
+        channel = PTYChannel.create()
+        slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            os.write(slave, frame(b"\x08\x07"))
+            assert await asyncio.wait_for(channel.recv(), 1) == b"\x08\x07"
+            await channel.send(b"\x10\x08")
+            assert os.read(slave, 256) == frame(b"\x10\x08")
+        finally:
+            os.close(slave)
+            await channel.close()
+
+    asyncio.run(scenario())
 
 
 def test_ble_mailbox_preserves_fifo_and_tracks_fromnum() -> None:
@@ -188,18 +206,20 @@ def test_ble_mailbox_preserves_fifo_and_tracks_fromnum() -> None:
     assert mailbox.current_counter() == b"\x02\x00\x00\x00"
 
 
-@pytest.mark.asyncio
-async def test_ble_upstream_drains_buffer_after_disconnect() -> None:
+def test_ble_upstream_drains_buffer_after_disconnect() -> None:
     """Do not drop already-received packets when the BLE central disconnects."""
-    channel = BLECentralChannel(MagicMock())
-    channel._pending.put_nowait(b"\x08\x07")
-    channel._disconnected.set()
-    assert await channel.recv() == b"\x08\x07"
-    assert await channel.recv() is None
+
+    async def scenario() -> None:
+        channel = BLECentralChannel(MagicMock())
+        channel._pending.put_nowait(b"\x08\x07")
+        channel._disconnected.set()
+        assert await channel.recv() == b"\x08\x07"
+        assert await channel.recv() is None
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_ble_peripheral_gatt_shape_and_mailbox(
+def test_ble_peripheral_gatt_shape_and_mailbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fake Bless enforces Meshtastic UUID, raw read/write, FROMNUM contract."""
@@ -212,83 +232,87 @@ async def test_ble_peripheral_gatt_shape_and_mailbox(
         readable = 16
         writeable = 32
 
-    class Char:
-        def __init__(self, uuid: str) -> None:
-            self.uuid = uuid
-            self.value = bytearray()
+    async def scenario() -> None:
+        class Char:
+            def __init__(self, uuid: str) -> None:
+                self.uuid = uuid
+                self.value = bytearray()
 
-    class FakeServer:
-        def __init__(self, *, name: str) -> None:
-            self.name = name
-            self.characteristics: dict[str, Char] = {}
-            self.service: str | None = None
-            self.notified: list[tuple[str, str]] = []
-            self.stopped = False
+        class FakeServer:
+            def __init__(self, *, name: str) -> None:
+                self.name = name
+                self.characteristics: dict[str, Char] = {}
+                self.service: str | None = None
+                self.notified: list[tuple[str, str]] = []
+                self.stopped = False
 
-        async def add_new_service(self, uuid: str) -> None:
-            self.service = uuid
+            async def add_new_service(self, uuid: str) -> None:
+                self.service = uuid
 
-        async def add_new_characteristic(
-            self, _service: str, uuid: str, *_args: Any
-        ) -> None:
-            self.characteristics[uuid] = Char(uuid)
+            async def add_new_characteristic(
+                self, _service: str, uuid: str, *_args: Any
+            ) -> None:
+                self.characteristics[uuid] = Char(uuid)
 
-        def get_characteristic(self, uuid: str) -> Char:
-            return self.characteristics[uuid]
+            def get_characteristic(self, uuid: str) -> Char:
+                return self.characteristics[uuid]
 
-        def update_value(self, service: str, uuid: str) -> None:
-            self.notified.append((service, uuid))
+            def update_value(self, service: str, uuid: str) -> None:
+                self.notified.append((service, uuid))
 
-        async def start(self) -> None:
-            pass
+            async def start(self) -> None:
+                pass
 
-        async def stop(self) -> None:
-            self.stopped = True
+            async def stop(self) -> None:
+                self.stopped = True
 
-        async def is_connected(self) -> bool:
-            return True
+            async def is_connected(self) -> bool:
+                return True
 
-    monkeypatch.setitem(
-        sys.modules,
-        "bless",
-        types.SimpleNamespace(
-            BlessServer=FakeServer,
-            GATTAttributePermissions=Flags,
-            GATTCharacteristicProperties=Flags,
-        ),
-    )
-    proxy = await BLEPeripheralChannel.start("Meshtastic_0123")
-    try:
-        server = proxy.server
-        assert server.service == SERVICE_UUID
-        assert set(server.characteristics) == {
-            TORADIO_UUID,
-            FROMRADIO_UUID,
-            FROMNUM_UUID,
-        }
-        server.write_request_func(
-            server.get_characteristic(TORADIO_UUID), b"\x08\x07", object()
+        monkeypatch.setitem(
+            sys.modules,
+            "bless",
+            types.SimpleNamespace(
+                BlessServer=FakeServer,
+                GATTAttributePermissions=Flags,
+                GATTCharacteristicProperties=Flags,
+            ),
         )
-        await asyncio.sleep(0)
-        assert await asyncio.wait_for(proxy.recv(), 1) == b"\x08\x07"
-        await proxy.send(b"\x10\x04")
-        assert (
-            server.read_request_func(
-                server.get_characteristic(FROMRADIO_UUID), object()
+        proxy = await BLEPeripheralChannel.start("Meshtastic_0123")
+        try:
+            server = proxy.server
+            assert server.service == SERVICE_UUID
+            assert set(server.characteristics) == {
+                TORADIO_UUID,
+                FROMRADIO_UUID,
+                FROMNUM_UUID,
+            }
+            server.write_request_func(
+                server.get_characteristic(TORADIO_UUID), b"\x08\x07", object()
             )
-            == b"\x10\x04"
-        )
-        assert (
-            server.read_request_func(server.get_characteristic(FROMRADIO_UUID)) == b""
-        )
-        assert (
-            server.read_request_func(server.get_characteristic(FROMNUM_UUID))
-            == b"\x01\x00\x00\x00"
-        )
-        assert server.notified == [(SERVICE_UUID, FROMNUM_UUID)]
-    finally:
-        await proxy.close()
-        assert server.stopped
+            await asyncio.sleep(0)
+            assert await asyncio.wait_for(proxy.recv(), 1) == b"\x08\x07"
+            await proxy.send(b"\x10\x04")
+            assert (
+                server.read_request_func(
+                    server.get_characteristic(FROMRADIO_UUID), object()
+                )
+                == b"\x10\x04"
+            )
+            assert (
+                server.read_request_func(server.get_characteristic(FROMRADIO_UUID))
+                == b""
+            )
+            assert (
+                server.read_request_func(server.get_characteristic(FROMNUM_UUID))
+                == b"\x01\x00\x00\x00"
+            )
+            assert server.notified == [(SERVICE_UUID, FROMNUM_UUID)]
+        finally:
+            await proxy.close()
+            assert server.stopped
+
+    asyncio.run(scenario())
 
 
 def test_proxy_cli_routes_without_normal_connection(
@@ -321,37 +345,40 @@ def test_proxy_cli_routes_without_normal_connection(
     assert launched[0].upstream == "serial:/dev/ttyUSB0"
 
 
-@pytest.mark.asyncio
-async def test_serial_upstream_wakes_device_and_closes(
+def test_serial_upstream_wakes_device_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raw serial bridging sends the normal 32-byte startup wake sequence."""
-    import serial
 
-    class FakeSerial:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            self.writes: list[bytes] = []
-            self.closed = False
+    async def scenario() -> None:
+        import serial  # type: ignore[import-untyped]
 
-        def write(self, data: bytes) -> int:
-            self.writes.append(data)
-            return len(data)
+        class FakeSerial:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                self.writes: list[bytes] = []
+                self.closed = False
 
-        def close(self) -> None:
-            self.closed = True
+            def write(self, data: bytes) -> int:
+                self.writes.append(data)
+                return len(data)
 
-    fake = FakeSerial()
-    monkeypatch.setattr(serial, "Serial", lambda *_args, **_kwargs: fake)
-    from meshtastic.interface_proxy.channels import SerialChannel
+            def close(self) -> None:
+                self.closed = True
 
-    channel = await SerialChannel.open("/dev/fake")
-    try:
-        assert fake.writes == [b"\x00" * 32]
-        await channel.send(b"\x08\x01")
-        assert fake.writes[-1] == frame(b"\x08\x01")
-    finally:
-        await channel.close()
-    assert fake.closed
+        fake = FakeSerial()
+        monkeypatch.setattr(serial, "Serial", lambda *_args, **_kwargs: fake)
+        from meshtastic.interface_proxy.channels import SerialChannel
+
+        channel = await SerialChannel.open("/dev/fake")
+        try:
+            assert fake.writes == [bytes([0xC3]) * 32]
+            await channel.send(b"\x08\x01")
+            assert fake.writes[-1] == frame(b"\x08\x01")
+        finally:
+            await channel.close()
+        assert fake.closed
+
+    asyncio.run(scenario())
 
 
 def test_proxy_cli_refuses_mixed_normal_actions(
@@ -371,6 +398,36 @@ def test_proxy_cli_refuses_mixed_normal_actions(
             "pty",
             "--sendtext",
             "dangerous-mixed-command",
+        ],
+    )
+    from meshtastic.interface_proxy import server
+
+    launch = MagicMock()
+    monkeypatch.setattr(server, "serve", launch)
+    with pytest.raises(SystemExit) as exit_info:
+        bootstrap.run_common(
+            args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
+        )
+    assert exit_info.value.code == 2
+    launch.assert_not_called()
+
+
+def test_proxy_cli_refuses_dry_run_combination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dry-run preview must never start a real blocking proxy listener."""
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    args = cli_parser.parse_cli_args(
+        parser,
+        version="test",
+        argv=[
+            "--interface-proxy-in",
+            "serial:/dev/ttyUSB0",
+            "--interface-proxy-out",
+            "pty",
+            "--dry-run",
         ],
     )
     from meshtastic.interface_proxy import server
@@ -410,6 +467,21 @@ def test_proxy_cli_rejects_ordinary_transport_selector() -> None:
             "--ble",
             "any",
         ],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        bootstrap.run_common(args, parser, MagicMock())
+    assert exc_info.value.code == 2
+
+
+def test_proxy_cli_rejects_bare_proxy_only_options() -> None:
+    """Proxy-only options without both --interface-proxy-in/out are refused."""
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    args = cli_parser.parse_cli_args(
+        parser,
+        version="test",
+        argv=["--interface-proxy-allow-public", "--info"],
     )
     with pytest.raises(SystemExit) as exc_info:
         bootstrap.run_common(args, parser, MagicMock())

@@ -30,7 +30,8 @@ class FrameDecoder:
     """Incrementally decode stream frames, resynchronizing after stray bytes.
 
     The decoder never constructs a payload larger than the firmware stream cap.
-    An invalid length raises immediately instead of buffering attacker input.
+    An invalid length drops the false header and rescans the remaining bytes, so
+    stream noise or a hostile client cannot terminate a live session.
     """
 
     def __init__(self) -> None:
@@ -51,7 +52,8 @@ class FrameDecoder:
                 return packets
             size = int.from_bytes(self._buffer[2:4], "big")
             if not 1 <= size <= MAX_TO_FROM_RADIO_SIZE:
-                raise ProxyProtocolError(f"invalid frame length: {size}")
+                del self._buffer[:2]
+                continue
             if len(self._buffer) < 4 + size:
                 return packets
             packets.append(bytes(self._buffer[4 : 4 + size]))

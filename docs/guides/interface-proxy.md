@@ -7,7 +7,7 @@ instance, rewriting protobufs, or running a separate MQTT broker.
 
 ## Transport layout
 
-```
+```text
 Meshtastic device <--USB serial / TCP / BLE central--> mtjk proxy
                                                      |
                                                      +-- TCP listener
@@ -63,11 +63,11 @@ does not parse, de-duplicate, decrypt, transform, or synthesize `ToRadio` and
 The BLE service (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`) and its three
 transport characteristics are the same as in the Android client and mtjk:
 
-| Characteristic | UUID | Operation |
-| --- | --- | --- |
-| `TORADIO` | `f75c76d2-129e-4dad-a1dd-7866124401e7` | unframed write |
-| `FROMRADIO` | `2c55e69e-4993-11ed-b878-0242ac120002` | unframed consuming read |
-| `FROMNUM` | `ed9da18c-a800-4f66-a670-aa7547e34453` | 4-byte little-endian counter/notify |
+| Characteristic | UUID                                   | Operation                           |
+| -------------- | -------------------------------------- | ----------------------------------- |
+| `TORADIO`      | `f75c76d2-129e-4dad-a1dd-7866124401e7` | unframed write                      |
+| `FROMRADIO`    | `2c55e69e-4993-11ed-b878-0242ac120002` | unframed consuming read             |
+| `FROMNUM`      | `ed9da18c-a800-4f66-a670-aa7547e34453` | 4-byte little-endian counter/notify |
 
 The gateway deliberately does **not** advertise the OTA or logging services of
 a physical radio. It is not a drop-in OTA transport or a replacement for the
@@ -81,13 +81,13 @@ feature does **not** turn mtjk into an MQTT gateway by itself.
 
 ## Platform and security matrix
 
-| Endpoint | Linux | macOS | Windows | Notes |
-| --- | --- | --- | --- | --- |
-| TCP listener / upstream TCP | Yes | Yes | Yes | Works on any host with sockets |
-| Physical USB serial upstream | Yes | Yes | Yes | Existing pyserial dependency; OS port permissions apply |
-| BLE upstream (central) | Expected | Expected | Expected | Existing Bleak dependency; pair/device access depends on OS |
-| Virtual serial output `pty` | Yes | Yes | No | `/dev/pts/N` or `/dev/ttysNNN`; no physical USB CDC device |
-| BLE GATT peripheral output | Experimental | Experimental | Experimental | Optional Bless 0.3.0; hardware/OS privileges may block advertising |
+| Endpoint                     | Linux        | macOS        | Windows      | Notes                                                              |
+| ---------------------------- | ------------ | ------------ | ------------ | ------------------------------------------------------------------ |
+| TCP listener / upstream TCP  | Yes          | Yes          | Yes          | Works on any host with sockets                                     |
+| Physical USB serial upstream | Yes          | Yes          | Yes          | Existing pyserial dependency; OS port permissions apply            |
+| BLE upstream (central)       | Expected     | Expected     | Expected     | Existing Bleak dependency; pair/device access depends on OS        |
+| Virtual serial output `pty`  | Yes          | Yes          | No           | `/dev/pts/N` or `/dev/ttysNNN`; no physical USB CDC device         |
+| BLE GATT peripheral output   | Experimental | Experimental | Experimental | Optional Bless 0.3.0; hardware/OS privileges may block advertising |
 
 **Security:** no user authentication, authorization, or packet filtering is
 provided. A connected client may operate/configure the upstream device with

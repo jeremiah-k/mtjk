@@ -125,7 +125,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
             active_client = False
             await downstream.close()
 
-    server = await asyncio.start_server(handle, host, port, reuse_address=True)
+    server = await asyncio.start_server(handle, host, port)
     async with server:
         _LOG.warning("Unauthenticated Meshtastic proxy listening on %s:%d", host, port)
         await server.serve_forever()
@@ -133,6 +133,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
 
 async def run_single_endpoint(options: ProxyOptions) -> None:
     """Expose a radio as POSIX PTY or an experimental BLE peripheral."""
+    downstream: PTYChannel | BLEPeripheralChannel
     if options.downstream == "pty":
         downstream = PTYChannel.create()
         print(f"Meshtastic proxy PTY: {downstream.path}", flush=True)
