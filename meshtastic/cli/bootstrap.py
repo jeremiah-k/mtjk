@@ -615,7 +615,10 @@ def run_common(
         except ValueError as exc:
             parser.error(str(exc))
         _configure_logging(args)
-        asyncio.run(serve(options))
+        try:
+            asyncio.run(serve(options))
+        except KeyboardInterrupt:
+            logger.info("Exiting interface proxy due to keyboard interrupt")
         return
     if (
         getattr(args, "interface_proxy_allow_public", False)
