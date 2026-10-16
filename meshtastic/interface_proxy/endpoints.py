@@ -41,7 +41,7 @@ class PTYChannel:
         """Allocate a new raw PTY pair and return the master endpoint."""
         if os.name != "posix":
             raise OSError("virtual serial PTY is supported only on POSIX hosts")
-        import tty
+        import tty  # pylint: disable=import-outside-toplevel
 
         master, slave = os.openpty()
         try:
@@ -58,7 +58,12 @@ class PTYChannel:
     async def _wait_readable(self) -> None:
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[None] = loop.create_future()
-        loop.add_reader(self.fd, lambda: ready.done() or ready.set_result(None))
+
+        def _on_readable() -> None:
+            if not ready.done():
+                ready.set_result(None)
+
+        loop.add_reader(self.fd, _on_readable)
         try:
             await ready
         finally:
@@ -169,11 +174,11 @@ class BLEPeripheralChannel:
     async def start(cls, name: str) -> BLEPeripheralChannel:
         """Start advertising the standard Meshtastic GATT service."""
         try:
-            from bless import (
-                BlessServer,
-                GATTAttributePermissions as Perm,
-                GATTCharacteristicProperties as Prop,
-            )
+            # Deferred optional dependency; the disable covers the import block below.
+            # pylint: disable=import-outside-toplevel
+            from bless import BlessServer  # type: ignore[import-not-found]
+            from bless import GATTAttributePermissions as Perm
+            from bless import GATTCharacteristicProperties as Prop
         except ImportError as exc:
             raise RuntimeError(
                 "BLE advertising requires optional 'bless' (install: pip install bless)"
@@ -217,7 +222,7 @@ class BLEPeripheralChannel:
                 TORADIO_UUID,
                 Prop.write | Prop.write_without_response,
                 bytearray(),
-                Perm.writeable,
+                Perm.writeable,  # bless 0.3.0 spells this permission "writeable"
             )
             await server.add_new_characteristic(
                 SERVICE_UUID,

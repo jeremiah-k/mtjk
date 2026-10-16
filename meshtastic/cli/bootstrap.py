@@ -573,6 +573,8 @@ def run_common(
                 "interface proxy requires both --interface-proxy-in "
                 "and --interface-proxy-out"
             )
+        if getattr(args, "dry_run", False):
+            parser.error("interface proxy cannot be combined with --dry-run")
         if args.quiet and (args.debug or args.listen or args.debuglib):
             parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
         prohibited = [
@@ -597,7 +599,10 @@ def run_common(
         name = getattr(args, "interface_proxy_ble_name", "Meshtastic_0000")
         if proxy_out != "ble-peripheral" and name != "Meshtastic_0000":
             parser.error("--interface-proxy-ble-name requires ble-peripheral output")
-        from meshtastic.interface_proxy.server import ProxyOptions, serve
+        from meshtastic.interface_proxy.server import (  # pylint: disable=import-outside-toplevel
+            ProxyOptions,
+            serve,
+        )
 
         options = ProxyOptions(
             upstream=proxy_in,
