@@ -76,7 +76,8 @@ class PTYChannel:
             try:
                 chunk = os.read(self.fd, 4096)
             except BlockingIOError:
-                self._slave_seen = True
+                # EAGAIN alone is not proof a slave is open (macOS can return
+                # EAGAIN before any client connects); only received data is.
                 await self._wait_readable()
                 continue
             except OSError as exc:
@@ -147,6 +148,11 @@ class BLEMailbox:
             self._counter = (self._counter + 1) % (1 << 32)
             return self._counter.to_bytes(4, "little")
 
+    def full(self) -> bool:
+        """Report whether another push would overflow the queue."""
+        with self._lock:
+            return len(self._pending) >= self._capacity
+
     def pop(self) -> bytes:
         """Consume exactly one GATT FROMRADIO read, or return empty bytes."""
         with self._lock:
@@ -177,6 +183,7 @@ class BLEPeripheralChannel:
         self._loop = asyncio.get_running_loop()
         self._fatal: BaseException | None = None
         self._session_started = False
+        self._outgoing_space = asyncio.Event()
 
     @classmethod
     async def start(cls, name: str) -> BLEPeripheralChannel:
@@ -198,7 +205,10 @@ class BLEPeripheralChannel:
         def on_read(characteristic: Any, *_args: Any, **_kwargs: Any) -> bytearray:
             uuid = str(characteristic.uuid).lower()
             if uuid == FROMRADIO_UUID:
-                return bytearray(channel.mailbox.pop())
+                payload = channel.mailbox.pop()
+                if payload:
+                    channel._signal_outgoing_space()
+                return bytearray(payload)
             if uuid == FROMNUM_UUID:
                 return bytearray(channel.mailbox.current_counter())
             return bytearray()
@@ -280,8 +290,20 @@ class BLEPeripheralChannel:
                 return None
             await asyncio.sleep(0.05)
 
+    def _signal_outgoing_space(self) -> None:
+        """Wake a send blocked on mailbox space after a GATT read consumed one."""
+        with contextlib.suppress(RuntimeError):  # event loop already closed
+            self._loop.call_soon_threadsafe(self._outgoing_space.set)
+
     async def send(self, payload: bytes) -> None:
-        """Queue a FROMRADIO read and notify FROMNUM subscribers."""
+        """Wait for queue space, queue one FROMRADIO read, and notify FROMNUM.
+
+        A slow central reading FROMRADIO is backpressure on the radio link,
+        not a terminal overflow: pause instead of aborting the session.
+        """
+        while self.mailbox.full():
+            await self._outgoing_space.wait()
+            self._outgoing_space.clear()
         counter = self.mailbox.push(payload)
         characteristic = self.server.get_characteristic(FROMNUM_UUID)
         characteristic.value = bytearray(counter)

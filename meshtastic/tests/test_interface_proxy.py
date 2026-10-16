@@ -909,3 +909,38 @@ def test_ble_peripheral_fatal_error_stops_queued_writes() -> None:
         assert isinstance(exc.value.__cause__, OverflowError)
 
     asyncio.run(scenario())
+
+
+def test_ble_peripheral_send_waits_for_queue_space() -> None:
+    """A slow central reading FROMRADIO applies backpressure, not overflow."""
+
+    async def scenario() -> None:
+        channel = BLEPeripheralChannel(MagicMock(), BLEMailbox(capacity=1))
+        await channel.send(b"\x08\x01")
+        assert channel.mailbox.full()
+        blocked = asyncio.create_task(channel.send(b"\x10\x02"))
+        await asyncio.sleep(0)
+        assert not blocked.done()
+        assert channel.mailbox.pop() == b"\x08\x01"
+        channel._signal_outgoing_space()
+        await asyncio.wait_for(blocked, 1)
+        assert channel.mailbox.pop() == b"\x10\x02"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(os.name != "posix", reason="PTY is available on POSIX")
+def test_pty_silent_client_close_does_not_end_session() -> None:
+    """A client that never writes is not treated as an observed, closed client."""
+
+    async def scenario() -> None:
+        channel = PTYChannel.create()
+        try:
+            slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+            os.close(slave)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(channel.recv(), 0.05)
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())

@@ -61,7 +61,9 @@ does not parse, de-duplicate, decrypt, transform, or synthesize `ToRadio` and
 `FromRadio` messages.
 
 The BLE-central reader buffers up to 256 raw `FROMRADIO` packets, applying GATT
-read backpressure when downstream delivery is slow. Backpressure bounds host
+read backpressure when downstream delivery is slow. The experimental BLE
+peripheral applies the same backpressure on its 128-packet `FROMRADIO` queue
+when the connected central reads slowly. Backpressure bounds host
 memory, but cannot guarantee that a radio's own smaller queue will never fill;
 slow downstream clients should be avoided. Already-buffered messages drain
 before disconnect is reported. A failed or over-limit GATT read is surfaced as
@@ -120,7 +122,7 @@ by Bless.
 reader at the kernel API level. Use exactly one serial client, and open the
 slave while the proxy is running. The PTY path is ephemeral, disappears when
 the proxy exits, and is not a Windows COM-device emulation. Once a PTY client
-has been observed, closing the slave ends the session and closes the upstream;
+has sent data, closing the slave ends the session and closes the upstream;
 restart the proxy for a new client. Windows virtual COM
 endpoints require an external signed virtual-port driver and are not included.
 
