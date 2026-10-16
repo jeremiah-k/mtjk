@@ -669,3 +669,61 @@ def test_proxy_ctrl_c_exits_without_traceback(
             args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
         )
     assert "Exiting interface proxy due to keyboard interrupt" in caplog.text
+
+
+def test_ble_central_disconnect_callback_during_connect_is_thread_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backend callback during connect wakes the new link, even off-loop."""
+    from threading import Thread
+    from unittest.mock import AsyncMock
+
+    async def scenario() -> None:
+        class FakeBleakClient:
+            def __init__(self, _address: str, *, disconnected_callback: Any) -> None:
+                self._callback = disconnected_callback
+                self.read_gatt_char = AsyncMock(return_value=b"")
+                self.disconnect = AsyncMock()
+
+            async def connect(self, *, timeout: float) -> None:
+                assert timeout == 20
+                worker = Thread(target=lambda: self._callback(self))
+                worker.start()
+                worker.join()
+
+            async def start_notify(self, _uuid: str, _callback: Any) -> None:
+                pass
+
+        monkeypatch.setitem(
+            sys.modules, "bleak", types.SimpleNamespace(BleakClient=FakeBleakClient)
+        )
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            assert await asyncio.wait_for(channel.recv(), 1) is None
+            assert channel._disconnected.is_set()
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_failed_connect_disconnects_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed connection attempt must not leak an opened backend link."""
+    from unittest.mock import AsyncMock
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.connect = AsyncMock(side_effect=OSError("failed to pair"))
+        client.disconnect = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+        )
+        with pytest.raises(OSError, match="failed to pair"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        client.disconnect.assert_awaited_once()
+
+    asyncio.run(scenario())
