@@ -101,6 +101,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
     """Expose one radio to one TCP client at a time; reject other clients."""
     host, port = parse_tcp_endpoint(options.downstream[4:])
     active_client = False
+    sessions: set[asyncio.Task[None]] = set()
 
     async def handle(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -125,10 +126,28 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
             active_client = False
             await downstream.close()
 
-    server = await asyncio.start_server(handle, host, port)
-    async with server:
+    def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        # Register synchronously: shutdown may run before the coroutine starts.
+        task = asyncio.create_task(handle(reader, writer))
+        sessions.add(task)
+        task.add_done_callback(sessions.discard)
+        # A task cancelled before its first step never enters handle's finally.
+        task.add_done_callback(lambda _task: writer.close())
+
+    server = await asyncio.start_server(accept, host, port)
+    try:
         _LOG.warning("Unauthenticated Meshtastic proxy listening on %s:%d", host, port)
-        await server.serve_forever()
+        # start_server already accepts connections. Own cancellation here:
+        # older asyncio serve_forever implementations wait for clients to
+        # close before returning, preventing us from cancelling their sessions.
+        await asyncio.Future[None]()
+    finally:
+        server.close()
+        remaining = tuple(sessions)
+        for task in remaining:
+            task.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)
+        await server.wait_closed()
 
 
 async def run_single_endpoint(options: ProxyOptions) -> None:
