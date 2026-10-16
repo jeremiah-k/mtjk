@@ -120,6 +120,8 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
                 await bridge(upstream, downstream)
             finally:
                 await upstream.close()
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            _LOG.info("TCP proxy transport disconnected: %s", exc)
         except Exception:
             _LOG.exception("TCP proxy session failed")
         finally:

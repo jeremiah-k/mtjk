@@ -8,6 +8,7 @@ import contextlib
 import errno
 import logging
 import os
+import sys
 import threading
 from typing import Any
 
@@ -184,6 +185,8 @@ class BLEPeripheralChannel:
         self._fatal: BaseException | None = None
         self._session_started = False
         self._outgoing_space = asyncio.Event()
+        self._adapter_properties: Any = None
+        self._adapter_alias: Any = None
 
     @classmethod
     async def start(cls, name: str) -> BLEPeripheralChannel:
@@ -235,6 +238,19 @@ class BLEPeripheralChannel:
         server.write_request_func = on_write
         try:
             await server.add_new_service(SERVICE_UUID)
+            # Bless's BlueZ backend changes the host adapter Alias when it
+            # starts advertising and clears it on stop. Preserve the operator's
+            # original setting, including when advertising registration fails.
+            adapter = (
+                getattr(server, "adapter", None) if sys.platform == "linux" else None
+            )
+            if adapter is not None:
+                channel._adapter_properties = adapter.get_interface(
+                    "org.freedesktop.DBus.Properties"
+                )
+                channel._adapter_alias = await channel._adapter_properties.call_get(
+                    "org.bluez.Adapter1", "Alias"
+                )
             await server.add_new_characteristic(
                 SERVICE_UUID,
                 TORADIO_UUID,
@@ -257,9 +273,13 @@ class BLEPeripheralChannel:
                 Perm.readable,
             )
             await server.start()
-        except BaseException:
+        except BaseException as exc:
             with contextlib.suppress(Exception):
-                await server.stop()
+                await channel._stop_backend()
+            if isinstance(exc, Exception):
+                # Optional backends raise their own exceptions (for example
+                # dbus_next.DBusError), outside the CLI's transport error types.
+                raise RuntimeError(f"BLE peripheral startup failed: {exc}") from exc
             raise
         _LOG.warning("Experimental BLE GATT peripheral advertising as %s", name)
         return channel
@@ -311,4 +331,30 @@ class BLEPeripheralChannel:
 
     async def close(self) -> None:
         """Unregister GATT services and stop advertising."""
-        await self.server.stop()
+        await self._stop_backend()
+
+    async def _stop_backend(self) -> None:
+        """Release the backend even when unregistering an advertisement fails."""
+        try:
+            await self.server.stop()
+        except Exception as exc:
+            raise RuntimeError(f"BLE peripheral shutdown failed: {exc}") from exc
+        finally:
+            try:
+                if self._adapter_alias is not None:
+                    try:
+                        await self._adapter_properties.call_set(
+                            "org.bluez.Adapter1", "Alias", self._adapter_alias
+                        )
+                    except Exception:  # best effort; still release the D-Bus connection
+                        _LOG.warning(
+                            "Could not restore Bluetooth adapter alias", exc_info=True
+                        )
+            finally:
+                # Bless 0.3.0's BlueZ stop() does not disconnect its owned D-Bus
+                # connection, and can fail before unregistering its GATT app.
+                # Disconnect even if restoring the alias is cancelled.
+                bus = getattr(self.server, "bus", None)
+                if bus is not None:
+                    with contextlib.suppress(Exception):
+                        bus.disconnect()

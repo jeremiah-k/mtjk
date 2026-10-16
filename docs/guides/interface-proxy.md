@@ -146,3 +146,31 @@ The automated test suite uses real loopback sockets and a POSIX PTY, plus a fake
 Bless server, but **does not** establish physical BLE interoperability. Run the
 normal CI suite and this hardware checklist before treating advertising as
 supported on a platform.
+
+## Recorded local qualification
+
+On 2026-10-16, the following read-only connection and configuration checks ran
+on Linux with Python 3.13.15. The physical T1000-E reported firmware
+`2.8.2.34c9457`; the simulator used the cached
+`meshtastic/meshtasticd:2.8.0-alpha-debian` image
+(`sha256:099b99e965a4ce5d5220572d3f3160ad0a8c541eccf335d941355d6d5cb35465`).
+
+| Source              | Output         | Observed result                                                                                   |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------------------- |
+| T1000-E USB serial  | TCP            | Two full configuration downloads across reconnect; normal CLI `--get device.role`; Ctrl+C cleanup |
+| T1000-E USB serial  | PTY            | Normal CLI `--get device.role`; proxy exits after client closes                                   |
+| T1000-E BLE central | TCP            | Full configuration download using the existing Bluetooth bond                                     |
+| T1000-E BLE central | PTY            | Normal CLI `--get device.role`; proxy exits after client closes                                   |
+| meshtasticd TCP     | TCP            | Normal CLI `--get device.role`; Ctrl+C cleanup                                                    |
+| meshtasticd TCP     | PTY            | Normal CLI `--get device.role`; proxy exits after client closes                                   |
+| meshtasticd TCP     | BLE peripheral | GATT setup reached BlueZ, but advertisement registration failed                                   |
+
+The BLE peripheral attempt used unmodified Bless 0.3.0 and BlueZ 5.72. The host
+controller rejected advertising with `Invalid Parameters (0x0d)`, including
+diagnostic retries with a shorter name and without experimental advertisement
+properties. No phone BLE session was established. The successful BLE-central
+checks used an existing bond, so PIN entry and fresh pairing were not qualified.
+
+The gateway now translates backend startup/shutdown failures into CLI errors,
+releases its owned BlueZ D-Bus connection after cleanup failures, and restores
+the host adapter alias that Bless changes during advertising.

@@ -6,7 +6,8 @@ import asyncio
 import contextlib
 import logging
 import sys
-from typing import TYPE_CHECKING, Protocol, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, cast
 
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
@@ -21,6 +22,25 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 _READ_CHUNK = 4096
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+async def _serial_io(
+    operation: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    """Finish bounded serial I/O before cancellation allows the port to close.
+
+    Cancelling to_thread only cancels its awaiter. Closing/reopening the port
+    while its worker still reads or writes can race descriptor reuse.
+    """
+    worker = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await worker
+        raise
 
 
 class PacketChannel(Protocol):
@@ -124,7 +144,7 @@ class SerialChannel:
             raise
         try:
             # Match SerialInterface's wake/resynchronization behavior.
-            await asyncio.to_thread(port.write, bytes([START2] * WAKE_BYTE_COUNT))
+            await _serial_io(port.write, bytes([START2] * WAKE_BYTE_COUNT))
             await asyncio.sleep(DEVICE_WAKE_DELAY)
         except BaseException:
             await asyncio.to_thread(port.close)
@@ -134,7 +154,7 @@ class SerialChannel:
     async def recv(self) -> bytes | None:
         """Read framed bytes; a serial idle timeout is not EOF."""
         while not self._pending:
-            chunk = await asyncio.to_thread(self._port.read, _READ_CHUNK)
+            chunk = await _serial_io(self._port.read, _READ_CHUNK)
             if not chunk:
                 await asyncio.sleep(0)
                 continue
@@ -144,7 +164,7 @@ class SerialChannel:
     async def send(self, payload: bytes) -> None:
         """Send exactly one frame, rejecting partial/zero-progress writes."""
         data = frame(payload)
-        written = await asyncio.to_thread(self._port.write, data)
+        written = await _serial_io(self._port.write, data)
         if written != len(data):
             raise OSError(f"serial proxy short write: {written}/{len(data)}")
 
