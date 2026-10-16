@@ -60,6 +60,13 @@ that framing and enforces the existing 512-byte stream message maximum. It
 does not parse, de-duplicate, decrypt, transform, or synthesize `ToRadio` and
 `FromRadio` messages.
 
+The BLE-central reader buffers up to 256 raw `FROMRADIO` packets, applying GATT
+read backpressure when downstream delivery is slow. Backpressure bounds host
+memory, but cannot guarantee that a radio's own smaller queue will never fill;
+slow downstream clients should be avoided. Already-buffered messages drain
+before disconnect is reported. A failed or over-limit GATT read is surfaced as
+a session error rather than mistaken for a clean device disconnect.
+
 The BLE service (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`) and its three
 transport characteristics are the same as in the Android client and mtjk:
 

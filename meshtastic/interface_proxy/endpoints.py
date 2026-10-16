@@ -169,6 +169,7 @@ class BLEPeripheralChannel:
         self._incoming: asyncio.Queue[bytes] = asyncio.Queue(maxsize=128)
         self._loop = asyncio.get_running_loop()
         self._fatal: BaseException | None = None
+        self._session_started = False
 
     @classmethod
     async def start(cls, name: str) -> BLEPeripheralChannel:
@@ -247,12 +248,19 @@ class BLEPeripheralChannel:
         return channel
 
     async def wait_for_central(self) -> None:
-        """Wait for the OS backend to report at least one connected central."""
+        """Wait for a central without discarding its first TORADIO write.
+
+        Fresh servers already have empty queues. Only a *subsequent* session
+        needs stale-message/failure reset, before awaiting the next central.
+        """
+        if self._session_started:
+            self.mailbox.reset()
+            while not self._incoming.empty():
+                self._incoming.get_nowait()
+            self._fatal = None
+        self._session_started = True
         while not await self.server.is_connected():
             await asyncio.sleep(0.25)
-        self.mailbox.reset()
-        while not self._incoming.empty():
-            self._incoming.get_nowait()
 
     async def recv(self) -> bytes | None:
         """Receive one unframed TORADIO write from a central."""

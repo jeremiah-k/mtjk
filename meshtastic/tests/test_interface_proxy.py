@@ -291,6 +291,8 @@ def test_ble_peripheral_gatt_shape_and_mailbox(
                 server.get_characteristic(TORADIO_UUID), b"\x08\x07", object()
             )
             await asyncio.sleep(0)
+            # The central may write before wait_for_central notices connection.
+            await proxy.wait_for_central()
             assert await asyncio.wait_for(proxy.recv(), 1) == b"\x08\x07"
             await proxy.send(b"\x10\x04")
             assert (
@@ -486,3 +488,144 @@ def test_proxy_cli_rejects_bare_proxy_only_options() -> None:
     with pytest.raises(SystemExit) as exc_info:
         bootstrap.run_common(args, parser, MagicMock())
     assert exc_info.value.code == 2
+
+
+def test_ble_upstream_backpressure_preserves_full_queue() -> None:
+    """A slow client pauses GATT reads rather than disconnecting at 256 packets."""
+
+    async def scenario() -> None:
+        from unittest.mock import AsyncMock
+
+        read_257 = asyncio.Event()
+        read_258 = asyncio.Event()
+        reads = 0
+
+        async def read_gatt(_uuid: str) -> bytes:
+            nonlocal reads
+            reads += 1
+            if reads == 257:
+                read_257.set()
+            elif reads == 258:
+                read_258.set()
+            return b"\x08\x01" if reads <= 257 else b""
+
+        client = MagicMock()
+        client.read_gatt_char = AsyncMock(side_effect=read_gatt)
+        client.disconnect = AsyncMock()
+        channel = BLECentralChannel(client)
+        channel._wake.set()
+        channel._receive_task = asyncio.create_task(channel._poll_radio())
+        try:
+            await asyncio.wait_for(read_257.wait(), 1)
+            assert channel._pending.qsize() == 256
+            assert not channel._disconnected.is_set()
+            assert await channel.recv() == b"\x08\x01"
+            # The blocked 257th write must complete before the next GATT read.
+            await asyncio.wait_for(read_258.wait(), 1)
+            assert channel._pending.qsize() == 256
+            assert not channel._disconnected.is_set()
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_upstream_recv_wakes_without_polling_and_drains_on_error() -> None:
+    """An awaiting recv wakes on packets/disconnect and reports invalid GATT data."""
+
+    async def scenario() -> None:
+        channel = BLECentralChannel(MagicMock())
+        waiter = asyncio.create_task(channel.recv())
+        await channel._pending.put(b"\x08\x02")
+        assert await asyncio.wait_for(waiter, 1) == b"\x08\x02"
+
+        # An in-flight waiter must complete immediately after clean disconnect.
+        waiter = asyncio.create_task(channel.recv())
+        channel._disconnected.set()
+        assert await asyncio.wait_for(waiter, 1) is None
+
+        # A GATT read error is not a normal EOF, even after buffered packets.
+        failed = BLECentralChannel(MagicMock())
+        await failed._pending.put(b"\x10\x02")
+        failed._receive_error = ProxyProtocolError("invalid GATT length")
+        failed._disconnected.set()
+        assert await failed.recv() == b"\x10\x02"
+        with pytest.raises(RuntimeError, match="BLE upstream receive failed") as exc:
+            await failed.recv()
+        assert isinstance(exc.value.__cause__, ProxyProtocolError)
+
+    asyncio.run(scenario())
+
+
+def test_ble_upstream_invalid_read_reports_failure() -> None:
+    """An oversized GATT response is surfaced rather than disguised as EOF."""
+
+    async def scenario() -> None:
+        from unittest.mock import AsyncMock
+
+        client = MagicMock()
+        client.read_gatt_char = AsyncMock(return_value=b"x" * 513)
+        channel = BLECentralChannel(client)
+        channel._wake.set()
+        await asyncio.wait_for(channel._poll_radio(), 1)
+        with pytest.raises(RuntimeError, match="BLE upstream receive failed") as exc:
+            await channel.recv()
+        assert isinstance(exc.value.__cause__, ProxyProtocolError)
+
+    asyncio.run(scenario())
+
+
+def test_ble_peripheral_reset_only_between_sessions() -> None:
+    """A first central's early write survives detection; later stale state resets."""
+
+    async def scenario() -> None:
+        from unittest.mock import AsyncMock
+
+        server = MagicMock()
+        server.is_connected = AsyncMock(return_value=True)
+        channel = BLEPeripheralChannel(server, BLEMailbox())
+        # BLE write can arrive before is_connected() reports the connection.
+        channel._incoming.put_nowait(b"\x08\x07")
+        await channel.wait_for_central()
+        assert await channel.recv() == b"\x08\x07"
+
+        channel._fatal = OverflowError("previous session")
+        channel._incoming.put_nowait(b"\x10\x07")
+        channel.mailbox.push(b"\x12\x07")
+        await channel.wait_for_central()
+        assert channel._fatal is None
+        assert channel._incoming.empty()
+        assert channel.mailbox.pop() == b""
+
+    asyncio.run(scenario())
+
+
+def test_proxy_ctrl_c_exits_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ctrl+C behaves like the ordinary CLI listen-loop shutdown path."""
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    args = cli_parser.parse_cli_args(
+        parser,
+        version="test",
+        argv=[
+            "--interface-proxy-in",
+            "serial:/dev/ttyUSB0",
+            "--interface-proxy-out",
+            "tcp:127.0.0.1:4403",
+        ],
+    )
+
+    def interrupt_proxy(coroutine: Any) -> None:
+        # asyncio.run normally closes its coroutine during Ctrl+C teardown.
+        coroutine.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(asyncio, "run", interrupt_proxy)
+    with caplog.at_level("INFO", logger=bootstrap.logger.name):
+        bootstrap.run_common(
+            args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
+        )
+    assert "Exiting interface proxy due to keyboard interrupt" in caplog.text

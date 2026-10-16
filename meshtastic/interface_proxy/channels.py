@@ -139,6 +139,7 @@ class BLECentralChannel:
         self._wake = asyncio.Event()
         self._pending: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
         self._disconnected = asyncio.Event()
+        self._receive_error: Exception | None = None
         self._receive_task: asyncio.Task[None] | None = None
 
     @classmethod
@@ -184,19 +185,49 @@ class BLECentralChannel:
                     if not payload:
                         break
                     validate_payload(payload)
-                    self._pending.put_nowait(payload)
-        except Exception:
+                    # Stop fetching GATT values while the downstream is slow;
+                    # a full queue is backpressure, not a radio disconnect.
+                    await self._pending.put(payload)
+        except Exception as exc:
+            self._receive_error = exc
             _LOG.exception("BLE upstream read stopped")
         finally:
             self._disconnected.set()
 
     async def recv(self) -> bytes | None:
-        """Return buffered messages before reporting upstream disconnection."""
-        while self._pending.empty() and not self._disconnected.is_set():
-            await asyncio.sleep(0.05)
+        """Wait for a packet or disconnect, draining buffered data first.
+
+        A GATT read failure must not be disguised as a normal radio EOF.
+        """
         if not self._pending.empty():
             return self._pending.get_nowait()
-        return None
+        if self._disconnected.is_set():
+            self._raise_receive_error()
+            return None
+
+        packet_task = asyncio.create_task(self._pending.get())
+        disconnect_task = asyncio.create_task(self._disconnected.wait())
+        try:
+            await asyncio.wait(
+                (packet_task, disconnect_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            if packet_task.done():
+                return packet_task.result()
+            # A packet and disconnect can become ready in the same iteration.
+            if not self._pending.empty():
+                return self._pending.get_nowait()
+            self._raise_receive_error()
+            return None
+        finally:
+            for task in (packet_task, disconnect_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(packet_task, disconnect_task, return_exceptions=True)
+
+    def _raise_receive_error(self) -> None:
+        """Distinguish an invalid/failed GATT read from a clean disconnect."""
+        if self._receive_error is not None:
+            raise RuntimeError("BLE upstream receive failed") from self._receive_error
 
     async def send(self, payload: bytes) -> None:
         """Write one unframed protobuf to TORADIO."""
