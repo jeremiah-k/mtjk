@@ -254,6 +254,32 @@ def addConnectionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
         action="store_true",
     )
 
+    proxy = parser.add_argument_group(
+        "Interface proxy (experimental)",
+        "Forward raw Meshtastic radio packets between a device and an exposed endpoint.",
+    )
+    proxy.add_argument(
+        "--interface-proxy-in",
+        metavar="SOURCE",
+        help="Radio source: serial:/dev/ttyUSB0, tcp:HOST:PORT, or ble:ADDRESS",
+    )
+    proxy.add_argument(
+        "--interface-proxy-out",
+        metavar="DESTINATION",
+        help="Expose as tcp:127.0.0.1:4403, pty (POSIX), or ble-peripheral (experimental)",
+    )
+    proxy.add_argument(
+        "--interface-proxy-allow-public",
+        action="store_true",
+        help="Permit unauthenticated non-loopback TCP or experimental BLE advertising",
+    )
+    proxy.add_argument(
+        "--interface-proxy-ble-name",
+        default="Meshtastic_0000",
+        metavar="NAME",
+        help="BLE GATT peripheral advertised name (experimental mode only)",
+    )
+
     return parser
 
 

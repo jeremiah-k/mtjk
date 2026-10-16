@@ -9,6 +9,7 @@ through :class:`BootstrapHooks`.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import logging
 import os
@@ -564,6 +565,61 @@ def run_common(
 ) -> None:
     """Run the CLI pre-connect and connected-session bootstrap flow."""
     actual_argv = sys.argv if argv is None else argv
+    proxy_in = getattr(args, "interface_proxy_in", None)
+    proxy_out = getattr(args, "interface_proxy_out", None)
+    if proxy_in is not None or proxy_out is not None:
+        if not proxy_in or not proxy_out:
+            parser.error(
+                "interface proxy requires both --interface-proxy-in "
+                "and --interface-proxy-out"
+            )
+        if args.quiet and (args.debug or args.listen or args.debuglib):
+            parser.error("--quiet cannot be used with --debug, --listen, or --debuglib")
+        prohibited = [
+            label
+            for attribute, label in _DRY_RUN_CONFLICTING_ACTIONS
+            if _action_requested(getattr(args, attribute, None))
+        ]
+        for attribute, label in (
+            ("ble", "--ble"),
+            ("host", "--host"),
+            ("port", "--port"),
+        ):
+            if _action_requested(getattr(args, attribute, None)):
+                prohibited.append(label)
+        for attribute, label in (("set", "--set"), ("configure", "--configure")):
+            if _action_requested(getattr(args, attribute, None)):
+                prohibited.append(label)
+        if prohibited:
+            parser.error(
+                "interface proxy cannot be combined with: " + ", ".join(prohibited)
+            )
+        name = getattr(args, "interface_proxy_ble_name", "Meshtastic_0000")
+        if proxy_out != "ble-peripheral" and name != "Meshtastic_0000":
+            parser.error("--interface-proxy-ble-name requires ble-peripheral output")
+        from meshtastic.interface_proxy.server import ProxyOptions, serve
+
+        options = ProxyOptions(
+            upstream=proxy_in,
+            downstream=proxy_out,
+            allow_public=getattr(args, "interface_proxy_allow_public", False),
+            ble_name=name,
+        )
+        try:
+            options.validate()
+        except ValueError as exc:
+            parser.error(str(exc))
+        _configure_logging(args)
+        asyncio.run(serve(options))
+        return
+    if (
+        getattr(args, "interface_proxy_allow_public", False)
+        or getattr(args, "interface_proxy_ble_name", "Meshtastic_0000")
+        != "Meshtastic_0000"
+    ):
+        parser.error(
+            "proxy-only options require --interface-proxy-in and --interface-proxy-out"
+        )
     _validate_and_normalize_args(args, parser, hooks)
     _configure_logging(args)
     if _run_preconnect_action(args, parser, hooks, argv=actual_argv):
