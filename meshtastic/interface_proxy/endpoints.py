@@ -35,6 +35,7 @@ class PTYChannel:
         self.path = path
         self._decoder = FrameDecoder()
         self._pending: collections.deque[bytes] = collections.deque()
+        self._slave_seen = False
 
     @classmethod
     def create(cls) -> PTYChannel:
@@ -70,21 +71,27 @@ class PTYChannel:
             loop.remove_reader(self.fd)
 
     async def recv(self) -> bytes | None:
-        """Read framed writes from the slave; EIO means no slave currently open."""
+        """Wait for the initial slave, then report EOF when that client closes."""
         while not self._pending:
             try:
                 chunk = os.read(self.fd, 4096)
             except BlockingIOError:
+                self._slave_seen = True
                 await self._wait_readable()
                 continue
             except OSError as exc:
                 if exc.errno == errno.EIO:
+                    if self._slave_seen:
+                        return None
                     await asyncio.sleep(0.1)
                     continue
                 raise
             if not chunk:
+                if self._slave_seen:
+                    return None
                 await asyncio.sleep(0.1)
                 continue
+            self._slave_seen = True
             self._pending.extend(self._decoder.feed(chunk))
         return self._pending.popleft()
 
@@ -264,13 +271,14 @@ class BLEPeripheralChannel:
 
     async def recv(self) -> bytes | None:
         """Receive one unframed TORADIO write from a central."""
-        while self._incoming.empty():
+        while True:
             if self._fatal is not None:
                 raise RuntimeError("BLE peripheral session failed") from self._fatal
+            if not self._incoming.empty():
+                return self._incoming.get_nowait()
             if not await self.server.is_connected():
                 return None
             await asyncio.sleep(0.05)
-        return self._incoming.get_nowait()
 
     async def send(self, payload: bytes) -> None:
         """Queue a FROMRADIO read and notify FROMNUM subscribers."""

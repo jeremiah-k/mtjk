@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Protocol
+import sys
+from typing import TYPE_CHECKING, Protocol, cast
 
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
@@ -93,9 +94,34 @@ class SerialChannel:
         """Open one serial port at 115200 baud without initializing MeshInterface."""
         import serial  # type: ignore[import-untyped]  # pylint: disable=import-outside-toplevel  # optional at import time for pure framing tests
 
-        port = await asyncio.to_thread(
-            serial.Serial, path, 115200, timeout=0.2, write_timeout=5
-        )
+        def _open_port() -> _SerialPort:
+            # Set control lines before opening, as SerialInterface does. The
+            # default asserted RTS can hold USB radios in reset/bootloader mode.
+            port = serial.Serial(
+                port=None, baudrate=115200, timeout=0.2, write_timeout=5
+            )
+            try:
+                port.port = path
+                port.dtr = True  # nRF52 USB CDC requires DTR for output.
+                port.rts = False
+                if sys.platform != "win32":
+                    port.exclusive = True
+                port.open()
+            except BaseException:
+                port.close()
+                raise
+            return cast(_SerialPort, port)
+
+        opening = asyncio.create_task(asyncio.to_thread(_open_port))
+        try:
+            port = await asyncio.shield(opening)
+        except asyncio.CancelledError:
+            # Cancelling to_thread cannot stop its worker. Reclaim the handle
+            # after acquisition rather than losing it when the await is cancelled.
+            with contextlib.suppress(Exception):
+                port = await opening
+                await asyncio.to_thread(port.close)
+            raise
         try:
             # Match SerialInterface's wake/resynchronization behavior.
             await asyncio.to_thread(port.write, bytes([START2] * WAKE_BYTE_COUNT))
@@ -138,6 +164,7 @@ class BLECentralChannel:
         self._client = client
         self._wake = asyncio.Event()
         self._pending: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
+        self._transport_disconnected = asyncio.Event()
         self._disconnected = asyncio.Event()
         self._receive_error: Exception | None = None
         self._receive_task: asyncio.Task[None] | None = None
@@ -156,7 +183,7 @@ class BLECentralChannel:
             # asyncio.Event directly from that callback.
             if link is not None:
                 with contextlib.suppress(RuntimeError):  # event loop already closed
-                    loop.call_soon_threadsafe(link._disconnected.set)
+                    loop.call_soon_threadsafe(link._transport_disconnected.set)
                     loop.call_soon_threadsafe(link._wake.set)
 
         client = BleakClient(address, disconnected_callback=_disconnected)
@@ -179,14 +206,14 @@ class BLECentralChannel:
 
     async def _poll_radio(self) -> None:
         try:
-            while not self._disconnected.is_set():
+            while not self._transport_disconnected.is_set():
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=0.4)
                 except asyncio.TimeoutError:
                     pass
                 self._wake.clear()
                 # Multiple packets can accumulate for a single FROMNUM change.
-                while not self._disconnected.is_set():
+                while not self._transport_disconnected.is_set():
                     payload = bytes(await self._client.read_gatt_char(FROMRADIO_UUID))
                     if not payload:
                         break
@@ -198,6 +225,7 @@ class BLECentralChannel:
             self._receive_error = exc
             _LOG.exception("BLE upstream read stopped")
         finally:
+            # Signal EOF only after a packet blocked on queue space is enqueued.
             self._disconnected.set()
 
     async def recv(self) -> bytes | None:

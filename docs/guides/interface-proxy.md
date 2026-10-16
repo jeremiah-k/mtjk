@@ -119,7 +119,9 @@ by Bless.
 **PTY limitations:** Unix pseudo-terminals cannot enforce a single external
 reader at the kernel API level. Use exactly one serial client, and open the
 slave while the proxy is running. The PTY path is ephemeral, disappears when
-the proxy exits, and is not a Windows COM-device emulation. Windows virtual COM
+the proxy exits, and is not a Windows COM-device emulation. Once a PTY client
+has been observed, closing the slave ends the session and closes the upstream;
+restart the proxy for a new client. Windows virtual COM
 endpoints require an external signed virtual-port driver and are not included.
 
 ## Hardware qualification before production use

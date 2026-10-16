@@ -88,6 +88,7 @@ class MemoryChannel:
     def __init__(self) -> None:
         self.incoming: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.outgoing: asyncio.Queue[bytes] = asyncio.Queue()
+        self.closed = False
 
     async def recv(self) -> bytes | None:
         return await self.incoming.get()
@@ -96,7 +97,7 @@ class MemoryChannel:
         await self.outgoing.put(payload)
 
     async def close(self) -> None:
-        pass
+        self.closed = True
 
 
 def test_bridge_keeps_message_bytes_in_both_directions() -> None:
@@ -163,6 +164,12 @@ def test_tcp_proxy_forwards_and_rejects_second_client(
             await upstream.incoming.put(b"\x10\x06")
             result = await asyncio.wait_for(reader.readexactly(6), 1)
             assert result == frame(b"\x10\x06")
+            # Stopping the listener must also finish the active radio session.
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert upstream.closed
+            assert await asyncio.wait_for(reader.read(1), 1) == b""
             writer.close()
             await writer.wait_closed()
         finally:
@@ -356,9 +363,18 @@ def test_serial_upstream_wakes_device_and_closes(
         import serial  # type: ignore[import-untyped]
 
         class FakeSerial:
-            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            def __init__(self, *_args: Any, **kwargs: Any) -> None:
+                assert kwargs["port"] is None
                 self.writes: list[bytes] = []
                 self.closed = False
+                self.port: str | None = None
+                self.dtr = False
+                self.rts = True
+
+            def open(self) -> None:
+                assert self.port == "/dev/fake"
+                assert self.dtr is True
+                assert self.rts is False
 
             def write(self, data: bytes) -> int:
                 self.writes.append(data)
@@ -367,11 +383,18 @@ def test_serial_upstream_wakes_device_and_closes(
             def close(self) -> None:
                 self.closed = True
 
-        fake = FakeSerial()
-        monkeypatch.setattr(serial, "Serial", lambda *_args, **_kwargs: fake)
+        opened: list[FakeSerial] = []
+
+        def create_serial(*args: Any, **kwargs: Any) -> FakeSerial:
+            fake = FakeSerial(*args, **kwargs)
+            opened.append(fake)
+            return fake
+
+        monkeypatch.setattr(serial, "Serial", create_serial)
         from meshtastic.interface_proxy.channels import SerialChannel
 
         channel = await SerialChannel.open("/dev/fake")
+        fake = opened[0]
         try:
             assert fake.writes == [bytes([0xC3]) * 32]
             await channel.send(b"\x08\x01")
@@ -725,5 +748,164 @@ def test_ble_central_failed_connect_disconnects_client(
         with pytest.raises(OSError, match="failed to pair"):
             await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
         client.disconnect.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_ble_disconnect_drains_packet_waiting_for_queue_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A consumed GATT packet remains deliverable when disconnect races backpressure."""
+    from unittest.mock import AsyncMock
+
+    async def scenario() -> None:
+        fetched_last = asyncio.Event()
+        reads = 0
+
+        async def read_gatt(_uuid: str) -> bytes:
+            nonlocal reads
+            reads += 1
+            if reads == 257:
+                fetched_last.set()
+            return reads.to_bytes(2, "big")
+
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.start_notify = AsyncMock()
+        client.disconnect = AsyncMock()
+        client.read_gatt_char = AsyncMock(side_effect=read_gatt)
+
+        def create_client(_address: str, *, disconnected_callback: Any) -> Any:
+            client.disconnected_callback = disconnected_callback
+            return client
+
+        monkeypatch.setitem(
+            sys.modules, "bleak", types.SimpleNamespace(BleakClient=create_client)
+        )
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            await asyncio.wait_for(fetched_last.wait(), 1)
+            client.disconnected_callback(client)
+            await asyncio.sleep(0)  # Deliver the backend's thread-safe callback.
+
+            async def drain() -> list[bytes]:
+                packets = []
+                while (packet := await channel.recv()) is not None:
+                    packets.append(packet)
+                return packets
+
+            assert await asyncio.wait_for(drain(), 1) == [
+                n.to_bytes(2, "big") for n in range(1, 258)
+            ]
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(os.name != "posix", reason="PTY is available on POSIX")
+def test_pty_waits_for_initial_client_but_reports_session_close() -> None:
+    """An absent initial slave can attach; closing that slave ends the session."""
+
+    async def scenario() -> None:
+        channel = PTYChannel.create()
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(channel.recv(), 0.02)
+            slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+            try:
+                os.write(slave, frame(b"\x08\x07"))
+                assert await asyncio.wait_for(channel.recv(), 1) == b"\x08\x07"
+            finally:
+                os.close(slave)
+            assert await asyncio.wait_for(channel.recv(), 1) is None
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("port busy"),
+        RuntimeError("missing bless"),
+        OverflowError("BLE peripheral queue overflow"),
+    ],
+)
+def test_proxy_cli_reports_transport_failure(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """Expected transport failures use the CLI's error status and message seam."""
+    import argparse
+
+    from meshtastic.interface_proxy import server
+
+    parser = argparse.ArgumentParser(add_help=False)
+    args = cli_parser.parse_cli_args(
+        parser,
+        version="test",
+        argv=["--interface-proxy-in", "serial:/bad", "--interface-proxy-out", "pty"],
+    )
+
+    async def fail(_options: ProxyOptions) -> None:
+        raise error
+
+    monkeypatch.setattr(server, "serve", fail)
+    hooks = MagicMock()
+    hooks.cli_exit.side_effect = SystemExit(1)
+    with pytest.raises(SystemExit) as exc:
+        bootstrap.run_common(args, parser, hooks)
+    assert exc.value.code == 1
+    hooks.cli_exit.assert_called_once_with(f"Interface proxy failed: {error}", 1)
+
+
+def test_serial_cancelled_acquisition_closes_late_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation cannot abandon a serial handle still opening in its worker."""
+    import threading
+
+    import serial
+
+    from meshtastic.interface_proxy.channels import SerialChannel
+
+    async def scenario() -> None:
+        started = asyncio.Event()
+        release = threading.Event()
+        loop = asyncio.get_running_loop()
+        port = MagicMock()
+
+        def open_port() -> None:
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(2):
+                raise TimeoutError("test did not release serial open")
+
+        port.open.side_effect = open_port
+        monkeypatch.setattr(serial, "Serial", lambda **_kwargs: port)
+        task = asyncio.create_task(SerialChannel.open("/dev/fake"))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            task.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            port.close.assert_called_once()
+        finally:
+            release.set()
+
+    asyncio.run(scenario())
+
+
+def test_ble_peripheral_fatal_error_stops_queued_writes() -> None:
+    """A terminal overflow must be reported even while more writes are queued."""
+
+    async def scenario() -> None:
+        channel = BLEPeripheralChannel(MagicMock(), BLEMailbox())
+        channel._incoming.put_nowait(b"\x08\x01")
+        channel._fatal = OverflowError("TORADIO queue overflow")
+        with pytest.raises(RuntimeError, match="BLE peripheral session failed") as exc:
+            await channel.recv()
+        assert isinstance(exc.value.__cause__, OverflowError)
 
     asyncio.run(scenario())
