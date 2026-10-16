@@ -147,27 +147,33 @@ class BLECentralChannel:
         """Connect to a BLE radio using the existing Bleak dependency."""
         from bleak import BleakClient  # pylint: disable=import-outside-toplevel
 
+        loop = asyncio.get_running_loop()
         link: BLECentralChannel | None = None
 
         def _disconnected(_client: object) -> None:
+            # Bleak backends may invoke callbacks from a non-event-loop thread,
+            # including while connect() is still in progress. Never touch an
+            # asyncio.Event directly from that callback.
             if link is not None:
-                link._disconnected.set()
-                link._wake.set()
+                with contextlib.suppress(RuntimeError):  # event loop already closed
+                    loop.call_soon_threadsafe(link._disconnected.set)
+                    loop.call_soon_threadsafe(link._wake.set)
 
         client = BleakClient(address, disconnected_callback=_disconnected)
-        await client.connect(timeout=20)
         link = cls(client)
-        loop = asyncio.get_running_loop()
 
         def _notified(_char: object, _value: bytearray) -> None:
-            loop.call_soon_threadsafe(link._wake.set)
+            with contextlib.suppress(RuntimeError):  # late notification on shutdown
+                loop.call_soon_threadsafe(link._wake.set)
 
         try:
+            await client.connect(timeout=20)
             await client.start_notify(FROMNUM_UUID, _notified)
             link._wake.set()  # drain anything queued before subscription
             link._receive_task = asyncio.create_task(link._poll_radio())
         except BaseException:
-            await client.disconnect()
+            with contextlib.suppress(Exception):
+                await client.disconnect()
             raise
         return link
 
