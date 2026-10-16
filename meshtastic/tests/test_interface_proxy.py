@@ -944,3 +944,109 @@ def test_pty_silent_client_close_does_not_end_session() -> None:
             await channel.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["recv", "send"])
+def test_serial_cancellation_finishes_io_before_close(operation: str) -> None:
+    """Port shutdown must wait for a cancelled read/write's worker to finish."""
+    import threading
+
+    from meshtastic.interface_proxy.channels import SerialChannel
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def read(_size: int) -> bytes:
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(2)
+            finished.set()
+            return b""
+
+        def write(data: bytes) -> int:
+            read(len(data))
+            return len(data)
+
+        port = MagicMock()
+        port.read.side_effect = read
+        port.write.side_effect = write
+        port.close.side_effect = lambda: finished.is_set() or pytest.fail(
+            "port closed while serial I/O was still running"
+        )
+        channel = SerialChannel(port)
+        task = asyncio.create_task(
+            channel.recv() if operation == "recv" else channel.send(b"\x08\x01")
+        )
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            await channel.close()
+            port.close.assert_called_once()
+        finally:
+            release.set()
+
+    asyncio.run(scenario())
+
+
+def test_ble_peripheral_reports_backend_startup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backend-specific advertising failures become normal CLI transport errors."""
+    from unittest.mock import AsyncMock
+
+    class BackendError(Exception):
+        pass
+
+    async def scenario() -> None:
+        server = MagicMock()
+        server.add_new_service = AsyncMock()
+        server.add_new_characteristic = AsyncMock()
+        server.start = AsyncMock(side_effect=BackendError("advertisement rejected"))
+        server.stop = AsyncMock()
+        original_alias = object()
+        properties = server.adapter.get_interface.return_value
+        properties.call_get = AsyncMock(return_value=original_alias)
+        properties.call_set = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bless",
+            types.SimpleNamespace(
+                BlessServer=lambda **_kwargs: server,
+                GATTAttributePermissions=types.SimpleNamespace(writeable=1, readable=2),
+                GATTCharacteristicProperties=types.SimpleNamespace(
+                    write=1, write_without_response=2, read=4, notify=8
+                ),
+            ),
+        )
+        with pytest.raises(RuntimeError, match="advertisement rejected") as exc:
+            await BLEPeripheralChannel.start("Meshtastic_FEED")
+        assert isinstance(exc.value.__cause__, BackendError)
+        server.stop.assert_awaited_once()
+        if sys.platform == "linux":
+            properties.call_set.assert_awaited_once_with(
+                "org.bluez.Adapter1", "Alias", original_alias
+            )
+
+    asyncio.run(scenario())
+
+
+def test_ble_peripheral_releases_bus_when_unregistering_fails() -> None:
+    """A failed advertisement unregister must not retain the GATT application."""
+    from unittest.mock import AsyncMock
+
+    async def scenario() -> None:
+        server = MagicMock()
+        server.stop = AsyncMock(side_effect=Exception("advertisement not registered"))
+        channel = BLEPeripheralChannel(server, BLEMailbox())
+        with pytest.raises(RuntimeError, match="shutdown failed"):
+            await channel.close()
+        server.bus.disconnect.assert_called_once()
+
+    asyncio.run(scenario())
