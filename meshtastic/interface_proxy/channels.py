@@ -63,7 +63,7 @@ class StreamChannel:
     async def close(self) -> None:
         """Close the stream and wait for shutdown where possible."""
         self.writer.close()
-        with contextlib.suppress(OSError, ConnectionError, TimeoutError):
+        with contextlib.suppress(OSError, ConnectionError, asyncio.TimeoutError):
             await asyncio.wait_for(self.writer.wait_closed(), 2)
 
 
@@ -176,7 +176,7 @@ class BLECentralChannel:
             while not self._disconnected.is_set():
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=0.4)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     pass
                 self._wake.clear()
                 # Multiple packets can accumulate for a single FROMNUM change.

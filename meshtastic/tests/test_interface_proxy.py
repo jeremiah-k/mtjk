@@ -575,8 +575,8 @@ def test_ble_upstream_invalid_read_reports_failure() -> None:
     asyncio.run(scenario())
 
 
-def test_ble_peripheral_reset_only_between_sessions() -> None:
-    """A first central's early write survives detection; later stale state resets."""
+def test_ble_peripheral_does_not_discard_writes_on_repeated_session_wait() -> None:
+    """One GATT server is single-use; a second wait must never erase early writes."""
 
     async def scenario() -> None:
         from unittest.mock import AsyncMock
@@ -589,13 +589,53 @@ def test_ble_peripheral_reset_only_between_sessions() -> None:
         await channel.wait_for_central()
         assert await channel.recv() == b"\x08\x07"
 
-        channel._fatal = OverflowError("previous session")
+        # A second central can write before an accidental repeat wait call.
+        # Without a portable identity we refuse reuse, rather than discard data
+        # or silently mix the previous central's session with a new one.
         channel._incoming.put_nowait(b"\x10\x07")
         channel.mailbox.push(b"\x12\x07")
-        await channel.wait_for_central()
-        assert channel._fatal is None
-        assert channel._incoming.empty()
-        assert channel.mailbox.pop() == b""
+        with pytest.raises(RuntimeError, match="single-session"):
+            await channel.wait_for_central()
+        assert await channel.recv() == b"\x10\x07"
+        assert channel.mailbox.pop() == b"\x12\x07"
+        server.is_connected.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_ble_upstream_idle_timeout_keeps_connection_alive() -> None:
+    """An ordinary polling timeout is not a radio disconnect."""
+
+    async def scenario() -> None:
+        from unittest.mock import AsyncMock
+
+        client = MagicMock()
+        client.read_gatt_char = AsyncMock(return_value=b"")
+        client.disconnect = AsyncMock()
+        channel = BLECentralChannel(client)
+        channel._receive_task = asyncio.create_task(channel._poll_radio())
+        try:
+            await asyncio.sleep(0.46)
+            assert not channel._disconnected.is_set()
+            assert channel._receive_error is None
+            assert client.read_gatt_char.await_count >= 1
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_stream_close_suppresses_asyncio_timeout() -> None:
+    """Slow close does not overwrite the underlying session outcome."""
+    from unittest.mock import AsyncMock
+
+    from meshtastic.interface_proxy.channels import StreamChannel
+
+    async def scenario() -> None:
+        writer = MagicMock()
+        writer.wait_closed = AsyncMock(side_effect=asyncio.TimeoutError())
+        await StreamChannel(asyncio.StreamReader(), writer).close()
+        writer.close.assert_called_once()
 
     asyncio.run(scenario())
 

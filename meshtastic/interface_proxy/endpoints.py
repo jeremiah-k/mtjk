@@ -248,16 +248,16 @@ class BLEPeripheralChannel:
         return channel
 
     async def wait_for_central(self) -> None:
-        """Wait for a central without discarding its first TORADIO write.
+        """Wait for the sole central session, preserving any early TORADIO writes.
 
-        Fresh servers already have empty queues. Only a *subsequent* session
-        needs stale-message/failure reset, before awaiting the next central.
+        The gateway closes its GATT server after this session. Bless does not
+        expose a portable central identity, so reusing one server for another
+        central could mix state or discard writes at a reconnect boundary.
         """
         if self._session_started:
-            self.mailbox.reset()
-            while not self._incoming.empty():
-                self._incoming.get_nowait()
-            self._fatal = None
+            raise RuntimeError(
+                "BLE peripheral is single-session; start a new GATT server"
+            )
         self._session_started = True
         while not await self.server.is_connected():
             await asyncio.sleep(0.25)
