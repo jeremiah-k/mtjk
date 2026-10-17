@@ -171,19 +171,31 @@ diagnostic retries with a shorter name and without experimental advertisement
 properties. No phone BLE session was established. The successful BLE-central
 checks used an existing bond, so PIN entry and fresh pairing were not qualified.
 
-Follow-up adapter-level diagnosis isolated the failure to the host controller,
-not mtjk or Bless: `bluetoothctl advertise on` and a minimal raw-D-Bus
-`LEAdvertisement1` registration fail identically at the kernel MGMT layer,
-independent of advertisement content. The controller is an Atheros AR3012
-(BT 4.0) USB dongle whose firmware rejects the legacy advertising HCI chain
-silently; a full controller power-cycle (`rfkill block`/`unblock`) did not
-change the rejection, so the limitation is permanent for this dongle and the
-peripheral role requires a different adapter. Qualify the peripheral role on
-any host by first confirming the adapter-level canary `bluetoothctl advertise
-on` succeeds, then a Bless smoke advertisement, then phone connectivity; keep
-BLE central sessions off the same adapter while advertising (BT 4.0-class
-controllers reject the concurrent role). A BT 5.0+ adapter (RTL8761B-class or
-Intel) is required for peripheral qualification.
+Follow-up adapter-level diagnosis isolated the failure below mtjk and Bless:
+`bluetoothctl advertise on` and a minimal raw-D-Bus `LEAdvertisement1`
+registration fail identically at the kernel MGMT layer, independent of
+advertisement content. A second, unrelated controller (a Broadcom BCM20702A0
+USB dongle) rejects advertisement registration with the same
+`Invalid Parameters (0x0d)` from its first attempt — across clean bluetoothd
+restarts, rfkill controller power-cycles, USB re-enumeration, and empty
+advertising instances — although exactly one registration succeeded on it
+immediately after plug-in and could not be reproduced. Two controllers from
+different vendors failing identically points at the host stack rather than
+the adapters: kernel regressions that make MGMT Add Advertising return 0x0d
+are a documented, recurring problem class in 2026-era kernels (BlueZ issue
+875 and its backported fixes; Raspberry Pi issues 7473 and the
+RPi-Distro 407 6.12-series regression). This host runs a 7.0 HWE kernel;
+the next diagnostic step is retesting the adapter-level canary on the older
+installed 6.17 kernel and, if it reproduces there too, capturing the failing
+HCI exchange with `btmon` for an upstream report.
+
+Regardless of the eventual root cause, the qualification procedure stands:
+confirm the adapter-level canary `bluetoothctl advertise on` succeeds, then a
+Bless smoke advertisement, then phone connectivity; keep BLE central sessions
+off the same adapter while advertising (BT 4.0-class controllers reject the
+concurrent role), and note that an uncleanly terminated advertisement can
+leave the adapter unable to re-register until the controller or bluetoothd
+is reset.
 
 The gateway now translates backend startup/shutdown failures into CLI errors,
 releases its owned BlueZ D-Bus connection after cleanup failures, and restores
