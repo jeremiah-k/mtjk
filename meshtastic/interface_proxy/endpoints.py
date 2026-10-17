@@ -175,6 +175,10 @@ class BLEPeripheralChannel:
 
     This is an opt-in proof of concept: backends vary in bonding, MTU/long-read,
     advertising name support and connection identity. No multi-central support.
+    Single-radio dual-role constraint: on BT 4.0-class controllers the kernel
+    rejects connectable advertising while a BLE central session is active on the
+    same adapter (the same opaque registration failure), so run the peripheral
+    on its own adapter or keep the radio's central link down while advertising.
     """
 
     def __init__(self, server: Any, mailbox: BLEMailbox) -> None:
@@ -279,7 +283,17 @@ class BLEPeripheralChannel:
             if isinstance(exc, Exception):
                 # Optional backends raise their own exceptions (for example
                 # dbus_next.DBusError), outside the CLI's transport error types.
-                raise RuntimeError(f"BLE peripheral startup failed: {exc}") from exc
+                message = f"BLE peripheral startup failed: {exc}"
+                if "dvertisement" in str(exc).lower():
+                    # BlueZ reports controller-level advertising rejections
+                    # (for example Invalid Parameters 0x0d) as an opaque
+                    # registration failure; point at the adapter-level canary.
+                    message += (
+                        "; check 'journalctl -u bluetooth' for the controller"
+                        " status and test the adapter standalone with"
+                        " 'bluetoothctl advertise on'"
+                    )
+                raise RuntimeError(message) from exc
             raise
         _LOG.warning("Experimental BLE GATT peripheral advertising as %s", name)
         return channel
