@@ -1028,11 +1028,18 @@ def test_ble_peripheral_reports_backend_startup_error(
         with pytest.raises(RuntimeError, match="advertisement rejected") as exc:
             await BLEPeripheralChannel.start("Meshtastic_FEED")
         assert isinstance(exc.value.__cause__, BackendError)
+        # Controller-level registration failures point at the adapter canary.
+        assert "bluetoothctl advertise on" in str(exc.value)
         server.stop.assert_awaited_once()
         if sys.platform == "linux":
             properties.call_set.assert_awaited_once_with(
                 "org.bluez.Adapter1", "Alias", original_alias
             )
+
+        server.start = AsyncMock(side_effect=BackendError("could not connect bus"))
+        with pytest.raises(RuntimeError, match="could not connect bus") as plain:
+            await BLEPeripheralChannel.start("Meshtastic_FEED")
+        assert "bluetoothctl" not in str(plain.value)
 
     asyncio.run(scenario())
 

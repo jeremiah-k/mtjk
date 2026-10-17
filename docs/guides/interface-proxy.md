@@ -171,6 +171,17 @@ diagnostic retries with a shorter name and without experimental advertisement
 properties. No phone BLE session was established. The successful BLE-central
 checks used an existing bond, so PIN entry and fresh pairing were not qualified.
 
+Follow-up adapter-level diagnosis isolated the failure to the host controller,
+not mtjk or Bless: `bluetoothctl advertise on` and a minimal raw-D-Bus
+`LEAdvertisement1` registration fail identically at the kernel MGMT layer,
+independent of advertisement content. The controller is an Atheros AR3012
+(BT 4.0) USB dongle whose firmware rejects the legacy advertising HCI chain
+silently. Qualify the peripheral role on any host by first confirming the
+adapter-level canary `bluetoothctl advertise on` succeeds, then a Bless smoke
+advertisement, then phone connectivity; keep BLE central sessions off the same
+adapter while advertising (BT 4.0-class controllers reject the concurrent
+role). A BT 5.0+ adapter is recommended for peripheral qualification.
+
 The gateway now translates backend startup/shutdown failures into CLI errors,
 releases its owned BlueZ D-Bus connection after cleanup failures, and restores
 the host adapter alias that Bless changes during advertising.
