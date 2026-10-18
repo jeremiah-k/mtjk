@@ -103,10 +103,11 @@ class FieldMetadata(_message.Message):
     KEYWORDS_FIELD_NUMBER: _builtins.int
     SINCE_FIRMWARE_FIELD_NUMBER: _builtins.int
     DEPRECATED_SINCE_FIELD_NUMBER: _builtins.int
+    OEM_FIXED_GPS_FIELD_NUMBER: _builtins.int
     diy_only: _builtins.bool
     """
-    Field is only relevant to DIY hardware builds. Apps may hide it when
-    connected to a pre-assembled / commercial board.
+    Field is only relevant to DIY hardware builds. Apps hide a GPS field
+    tagged this way when the board's `HardwareModel` sets `oem_fixed_gps`.
     """
     admin_only: _builtins.bool
     """
@@ -205,6 +206,12 @@ class FieldMetadata(_message.Message):
     MACHINE-READABLE, and presentation metadata, on the same terms as
     `since_firmware`.
     """
+    oem_fixed_gps: _builtins.bool
+    """
+    Set on a `HardwareModel` value: the maker wired the board's GPS, so the
+    `diy_only` GPS pin fields do not apply. Apps hide those fields on these
+    boards and keep them on any other or unknown board.
+    """
     def __init__(
         self,
         *,
@@ -219,10 +226,11 @@ class FieldMetadata(_message.Message):
         keywords: _builtins.str | None = ...,
         since_firmware: _builtins.str | None = ...,
         deprecated_since: _builtins.str | None = ...,
+        oem_fixed_gps: _builtins.bool | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
