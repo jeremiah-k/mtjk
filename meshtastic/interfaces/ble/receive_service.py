@@ -1137,17 +1137,13 @@ class BLEReceiveRecoveryController:
                     f"{message} (suppressed {suppressed} repeats in the last "
                     f"{cooldown:.0f}s)"
                 )
-            if notify_enabled:
-                logger.debug(message)
-            else:
-                logger.debug(
-                    "%s (polling mode without FROMNUM notifications)",
-                    message,
-                )
+            if not notify_enabled:
+                message = f"{message} (polling mode without FROMNUM notifications)"
+            logger.debug(message)
             return
 
         logger.debug(
-            "Suppressed repeated empty BLE read warning (%d within %.0fs window)",
+            "Suppressed repeated empty BLE read diagnostic (%d within %.0fs window)",
             suppressed,
             cooldown,
         )

@@ -3,6 +3,7 @@
 import logging
 import threading
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -107,3 +108,37 @@ def test_actual_read_error_still_reaches_error_logs(
         record.levelno == logging.ERROR and "GATT read failed" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_empty_read_reporting_keeps_rate_limiting(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Repeat exhaustion within the cooldown is counted, then reported with the next diagnostic."""
+    controller = _controller(_Interface([]))
+    clock = [100.0, 100.0, 105.0, 111.0]
+    with patch(
+        "meshtastic.interfaces.ble.receive_service.time.monotonic",
+        side_effect=clock,
+    ):
+        with caplog.at_level(logging.DEBUG):
+            for _ in clock:
+                controller.log_empty_read_warning()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert (
+        sum("receive queue empty after retries" in message for message in messages) == 2
+    )
+    assert any(
+        "Suppressed repeated empty BLE read diagnostic (1 within 10s window)" in message
+        for message in messages
+    )
+    assert any(
+        "Suppressed repeated empty BLE read diagnostic (2 within 10s window)" in message
+        for message in messages
+    )
+    assert any(
+        "suppressed 2 repeats in the last 10s" in message for message in messages
+    )
+    assert not [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
