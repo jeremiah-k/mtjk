@@ -311,11 +311,11 @@ def test_set_pref_enforces_expanded_schema_metadata_bounds(
     """Bounds added by later upstream annotation expansions activate too."""
     config = localonly_pb2.LocalConfig()
 
-    assert setPref(config, "lora.tx_power", "31") is False
+    assert setPref(config, "lora.tx_power", "37") is False
     assert config.lora.tx_power == 0
 
     out, err = capsys.readouterr()
-    assert "Invalid value 31 for lora.tx_power; expected between 0 and 30." in out
+    assert "Invalid value 37 for lora.tx_power; expected between 0 and 36." in out
     assert err == ""
 
 

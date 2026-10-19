@@ -681,7 +681,7 @@ def test_preview_configure_nested_leaf_reports_unloaded_current_state(
         "module_config:\n"
         "  mqtt:\n"
         "    map_report_settings:\n"
-        "      publish_interval_secs: 120\n",
+        "      publish_interval_secs: 3600\n",
     )
     node = _target_node()
     node.moduleConfig.ClearField("mqtt")
@@ -694,7 +694,7 @@ def test_preview_configure_nested_leaf_reports_unloaded_current_state(
     )
 
     assert (
-        "Would set mqtt.map_report_settings.publish_interval_secs = 120 "
+        "Would set mqtt.map_report_settings.publish_interval_secs = 3600 "
         "(current: not set)"
     ) in _printed_lines(hooks)
     _assert_no_mutations(node, sleeps)

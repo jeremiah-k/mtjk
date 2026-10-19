@@ -515,7 +515,7 @@ def test_export_config_round_trips_nested_module_bytes_fields() -> None:
     """Firmware 2.8 Mesh Beacon channel PSKs must remain bytes after restore."""
     source_local = localonly_pb2.LocalConfig()
     source_module = localonly_pb2.LocalModuleConfig()
-    source_module.mesh_beacon.broadcast_interval_secs = 60
+    source_module.mesh_beacon.broadcast_interval_secs = 3600
     source_module.mesh_beacon.broadcast_offer_channel.psk = b"\x01\x02\x03\x04"
     source_module.mesh_beacon.broadcast_targets.add().channel_index = 2
 
