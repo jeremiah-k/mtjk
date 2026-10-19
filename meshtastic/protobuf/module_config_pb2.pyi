@@ -586,7 +586,7 @@ class ModuleConfig(_message.Message):
         """
         Minimum interval in seconds between position updates from the same node.
         A non-zero value implicitly enables the suppression window; 0 disables it.
-        Firmware default: 21600 (6 hours), installed when this config is first created.
+        Firmware default: 18000 (5 hours), installed when this config is first created.
         """
         nodeinfo_direct_response_max_hops: _builtins.int
         """
@@ -606,7 +606,7 @@ class ModuleConfig(_message.Message):
         """
         unknown_packet_threshold: _builtins.int
         """
-        Maximum unknown/undecryptable packets per rate window before the source
+        Maximum unknown/undecryptable packets per 5 minutes before the source
         is dropped. A non-zero value implicitly enables unknown-packet filtering;
         0 disables it.
         """

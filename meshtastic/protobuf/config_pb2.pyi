@@ -45,7 +45,7 @@ class Config(_message.Message):
             DESCRIPTOR: _descriptor.EnumDescriptor
             CLIENT: Config.DeviceConfig._Role.ValueType  # 0
             """
-            Description: App connected or stand alone messaging device.
+            Description: App connected or standalone messaging device.
             Technical Details: Default Role
             """
             CLIENT_MUTE: Config.DeviceConfig._Role.ValueType  # 1
@@ -106,7 +106,7 @@ class Config(_message.Message):
             """
             LOST_AND_FOUND: Config.DeviceConfig._Role.ValueType  # 9
             """
-            Description: Broadcasts location as message to default channel regularly for to assist with device recovery.
+            Description: Broadcasts location as message to default channel regularly to assist with device recovery.
             Technical Details: Used to automatically send a text message to the mesh
                with the current position of the device on a frequent interval:
                "I'm lost! Position: lat / long"
@@ -141,7 +141,7 @@ class Config(_message.Message):
 
         CLIENT: Config.DeviceConfig.Role.ValueType  # 0
         """
-        Description: App connected or stand alone messaging device.
+        Description: App connected or standalone messaging device.
         Technical Details: Default Role
         """
         CLIENT_MUTE: Config.DeviceConfig.Role.ValueType  # 1
@@ -198,7 +198,7 @@ class Config(_message.Message):
         """
         LOST_AND_FOUND: Config.DeviceConfig.Role.ValueType  # 9
         """
-        Description: Broadcasts location as message to default channel regularly for to assist with device recovery.
+        Description: Broadcasts location as message to default channel regularly to assist with device recovery.
         Technical Details: Used to automatically send a text message to the mesh
            with the current position of the device on a frequent interval:
            "I'm lost! Position: lat / long"
@@ -245,12 +245,12 @@ class Config(_message.Message):
             LOCAL_ONLY: Config.DeviceConfig._RebroadcastMode.ValueType  # 2
             """
             Ignores observed messages from foreign meshes that are open or those which it cannot decrypt.
-            Only rebroadcasts message on the nodes local primary / secondary channels.
+            Only rebroadcasts messages on the node's local primary / secondary channels.
             """
             KNOWN_ONLY: Config.DeviceConfig._RebroadcastMode.ValueType  # 3
             """
             Ignores observed messages from foreign meshes like LOCAL_ONLY,
-            but takes it step further by also ignoring messages from nodenums not in the node's known list (NodeDB)
+            but takes it a step further by also ignoring messages from nodenums not in the node's known list (NodeDB)
             """
             NONE: Config.DeviceConfig._RebroadcastMode.ValueType  # 4
             """
@@ -280,12 +280,12 @@ class Config(_message.Message):
         LOCAL_ONLY: Config.DeviceConfig.RebroadcastMode.ValueType  # 2
         """
         Ignores observed messages from foreign meshes that are open or those which it cannot decrypt.
-        Only rebroadcasts message on the nodes local primary / secondary channels.
+        Only rebroadcasts messages on the node's local primary / secondary channels.
         """
         KNOWN_ONLY: Config.DeviceConfig.RebroadcastMode.ValueType  # 3
         """
         Ignores observed messages from foreign meshes like LOCAL_ONLY,
-        but takes it step further by also ignoring messages from nodenums not in the node's known list (NodeDB)
+        but takes it a step further by also ignoring messages from nodenums not in the node's known list (NodeDB)
         """
         NONE: Config.DeviceConfig.RebroadcastMode.ValueType  # 4
         """
@@ -413,7 +413,7 @@ class Config(_message.Message):
         node_info_broadcast_secs: _builtins.int
         """
         Send our nodeinfo this often
-        Defaults to 900 Seconds (15 minutes)
+        Defaults to 10800 seconds (3 hours), minimum 3600 (1 hour)
         """
         double_tap_as_button_press: _builtins.bool
         """
@@ -647,7 +647,7 @@ class Config(_message.Message):
         position_broadcast_secs: _builtins.int
         """
         We should send our position this often (but only if it has changed significantly)
-        Defaults to 15 minutes
+        Defaults to 1 hour (12 hours on routers)
         """
         position_broadcast_smart_enabled: _builtins.bool
         """
@@ -676,7 +676,7 @@ class Config(_message.Message):
         gps_update_interval: _builtins.int
         """
         How often should we try to get GPS position (in seconds)
-        or zero for the default of once every 30 seconds
+        or zero for the default of once every 2 minutes (24 hours on routers)
         or a very large value (maxint) to update only once at boot.
         """
         @_builtins.property
@@ -765,7 +765,7 @@ class Config(_message.Message):
         POWERMON_ENABLES_FIELD_NUMBER: _builtins.int
         is_power_saving: _builtins.bool
         """
-        Description: Will sleep everything as much as possible, for the tracker and sensor role this will also include the lora radio.
+        Description: Will sleep everything as much as possible, for the Tracker and Sensor roles this also includes the LoRa radio.
         Don't use this setting if you want to use your device with the phone apps or are using a device without a user button.
         Technical Details: Works for ESP32 devices and NRF52 devices in the Sensor or Tracker roles
         """
@@ -1137,7 +1137,7 @@ class Config(_message.Message):
             """
             COLOR: Config.DisplayConfig._DisplayMode.ValueType  # 3
             """
-            TFT Full Color Displays (not implemented yet)
+            TFT Full Color Displays, which select the MUI
             """
 
         class DisplayMode(_DisplayMode, metaclass=_DisplayModeEnumTypeWrapper): ...
@@ -1155,7 +1155,7 @@ class Config(_message.Message):
         """
         COLOR: Config.DisplayConfig.DisplayMode.ValueType  # 3
         """
-        TFT Full Color Displays (not implemented yet)
+        TFT Full Color Displays, which select the MUI
         """
 
         class _CompassOrientation:
@@ -1248,7 +1248,7 @@ class Config(_message.Message):
         screen_on_secs: _builtins.int
         """
         Number of seconds the screen stays on after pressing the user button or receiving a message
-        0 for default of one minute MAXUINT for always on
+        0 for default of ten minutes, MAXUINT for always on
         """
         @_builtins.property
         @_deprecated("""This field has been marked as deprecated using proto field options.""")
@@ -1725,13 +1725,13 @@ class Config(_message.Message):
             SHORT_TURBO: Config.LoRaConfig._ModemPreset.ValueType  # 8
             """
             Short Range - Turbo
-            This is the fastest preset and the only one with 500kHz bandwidth.
+            This is the fastest preset, and one of three with 500kHz bandwidth.
             It is not legal to use in all regions due to this wider bandwidth.
             """
             LONG_TURBO: Config.LoRaConfig._ModemPreset.ValueType  # 9
             """
             Long Range - Turbo
-            This preset performs similarly to LongFast, but with 500Khz bandwidth.
+            This preset performs similarly to LongFast, but with 500kHz bandwidth.
             """
             LITE_FAST: Config.LoRaConfig._ModemPreset.ValueType  # 10
             """
@@ -1826,13 +1826,13 @@ class Config(_message.Message):
         SHORT_TURBO: Config.LoRaConfig.ModemPreset.ValueType  # 8
         """
         Short Range - Turbo
-        This is the fastest preset and the only one with 500kHz bandwidth.
+        This is the fastest preset, and one of three with 500kHz bandwidth.
         It is not legal to use in all regions due to this wider bandwidth.
         """
         LONG_TURBO: Config.LoRaConfig.ModemPreset.ValueType  # 9
         """
         Long Range - Turbo
-        This preset performs similarly to LongFast, but with 500Khz bandwidth.
+        This preset performs similarly to LongFast, but with 500kHz bandwidth.
         """
         LITE_FAST: Config.LoRaConfig.ModemPreset.ValueType  # 10
         """
@@ -1962,7 +1962,7 @@ class Config(_message.Message):
         """
         spread_factor: _builtins.int
         """
-        A number from 5 to 12, which the firmware clamps to that range.
+        A number from 5 to 12; firmware replaces a value outside that range with 11.
         Indicates number of chirps per symbol as 1<<spread_factor.
         RF95 radios additionally reject 5 and 6; that exclusion is per hardware
         and so is not expressible as a bound here.
@@ -1972,7 +1972,7 @@ class Config(_message.Message):
         The denominator of the coding rate.
         ie for 4/5, the value is 5. 4/8 the value is 8.
 
-        With `use_preset` disabled this is the coding rate, clamped to 5 through 8.
+        With `use_preset` disabled this is the coding rate, 4 through 8; firmware replaces a value outside that range with 5.
 
         With `use_preset` enabled, since 2.7.18 this raises the preset's coding rate
         when it is 5 through 8 AND higher than the preset's. A lower value, a value
@@ -1999,7 +1999,7 @@ class Config(_message.Message):
         """
         Maximum number of hops. This can't be greater than 7.
         Default of 3
-        Attempting to set a value > 7 results in the default
+        Values above 7 are treated as 7
         """
         tx_enabled: _builtins.bool
         """
@@ -2236,7 +2236,7 @@ class Config(_message.Message):
         """
         serial_enabled: _builtins.bool
         """
-        Serial Console over the Stream API."
+        Serial Console over the Stream API.
         """
         debug_log_api_enabled: _builtins.bool
         """
