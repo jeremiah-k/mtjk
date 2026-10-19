@@ -946,14 +946,14 @@ class TestBLEReceiveRecoveryControllerEmptyReadWarnings:
             with caplog.at_level(logging.DEBUG):
                 controller.log_empty_read_warning()
 
-        assert "Exceeded max retries for empty BLE read" in caplog.text
+        assert "BLE receive queue empty after retries" in caplog.text
         assert "polling mode without FROMNUM notifications" in caplog.text
         assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
-    def test_log_empty_read_warning_uses_warning_with_fromnum_notify(
+    def test_log_empty_read_warning_uses_debug_with_fromnum_notify(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When FROMNUM notifications are enabled, empty-read exhaustion remains warning-level."""
+        """Notify mode also permits advisory write wakeups with no response data."""
         iface = self._Iface(fromnum_notify_enabled=True)
         controller = BLEReceiveRecoveryController(cast(Any, iface))
 
@@ -961,11 +961,11 @@ class TestBLEReceiveRecoveryControllerEmptyReadWarnings:
             "meshtastic.interfaces.ble.receive_service.time.monotonic",
             return_value=100.0,
         ):
-            with caplog.at_level(logging.WARNING):
+            with caplog.at_level(logging.DEBUG):
                 controller.log_empty_read_warning()
 
-        assert "Exceeded max retries for empty BLE read" in caplog.text
-        assert any(record.levelno == logging.WARNING for record in caplog.records)
+        assert "BLE receive queue empty after retries" in caplog.text
+        assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
 
 class TestBLEReceiveRecoveryServiceCoordinatorOperations:
