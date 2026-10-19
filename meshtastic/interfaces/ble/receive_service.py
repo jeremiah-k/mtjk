@@ -1100,7 +1100,11 @@ class BLEReceiveRecoveryController:
         ) from error
 
     def log_empty_read_warning(self) -> None:
-        """Emit empty-read warning for the bound interface."""
+        """Record successful empty reads as diagnostics (historical hook name).
+
+        Read triggers are advisory: writes, including heartbeats, also wake the
+        loop. Empty data alone is not evidence of a GATT or connection failure.
+        """
         iface = self._iface
         override_log_empty_read_warning = self._resolve_iface_receive_hook_override(
             "_log_empty_read_warning"
@@ -1127,14 +1131,14 @@ class BLEReceiveRecoveryController:
                 suppressed = self._session.suppressed_empty_read_warnings
 
         if should_emit:
-            message = f"Exceeded max retries for empty BLE read from {FROMRADIO_UUID}"
+            message = f"BLE receive queue empty after retries from {FROMRADIO_UUID}"
             if suppressed:
                 message = (
                     f"{message} (suppressed {suppressed} repeats in the last "
                     f"{cooldown:.0f}s)"
                 )
             if notify_enabled:
-                logger.warning(message)
+                logger.debug(message)
             else:
                 logger.debug(
                     "%s (polling mode without FROMNUM notifications)",
