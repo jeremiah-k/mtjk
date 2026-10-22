@@ -14,7 +14,7 @@ from typing import Any
 
 from meshtastic.interface_proxy._bluez import (
     _install_advertising,
-    _install_read_handler,
+    _install_request_handler,
 )
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
@@ -287,7 +287,7 @@ class BLEPeripheralChannel:
                 Perm.readable,
             )
             if bluez_adapter is not None:
-                _install_read_handler(server)
+                _install_request_handler(server)
             await server.start()
         except BaseException as exc:
             with contextlib.suppress(Exception):

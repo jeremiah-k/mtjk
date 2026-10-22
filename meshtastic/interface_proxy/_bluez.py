@@ -1,4 +1,4 @@
-"""BlueZ read-offset handling missing from Bless's portable callbacks."""
+"""BlueZ GATT options and session isolation missing from Bless callbacks."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from meshtastic.interfaces.ble.constants import FROMNUM_UUID, FROMRADIO_UUID
+from meshtastic.interfaces.ble.constants import (
+    FROMNUM_UUID,
+    FROMRADIO_UUID,
+    TORADIO_UUID,
+)
 
 _LOG = logging.getLogger(__name__)
 _GATT_INTERFACE = "org.bluez.GattCharacteristic1"
@@ -60,7 +64,15 @@ class _ReadSnapshot:
     def _read(
         self, offset: int, device: str | None, consume: Callable[[], bytes]
     ) -> bytes:
-        if offset < 0:
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or not 0 <= offset <= 65535
+        ):
+            raise ValueError("Invalid read offset")
+        # A second identified central must never consume the first central's
+        # queued packets. The GATT server is intentionally single-session.
+        if self._device is not None and device != self._device:
             raise ValueError("Invalid read offset")
         if offset == 0:
             self._payload = consume()
@@ -70,13 +82,13 @@ class _ReadSnapshot:
         return self._payload[offset:]
 
 
-def _install_read_handler(server: Any) -> None:
-    """Preserve packets across BlueZ ReadValue(offset=...) calls.
+def _install_request_handler(server: Any) -> None:
+    """Preserve consuming reads and one central across BlueZ GATT requests.
 
-    Bless 0.3.0 discards ReadValue options before invoking our callback. Its
-    callback therefore consumes another FROMRADIO packet on every Read Blob
-    request. Use the owned bus's message-handler API to retain those options;
-    leave service registration and all other requests to Bless.
+    Bless 0.3.0 discards read/write options before invoking our callbacks.
+    Retain read offsets and session identity on the owned bus. TORADIO accepts
+    complete writes only: fragments and prepared writes cannot be forwarded as
+    independent radio commands. Leave all other requests to Bless.
     """
     # These are already required by Bless's Linux backend, but stay optional
     # when importing the proxy on other platforms or without BLE advertising.
@@ -88,20 +100,58 @@ def _install_read_handler(server: Any) -> None:
     for uuid in (FROMRADIO_UUID, FROMNUM_UUID):
         characteristic = server.get_characteristic(uuid).gatt
         reads[characteristic.path] = (characteristic, _ReadSnapshot())
+    writable = server.get_characteristic(TORADIO_UUID).gatt
+    central: str | None = None
 
     def _on_message(message: Any) -> Any:
-        if (
-            message.message_type != MessageType.METHOD_CALL
-            or message.interface != _GATT_INTERFACE
-            or message.member != "ReadValue"
-            or message.path not in reads
-            or message.signature != "a{sv}"
-        ):
+        nonlocal central
+        gatt_call = (
+            message.message_type == MessageType.METHOD_CALL
+            and message.interface == _GATT_INTERFACE
+        )
+        reading = (
+            gatt_call
+            and message.member == "ReadValue"
+            and message.path in reads
+            and message.signature == "a{sv}"
+        )
+        writing = (
+            gatt_call
+            and message.member == "WriteValue"
+            and message.path == writable.path
+            and message.signature == "aya{sv}"
+        )
+        if not reading and not writing:
             return None
-        characteristic, snapshot = reads[message.path]
-        options = message.body[0]
+        options = message.body[0 if reading else 1]
         offset = options["offset"].value if "offset" in options else 0
         device = options["device"].value if "device" in options else None
+        if central is not None and device != central:
+            error = "InvalidOffset" if reading else "NotPermitted"
+            return Message.new_error(
+                message, f"org.bluez.Error.{error}", "BLE proxy already has a central"
+            )
+        if writing:
+            preparing = (
+                options["prepare-authorize"].value
+                if "prepare-authorize" in options
+                else False
+            )
+            if (
+                isinstance(offset, bool)
+                or not isinstance(offset, int)
+                or offset != 0
+                or preparing
+            ):
+                return Message.new_error(
+                    message,
+                    "org.bluez.Error.NotSupported",
+                    "TORADIO requires a complete, non-prepared write at offset zero",
+                )
+            server.write(writable, message.body[0])
+            central = device
+            return Message.new_method_return(message, "", [])
+        characteristic, snapshot = reads[message.path]
         try:
             value = snapshot._read(
                 offset, device, lambda: bytes(server.read(characteristic))
@@ -110,6 +160,7 @@ def _install_read_handler(server: Any) -> None:
             return Message.new_error(
                 message, "org.bluez.Error.InvalidOffset", "Invalid read offset"
             )
+        central = device
         _LOG.debug("BLE GATT read offset=%d returned %d bytes", offset, len(value))
         return Message.new_method_return(message, "ay", [value])
 
