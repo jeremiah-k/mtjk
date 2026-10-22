@@ -118,6 +118,16 @@ cannot be a BLE central and peripheral simultaneously. The BLE peripheral is a
 Windows Bless installation may additionally require `pysetupdi` as documented
 by Bless.
 
+On BlueZ, the first identified central to read or write owns all three transport
+characteristics for that server's lifetime. Subsequent requests with a different
+or missing device identity are rejected before consuming or forwarding packets.
+This does not authenticate the first central. If the backend never supplies an
+identity, central isolation remains best effort. The handler also preserves the
+[BlueZ write options](https://bluez.readthedocs.io/en/latest/gatt-api/#characteristic-hierarchy):
+nonzero offsets and prepare-authorization requests are rejected instead of
+forwarding fragments as complete TORADIO packets. Complete, already-assembled
+writes pass unchanged; small-MTU interoperability remains unqualified.
+
 **PTY limitations:** Unix pseudo-terminals cannot enforce a single external
 reader at the kernel API level. Use exactly one serial client, and open the
 slave while the proxy is running. The PTY path is ephemeral, disappears when
