@@ -1006,7 +1006,7 @@ def test_ble_peripheral_reports_backend_startup_error(
         lambda _server: None,
     )
     monkeypatch.setattr(
-        "meshtastic.interface_proxy.endpoints._install_read_handler",
+        "meshtastic.interface_proxy.endpoints._install_request_handler",
         lambda _server: None,
     )
 
