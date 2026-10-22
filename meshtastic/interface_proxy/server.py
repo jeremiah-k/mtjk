@@ -167,6 +167,7 @@ async def run_single_endpoint(options: ProxyOptions) -> None:
             # Rebinding a live GATT client to a new upstream would mix the
             # old device's config stream with the replacement's state.
             await downstream.wait_for_central()
+            _LOG.debug("BLE central subscribed; opening proxy upstream")
         upstream = await connect_upstream(options.upstream)
         try:
             await bridge(upstream, downstream)
