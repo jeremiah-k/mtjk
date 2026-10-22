@@ -103,7 +103,9 @@ def test_bluez_read_continuations_preserve_packet(
     _install_read_handler(server)
     handler = server.bus.add_message_handler.call_args.args[0]
 
-    def read(offset: int, device: str = "central", path: str = FROMRADIO_UUID) -> Any:
+    def read(
+        offset: object, device: str | None = "central", path: str = FROMRADIO_UUID
+    ) -> Any:
         return handler(
             types.SimpleNamespace(
                 message_type="call",
@@ -126,6 +128,12 @@ def test_bluez_read_continuations_preserve_packet(
     assert read(len(first)) == b""
     assert read(101) == "org.bluez.Error.InvalidOffset"
     assert read(22, device="another central") == "org.bluez.Error.InvalidOffset"
+    # Even a fresh offset-zero read may not steal another central's packet.
+    assert read(0, device="another central") == "org.bluez.Error.InvalidOffset"
+    assert read(0, device=None) == "org.bluez.Error.InvalidOffset"
+    assert read(-1) == "org.bluez.Error.InvalidOffset"
+    assert read(65536) == "org.bluez.Error.InvalidOffset"
+    assert read("invalid") == "org.bluez.Error.InvalidOffset"
     assert read(0) == second
     assert read(0) == b""
     assert read(1) == "org.bluez.Error.InvalidOffset"
