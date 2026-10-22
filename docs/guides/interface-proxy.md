@@ -276,3 +276,22 @@ MTU 517. Requesting MTU 23 failed on the first nonempty read, so small-MTU
 interoperability is still unqualified despite the continuation-read regression
 fix. The Atheros controller also failed the phone's LE link establishment
 (status 133, native reason 0x3e) before any GATT request.
+
+
+A clean proxy restart exposed an additional Android bonding/reconnect limit.
+The PC retained a bond while Android had returned to `BOND_NONE`. Clearing the
+bond on both sides and retrying from the app still failed, including with a
+temporary DisplayOnly agent. With the same running proxy and a temporary
+`NoInputNoOutput` agent, a diagnostic call to Android's
+`createBond(TRANSPORT_LE)` reached `BOND_BONDED`. Meshtastic then connected and
+loaded configuration after an explicit Connect action. The recovered server
+used the ordinary CLI with explicit controller/source-interface flags; no
+backend factory override was needed. It was left running for the phone.
+
+Android's HCI summary independently showed classic SSP authentication failures
+and a subsequent successful encrypted LE connection in the explicit-LE test.
+This supports investigating the app's automatic bonding transport on a cached
+dual-mode desktop identity; it does not establish that all automatic bonding
+or proxy restart paths work. The installed 2.8.3 APK's name regex accepts
+`MT_fcc6`; the displayed `x` prefix comes from the app's saved Bluetooth
+transport identifier when its UI falls back from a device-list entry.
