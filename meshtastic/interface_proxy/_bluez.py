@@ -37,7 +37,7 @@ def _install_advertising(server: Any) -> None:
 
     app = server.app
 
-    async def start_advertising(adapter: Any) -> None:
+    async def _start_advertising(adapter: Any) -> None:
         # Keep Bless's advertisement ownership/cleanup and local-name behavior.
         await app.set_name(adapter, app.app_name)
         advertisement = Advertisement(Type.PERIPHERAL, len(app.advertisements) + 1, app)
@@ -47,7 +47,7 @@ def _install_advertising(server: Any) -> None:
         manager = adapter.get_interface("org.bluez.LEAdvertisingManager1")
         await manager.call_register_advertisement(advertisement.path, {})
 
-    app.start_advertising = start_advertising
+    app.start_advertising = _start_advertising
 
 
 class _ReadSnapshot:
@@ -89,7 +89,7 @@ def _install_read_handler(server: Any) -> None:
         characteristic = server.get_characteristic(uuid).gatt
         reads[characteristic.path] = (characteristic, _ReadSnapshot())
 
-    def on_message(message: Any) -> Any:
+    def _on_message(message: Any) -> Any:
         if (
             message.message_type != MessageType.METHOD_CALL
             or message.interface != _GATT_INTERFACE
@@ -113,4 +113,4 @@ def _install_read_handler(server: Any) -> None:
         _LOG.debug("BLE GATT read offset=%d returned %d bytes", offset, len(value))
         return Message.new_method_return(message, "ay", [value])
 
-    server.bus.add_message_handler(on_message)
+    server.bus.add_message_handler(_on_message)

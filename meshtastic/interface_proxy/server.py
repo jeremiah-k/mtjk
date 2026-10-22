@@ -75,13 +75,13 @@ async def bridge(upstream: PacketChannel, downstream: PacketChannel) -> None:
     proxy variants) is never parsed, filtered, decrypted, or rewritten.
     """
 
-    async def transfer(source: PacketChannel, destination: PacketChannel) -> None:
+    async def _transfer(source: PacketChannel, destination: PacketChannel) -> None:
         while (packet := await source.recv()) is not None:
             await destination.send(packet)
 
     tasks = (
-        asyncio.create_task(transfer(upstream, downstream), name="radio-to-client"),
-        asyncio.create_task(transfer(downstream, upstream), name="client-to-radio"),
+        asyncio.create_task(_transfer(upstream, downstream), name="radio-to-client"),
+        asyncio.create_task(_transfer(downstream, upstream), name="client-to-radio"),
     )
     try:
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -103,7 +103,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
     active_client = False
     sessions: set[asyncio.Task[None]] = set()
 
-    async def handle(
+    async def _handle(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         nonlocal active_client
@@ -128,15 +128,15 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
             active_client = False
             await downstream.close()
 
-    def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    def _accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         # Register synchronously: shutdown may run before the coroutine starts.
-        task = asyncio.create_task(handle(reader, writer))
+        task = asyncio.create_task(_handle(reader, writer))
         sessions.add(task)
         task.add_done_callback(sessions.discard)
-        # A task cancelled before its first step never enters handle's finally.
+        # A task cancelled before its first step never enters _handle's finally.
         task.add_done_callback(lambda _task: writer.close())
 
-    server = await asyncio.start_server(accept, host, port)
+    server = await asyncio.start_server(_accept, host, port)
     try:
         _LOG.warning("Unauthenticated Meshtastic proxy listening on %s:%d", host, port)
         # start_server already accepts connections. Own cancellation here:
