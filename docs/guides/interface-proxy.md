@@ -184,10 +184,9 @@ different vendors failing identically points at the host stack rather than
 the adapters: kernel regressions that make MGMT Add Advertising return 0x0d
 are a documented, recurring problem class in 2026-era kernels (BlueZ issue
 875 and its backported fixes; Raspberry Pi issues 7473 and the
-RPi-Distro 407 6.12-series regression). This host runs a 7.0 HWE kernel;
-the next diagnostic step is retesting the adapter-level canary on the older
-installed 6.17 kernel and, if it reproduces there too, capturing the failing
-HCI exchange with `btmon` for an upstream report.
+RPi-Distro 407 6.12-series regression). These observations apply to the host
+stack tested on October 16; advertising was retested after a kernel update
+as recorded below.
 
 Regardless of the eventual root cause, the qualification procedure stands:
 confirm the adapter-level canary `bluetoothctl advertise on` succeeds, then a
@@ -200,3 +199,38 @@ is reset.
 The gateway now translates backend startup/shutdown failures into CLI errors,
 releases its owned BlueZ D-Bus connection after cleanup failures, and restores
 the host adapter alias that Bless changes during advertising.
+
+On 2026-10-22, with kernel `7.0.0-38-generic` and BlueZ 5.72, the Broadcom
+controller successfully registered repeated `bluetoothctl` advertisements and
+an unmodified Bless 0.3.0 Meshtastic GATT advertisement. Advertising therefore
+no longer requires the proposed older-kernel comparison on this host.
+
+A second local Bluetooth controller, acting as a paired central, completed
+a T1000-E USB serial → BLE peripheral configuration download: 51 protobuf
+messages, including the matching configuration-complete token, with a maximum
+payload of 243 bytes. The proxy exited when that central disconnected. This
+download used a temporary Bless advertisement with `Discoverable=true`; that
+change did not resolve the Android failure and is not part of the gateway.
+A second download passed with unmodified Bless on the Atheros controller,
+using a fresh, unpaired central connection from the Broadcom controller.
+An LE-only scan discovered the server and the controller connection list
+confirmed LE transport. This qualifies those connections' data paths, rather
+than all ATT MTUs or phones.
+
+The Android app could discover the proxy but failed in its bonding step,
+before GATT connection or configuration download. Shortening the advertised
+name to the firmware-style `MT_fcc6` and enabling advertisement discoverability
+did not resolve it. The failure also occurred with the second controller's
+distinct address and with a second phone. A successful explicit pairing between
+the two local Linux controllers does not establish Android pairing
+compatibility. Temporarily enabling desktop discoverability on the Atheros
+adapter allowed a pairing-code dialog to appear, but the phone log showed
+Meshtastic's 30-second bonding timeout, followed by Android returning from
+`BONDING` to `NONE` after about 44 seconds. No completed bond or subsequent
+GATT connection to the proxy appeared in that log. Confirming a code therefore
+did not qualify phone pairing. The original desktop discoverability settings
+were restored after the experiment.
+
+The gateway's characteristics are unencrypted and it does not implement
+firmware's fixed PIN pairing mode; `123456` is not configured as a proxy PIN.
+Android bonding remains unqualified.
