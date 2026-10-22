@@ -138,8 +138,9 @@ def _connect_tcp(
         for source in sources:
             if (":" in source) != (family == socket.AF_INET6):
                 continue
-            sock = socket.socket(family, kind, protocol)
+            sock = None
             try:
+                sock = socket.socket(family, kind, protocol)
                 if timeout is not None:
                     sock.settimeout(timeout)
                 local = socket.getaddrinfo(
@@ -150,9 +151,11 @@ def _connect_tcp(
                 return sock
             except OSError as exc:
                 error = exc
-                sock.close()
+                if sock is not None:
+                    sock.close()
             except BaseException:
-                sock.close()
+                if sock is not None:
+                    sock.close()
                 raise
     if error is not None:
         raise error

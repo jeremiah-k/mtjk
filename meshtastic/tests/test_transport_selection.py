@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import socket
 import threading
 from typing import Any
@@ -117,6 +118,37 @@ def test_async_tcp_tries_compatible_sources(monkeypatch: pytest.MonkeyPatch) -> 
         ("::1", 0),
         ("127.0.0.1", 0),
     ]
+
+
+def test_sync_tcp_falls_back_when_socket_family_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unsupported first socket family must not prevent a usable connection."""
+    monkeypatch.setattr(
+        selection, "_network_addresses", lambda _name: ["::1", "127.0.0.1"]
+    )
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        MagicMock(
+            side_effect=[
+                [
+                    (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 4403, 0, 0)),
+                    (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 4403)),
+                ],
+                [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))],
+            ]
+        ),
+    )
+    connected = MagicMock()
+    factory = MagicMock(
+        side_effect=[OSError(errno.EAFNOSUPPORT, "IPv6 unavailable"), connected]
+    )
+    monkeypatch.setattr(socket, "socket", factory)
+    assert selection._connect_tcp("radio", 4403, "loop", 2) is connected
+    connected.bind.assert_called_once_with(("127.0.0.1", 0))
+    connected.connect.assert_called_once_with(("127.0.0.1", 4403))
+    connected.close.assert_not_called()
 
 
 @pytest.mark.parametrize(
