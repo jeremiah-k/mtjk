@@ -12,6 +12,7 @@ import sys
 import threading
 from typing import Any
 
+from meshtastic.interface_proxy._bluez import _install_read_handler
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
@@ -236,6 +237,7 @@ class BLEPeripheralChannel:
             except ValueError as exc:
                 channel._loop.call_soon_threadsafe(setattr, channel, "_fatal", exc)
                 return
+            _LOG.debug("BLE TORADIO write received: %d bytes", len(payload))
             channel._loop.call_soon_threadsafe(enqueue, payload)
 
         server.read_request_func = on_read
@@ -277,6 +279,8 @@ class BLEPeripheralChannel:
                 Perm.readable,
             )
             await server.start()
+            if adapter is not None:
+                _install_read_handler(server)
         except BaseException as exc:
             with contextlib.suppress(Exception):
                 await channel._stop_backend()

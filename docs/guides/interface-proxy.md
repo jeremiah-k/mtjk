@@ -234,3 +234,26 @@ were restored after the experiment.
 The gateway's characteristics are unencrypted and it does not implement
 firmware's fixed PIN pairing mode; `123456` is not configured as a proxy PIN.
 Android bonding remains unqualified.
+
+Further TCP → BLE tests used the Docker meshtasticd simulator on loopback,
+with the Atheros controller hosting the peripheral and the Broadcom controller
+as the central. A complete configuration download passed with ATT MTU 517,
+including notification subscription and the matching configuration-complete
+token. The normal `mtjk --info` path also completed with the client explicitly
+selected to use the Broadcom controller. Without that selection, a failed CLI
+run scanned on the same controller that hosted the peripheral. General BLE
+adapter selection is a separate transport-selection concern.
+
+A targeted backend reproduction found that Bless 0.3.0 discards BlueZ read
+offsets: a continuation read consumed the next FROMRADIO packet. The gateway
+now handles BlueZ continuation reads on its owned D-Bus connection, retaining
+the original packet and returning its suffix, as the firmware does. The
+offset reproduction and another real TCP → BLE configuration download passed
+after the fix. Physical connections at smaller MTUs remain unqualified.
+
+Pairing before GATT timed out with the desktop pairing agent. A temporary
+`NoInputNoOutput` test agent restricted to the two local controllers allowed
+both sides to record a completed bond and the same configuration download to
+finish. That agent was removed and the desktop agent restored after the test;
+it is not installed by the gateway. This separates local Bluetooth pairing
+authorization from the Meshtastic protocol bytes forwarded over TCP or serial.
