@@ -261,7 +261,6 @@ finish. That agent was removed and the desktop agent restored after the test;
 it is not installed by the gateway. This separates local Bluetooth pairing
 authorization from the Meshtastic protocol bytes forwarded over TCP or serial.
 
-
 Android 2.8.3 qualification used an ADB-connected TCL T768S running Android 11,
 Docker meshtasticd TCP input, and the Broadcom controller as the peripheral.
 After pairing with a temporary, controller-restricted `NoInputNoOutput` agent,
@@ -276,7 +275,6 @@ MTU 517. Requesting MTU 23 failed on the first nonempty read, so small-MTU
 interoperability is still unqualified despite the continuation-read regression
 fix. The Atheros controller also failed the phone's LE link establishment
 (status 133, native reason 0x3e) before any GATT request.
-
 
 A clean proxy restart exposed an additional Android bonding/reconnect limit.
 The PC retained a bond while Android had returned to `BOND_NONE`. Clearing the

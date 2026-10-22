@@ -60,7 +60,15 @@ class _ReadSnapshot:
     def _read(
         self, offset: int, device: str | None, consume: Callable[[], bytes]
     ) -> bytes:
-        if offset < 0:
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or not 0 <= offset <= 65535
+        ):
+            raise ValueError("Invalid read offset")
+        # A second identified central must never consume the first central's
+        # queued packets. The GATT server is intentionally single-session.
+        if self._device is not None and device != self._device:
             raise ValueError("Invalid read offset")
         if offset == 0:
             self._payload = consume()
