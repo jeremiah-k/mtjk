@@ -12,7 +12,7 @@ import sys
 import threading
 from typing import Any
 
-from meshtastic.interface_proxy._bluez import _install_read_handler
+from meshtastic.interface_proxy._bluez import _install_advertising, _install_read_handler
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
@@ -257,6 +257,7 @@ class BLEPeripheralChannel:
                 channel._adapter_alias = await channel._adapter_properties.call_get(
                     "org.bluez.Adapter1", "Alias"
                 )
+                _install_advertising(server)
             await server.add_new_characteristic(
                 SERVICE_UUID,
                 TORADIO_UUID,
@@ -278,9 +279,9 @@ class BLEPeripheralChannel:
                 bytearray(b"\x00\x00\x00\x00"),
                 Perm.readable,
             )
-            await server.start()
             if adapter is not None:
                 _install_read_handler(server)
+            await server.start()
         except BaseException as exc:
             with contextlib.suppress(Exception):
                 await channel._stop_backend()

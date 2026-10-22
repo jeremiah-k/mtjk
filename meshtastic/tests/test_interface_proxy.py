@@ -1001,6 +1001,15 @@ def test_ble_peripheral_reports_backend_startup_error(
     """Backend-specific advertising failures become normal CLI transport errors."""
     from unittest.mock import AsyncMock
 
+    monkeypatch.setattr(
+        "meshtastic.interface_proxy.endpoints._install_advertising",
+        lambda _server: None,
+    )
+    monkeypatch.setattr(
+        "meshtastic.interface_proxy.endpoints._install_read_handler",
+        lambda _server: None,
+    )
+
     class BackendError(Exception):
         pass
 
