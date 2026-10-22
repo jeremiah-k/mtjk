@@ -217,7 +217,7 @@ class BLEPeripheralChannel:
         )
         channel = cls(server, BLEMailbox())
 
-        def on_read(characteristic: Any, *_args: Any, **_kwargs: Any) -> bytearray:
+        def _on_read(characteristic: Any, *_args: Any, **_kwargs: Any) -> bytearray:
             uuid = str(characteristic.uuid).lower()
             if uuid == FROMRADIO_UUID:
                 payload = channel.mailbox.pop()
@@ -228,13 +228,13 @@ class BLEPeripheralChannel:
                 return bytearray(channel.mailbox.current_counter())
             return bytearray()
 
-        def enqueue(raw: bytes) -> None:
+        def _enqueue(raw: bytes) -> None:
             try:
                 channel._incoming.put_nowait(raw)
             except asyncio.QueueFull:
                 channel._fatal = OverflowError("BLE peripheral TORADIO queue overflow")
 
-        def on_write(
+        def _on_write(
             characteristic: Any, value: Any, *_args: Any, **_kwargs: Any
         ) -> None:
             if str(characteristic.uuid).lower() != TORADIO_UUID:
@@ -245,10 +245,10 @@ class BLEPeripheralChannel:
                 channel._loop.call_soon_threadsafe(setattr, channel, "_fatal", exc)
                 return
             _LOG.debug("BLE TORADIO write received: %d bytes", len(payload))
-            channel._loop.call_soon_threadsafe(enqueue, payload)
+            channel._loop.call_soon_threadsafe(_enqueue, payload)
 
-        server.read_request_func = on_read
-        server.write_request_func = on_write
+        server.read_request_func = _on_read
+        server.write_request_func = _on_write
         try:
             await server.add_new_service(SERVICE_UUID)
             # Bless's BlueZ backend changes the host adapter Alias when it
