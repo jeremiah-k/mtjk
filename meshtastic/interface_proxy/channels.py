@@ -7,8 +7,9 @@ import contextlib
 import logging
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
+from meshtastic._transport_selection import _open_tcp_connection
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
@@ -190,7 +191,9 @@ class BLECentralChannel:
         self._receive_task: asyncio.Task[None] | None = None
 
     @classmethod
-    async def open(cls, address: str) -> BLECentralChannel:
+    async def open(
+        cls, address: str, *, adapter: str | None = None
+    ) -> BLECentralChannel:
         """Connect to a BLE radio using the existing Bleak dependency."""
         from bleak import BleakClient  # pylint: disable=import-outside-toplevel
 
@@ -206,7 +209,14 @@ class BLECentralChannel:
                     loop.call_soon_threadsafe(link._transport_disconnected.set)
                     loop.call_soon_threadsafe(link._wake.set)
 
-        client = BleakClient(address, disconnected_callback=_disconnected)
+        transport_options: dict[str, Any] = {}
+        if adapter is not None:
+            transport_options["bluez"] = {"adapter": adapter}
+        client = BleakClient(
+            address,
+            disconnected_callback=_disconnected,
+            **transport_options,
+        )
         link = cls(client)
 
         def _notified(_char: object, _value: bytearray) -> None:
@@ -298,16 +308,20 @@ class BLECentralChannel:
         await self._client.disconnect()
 
 
-async def connect_upstream(uri: str) -> PacketChannel:
+async def connect_upstream(
+    uri: str, *, ble_adapter: str | None = None, network_interface: str | None = None
+) -> PacketChannel:
     """Connect to a serial, TCP, or BLE upstream radio endpoint."""
     if uri.startswith("serial:") and uri[7:]:
         return await SerialChannel.open(uri[7:])
     if uri.startswith("tcp:"):
         host, port = parse_tcp_endpoint(uri[4:])
-        reader, writer = await asyncio.open_connection(host, port)
+        reader, writer = await _open_tcp_connection(host, port, network_interface)
         return StreamChannel(reader, writer)
     if uri.startswith("ble:") and uri[4:]:
-        return await BLECentralChannel.open(uri[4:])
+        return await BLECentralChannel.open(
+            uri[4:], **({"adapter": ble_adapter} if ble_adapter is not None else {})
+        )
     raise ValueError("proxy input must be serial:PATH, tcp:HOST:PORT, or ble:ADDRESS")
 
 

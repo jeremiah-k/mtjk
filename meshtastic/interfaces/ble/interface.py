@@ -46,6 +46,7 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDBusError, BleakError
 
 import meshtastic.interfaces.ble.constants as _ble_constants
+from meshtastic._transport_selection import _validate_ble_adapter
 from meshtastic._publishing import publishing_thread as publishingThread
 from meshtastic.cancellation import (
     _acquire_lock,
@@ -249,6 +250,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         auto_reconnect: bool = False,
         pair_on_connect: bool = False,
         cancelEvent: threading.Event | None = None,
+        bleAdapter: str | None = None,
     ) -> None:
         """Initialize the BLEInterface, configure background threads, and attempt an initial connection to a Meshtastic BLE device.
 
@@ -264,6 +266,9 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         pair_on_connect : bool
             If True, request BLE pairing as part of each connect attempt. This maps
             to Bleak's `BleakClient(..., pair=True)` behavior. (Default value = False)
+        bleAdapter : str | None
+            Linux BlueZ controller name, such as hci0, retained across discovery
+            and reconnects. None uses the backend's default controller.
         noProto : bool
             If True, skip protobuf protocol initialization. (Default value = False)
         debugOut : IO[str] | Callable[[str], Any] | None
@@ -320,6 +325,8 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         self._exit_handler: Any | None = None
         self.address = address
         self._last_connection_request: str | None = sanitize_address(address)
+        _validate_ble_adapter(bleAdapter)
+        self._adapter = bleAdapter
         self.auto_reconnect = auto_reconnect
         if not isinstance(pair_on_connect, bool):
             raise self.BLEError(ERROR_PAIR_ON_CONNECT_BOOL)
@@ -332,7 +339,11 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         self.thread_coordinator = ThreadCoordinator()
         self._notification_manager = NotificationManager()
         self._notification_dispatcher = self._create_notification_dispatcher()
-        self._discovery_manager: DiscoveryManager | None = DiscoveryManager()
+        self._discovery_manager: DiscoveryManager | None = (
+            DiscoveryManager(adapter=bleAdapter)
+            if bleAdapter is not None
+            else DiscoveryManager()
+        )
         self._connection_validator = ConnectionValidator(
             self._state_manager, state_lock, self.BLEError
         )
@@ -341,6 +352,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             state_lock,
             self.thread_coordinator,
             self.error_handler,
+            **({"adapter": bleAdapter} if bleAdapter is not None else {}),
         )
         self._connection_orchestrator = ConnectionOrchestrator(
             self,
@@ -873,7 +885,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         )
 
     @staticmethod
-    def scan() -> list[BLEDevice]:
+    def scan(adapter: str | None = None) -> list[BLEDevice]:
         """Scan for BLE devices advertising the Meshtastic service UUID.
 
         Performs a timed scan and returns discovered devices that advertise the Meshtastic service.
@@ -889,6 +901,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         BleakDBusError
             If a DBus-level error occurs during scanning (propagated to callers).
         """
+        _validate_ble_adapter(adapter)
         with BLEClient(log_if_no_address=False) as client:
             logger.debug(
                 "Scanning for BLE devices (takes %.0f seconds)...",
@@ -899,6 +912,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                     timeout=BLEConfig.BLE_SCAN_TIMEOUT,
                     return_adv=True,
                     service_uuids=[SERVICE_UUID],
+                    **({"bluez": {"adapter": adapter}} if adapter is not None else {}),
                 )
                 return _parse_scan_response(response)
             except BleakDBusError:

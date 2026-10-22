@@ -8,6 +8,11 @@ import logging
 import socket
 from dataclasses import dataclass
 
+from meshtastic._transport_selection import (
+    _listener_address,
+    _network_addresses,
+    _validate_ble_adapter,
+)
 from meshtastic.interface_proxy.channels import (
     PacketChannel,
     StreamChannel,
@@ -29,6 +34,20 @@ def _safe_listener_host(host: str, allow_public: bool) -> str:
     if not allow_public and host.lower() == "localhost":
         return "127.0.0.1"
     return host
+
+
+def _validate_tcp_listener(host: str, allow_public: bool) -> None:
+    """Check the resolved bind address, including when NIC addresses change."""
+    if allow_public:
+        return
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host.lower() == "localhost"
+    if not loopback:
+        raise ValueError(
+            "non-loopback proxy listener requires --interface-proxy-allow-public"
+        )
 
 
 def _enable_tcp_keepalive(writer: asyncio.StreamWriter) -> None:
@@ -111,9 +130,27 @@ class ProxyOptions:
     downstream: str
     allow_public: bool = False
     ble_name: str = "Meshtastic_0000"
+    ble_adapter: str | None = None
+    peripheral_adapter: str | None = None
+    network_interface: str | None = None
+    bind_interface: str | None = None
 
     def validate(self) -> None:
         """Reject unsupported endpoints and unsafe defaults before opening I/O."""
+        _validate_ble_adapter(self.ble_adapter)
+        _validate_ble_adapter(self.peripheral_adapter)
+        if self.ble_adapter is not None and not self.upstream.startswith("ble:"):
+            raise ValueError("--ble-adapter requires a BLE upstream")
+        if self.peripheral_adapter is not None and self.downstream != "ble-peripheral":
+            raise ValueError(
+                "--interface-proxy-ble-adapter requires ble-peripheral output"
+            )
+        if self.network_interface is not None:
+            if not self.upstream.startswith("tcp:"):
+                raise ValueError("--tcp-interface requires a TCP upstream")
+            _network_addresses(self.network_interface)
+        if self.bind_interface is not None and not self.downstream.startswith("tcp:"):
+            raise ValueError("--interface-proxy-bind-interface requires TCP output")
         if not (
             self.upstream.startswith("serial:")
             or self.upstream.startswith("tcp:")
@@ -130,18 +167,11 @@ class ProxyOptions:
             raise ValueError("BLE upstream address cannot be empty")
         if self.downstream.startswith("tcp:"):
             host, port = parse_tcp_endpoint(self.downstream[4:])
+            host = _listener_address(host, self.bind_interface)
             _reject_self_proxy(
                 self.upstream, _safe_listener_host(host, self.allow_public), port
             )
-            if not self.allow_public:
-                try:
-                    loopback = ipaddress.ip_address(host).is_loopback
-                except ValueError:
-                    loopback = host.lower() == "localhost"
-                if not loopback:
-                    raise ValueError(
-                        "non-loopback proxy listener requires --interface-proxy-allow-public"
-                    )
+            _validate_tcp_listener(host, self.allow_public)
         elif self.downstream == "ble-peripheral":
             if not self.allow_public:
                 raise ValueError(
@@ -191,8 +221,10 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
     # gate and never let the system resolver widen a localhost-only listener.
     options.validate()
     host, port = parse_tcp_endpoint(options.downstream[4:])
+    host = _listener_address(host, options.bind_interface)
     host = _safe_listener_host(host, options.allow_public)
     _reject_self_proxy(options.upstream, host, port)
+    _validate_tcp_listener(host, options.allow_public)
     active_client = False
     sessions: set[asyncio.Task[None]] = set()
 
@@ -211,7 +243,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
             return
         active_client = True
         try:
-            upstream = await connect_upstream(options.upstream)
+            upstream = await _open_upstream(options)
             try:
                 await bridge(upstream, downstream)
             finally:
@@ -255,7 +287,14 @@ async def run_single_endpoint(options: ProxyOptions) -> None:
         downstream = PTYChannel.create()
         print(f"Meshtastic proxy PTY: {downstream.path}", flush=True)
     else:
-        downstream = await BLEPeripheralChannel.start(options.ble_name)
+        downstream = await BLEPeripheralChannel.start(
+            options.ble_name,
+            **(
+                {"adapter": options.peripheral_adapter}
+                if options.peripheral_adapter is not None
+                else {}
+            ),
+        )
         _LOG.warning("BLE peripheral requires tested OS GATT adapter, pairing, and MTU")
     try:
         if isinstance(downstream, BLEPeripheralChannel):
@@ -264,13 +303,22 @@ async def run_single_endpoint(options: ProxyOptions) -> None:
             # old device's config stream with the replacement's state.
             await downstream.wait_for_central()
             _LOG.debug("BLE central subscribed; opening proxy upstream")
-        upstream = await connect_upstream(options.upstream)
+        upstream = await _open_upstream(options)
         try:
             await bridge(upstream, downstream)
         finally:
             await upstream.close()
     finally:
         await downstream.close()
+
+
+async def _open_upstream(options: ProxyOptions) -> PacketChannel:
+    kwargs = {}
+    if options.ble_adapter is not None:
+        kwargs["ble_adapter"] = options.ble_adapter
+    if options.network_interface is not None:
+        kwargs["network_interface"] = options.network_interface
+    return await connect_upstream(options.upstream, **kwargs)
 
 
 async def serve(options: ProxyOptions) -> None:
