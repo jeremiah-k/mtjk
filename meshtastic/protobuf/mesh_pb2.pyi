@@ -655,6 +655,14 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Elecrow ThinkNode MX
     """
+    NODARA: _HardwareModel.ValueType  # 151
+    """
+    Radioddity Nodara
+    """
+    HELTEC_MESH_POCKET_V2: _HardwareModel.ValueType  # 152
+    """
+    Heltec Magnetic Power Bank V2
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1287,6 +1295,14 @@ MakerFabs Nomad Terminal
 THINKNODE_MX: HardwareModel.ValueType  # 150
 """
 Elecrow ThinkNode MX
+"""
+NODARA: HardwareModel.ValueType  # 151
+"""
+Radioddity Nodara
+"""
+HELTEC_MESH_POCKET_V2: HardwareModel.ValueType  # 152
+"""
+Heltec Magnetic Power Bank V2
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """

@@ -510,6 +510,19 @@ with BLEInterface(address="DD:DD:13:27:74:29") as iface:
 
 ## Log interpretation quick reference
 
+A successful GATT read can return an empty FromRadio queue. FROMNUM
+notifications and successful writes (including heartbeats) wake the receive
+loop, so a wakeup does not guarantee queued data. The read after the final
+packet in a burst can also be empty. Empty-read retry exhaustion is a
+rate-limited DEBUG diagnostic in both notification and polling modes; it does
+not by itself indicate a failed connection or trigger reconnection.
+
+Read retries remain bounded to allow late payloads to arrive. GATT errors,
+disconnects, malformed packets, and fatal receive-loop errors retain their
+separate warning/error and recovery paths. Investigate missing traffic or
+health failures alongside those errors rather than treating empty reads as
+proof of link failure.
+
 | Message                                                    | Meaning                                                                                                               |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `Ignoring disconnect … while a connection is in progress.` | Benign stale callback during CONNECTING; discard.                                                                     |

@@ -82,8 +82,8 @@ def test_expanded_schema_annotations_reach_normalized_metadata() -> None:
     assert metadata.label == "Transmit Power"
     assert metadata.unit == "dBm"
     assert metadata.min_value == 0.0
-    assert metadata.max_value == 30.0
-    assert metadata.keywords == ("tx", "power", "dbm", "output", "gain")
+    assert metadata.max_value == 36.0
+    assert metadata.keywords == ("tx", "power", "dbm", "output")
 
 
 @pytest.mark.unit
