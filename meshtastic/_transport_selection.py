@@ -164,8 +164,21 @@ async def _open_tcp_connection(
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     if interface is None:
         return await asyncio.open_connection(host, port)
+    sources = _network_addresses(interface)
+    try:
+        destination_family = ipaddress.ip_address(host).version
+    except ValueError:
+        destination_family = None  # Hostnames may resolve to either family.
+    if destination_family is not None:
+        sources = [
+            source
+            for source in sources
+            if (6 if ":" in source else 4) == destination_family
+        ]
+        if not sources:
+            raise OSError(f"Selected interface has no address compatible with {host!r}")
     error: OSError | None = None
-    for source in _network_addresses(interface):
+    for source in sources:
         try:
             return await asyncio.open_connection(
                 host,
