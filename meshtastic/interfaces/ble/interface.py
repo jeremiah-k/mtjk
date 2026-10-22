@@ -46,8 +46,8 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDBusError, BleakError
 
 import meshtastic.interfaces.ble.constants as _ble_constants
-from meshtastic._transport_selection import _validate_ble_adapter
 from meshtastic._publishing import publishing_thread as publishingThread
+from meshtastic._transport_selection import _validate_ble_adapter
 from meshtastic.cancellation import (
     _acquire_lock,
     _cancellable_init,
