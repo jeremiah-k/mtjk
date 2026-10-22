@@ -12,6 +12,44 @@ _LOG = logging.getLogger(__name__)
 _GATT_INTERFACE = "org.bluez.GattCharacteristic1"
 
 
+def _install_advertising(server: Any) -> None:
+    """Make this advertisement discoverable without changing the host's mode.
+
+    Bless 0.3.0 omits Discoverable, inheriting the desktop adapter's setting.
+    BlueZ can advertise a discoverable LE peripheral independently of BR/EDR;
+    this matches firmware and avoids enabling classic desktop discoverability.
+    """
+    # pylint: disable=import-outside-toplevel,import-error
+    from bless.backends.bluezdbus.dbus.advertisement import (  # type: ignore[import-not-found]
+        BlueZLEAdvertisement,
+        Type,
+    )
+    from dbus_next.constants import PropertyAccess  # type: ignore[import-not-found]
+    from dbus_next.service import dbus_property  # type: ignore[import-not-found]
+
+    class Advertisement(BlueZLEAdvertisement):  # type: ignore[misc]
+        """Only this proxy's advertisement overrides discoverability."""
+
+        @dbus_property(access=PropertyAccess.READ)  # type: ignore[untyped-decorator]
+        def Discoverable(self) -> "b":  # type: ignore[name-defined]  # pylint: disable=invalid-name
+            """Advertise general LE discoverability independently of the host."""
+            return True
+
+    app = server.app
+
+    async def start_advertising(adapter: Any) -> None:
+        # Keep Bless's advertisement ownership/cleanup and local-name behavior.
+        await app.set_name(adapter, app.app_name)
+        advertisement = Advertisement(Type.PERIPHERAL, len(app.advertisements) + 1, app)
+        app.advertisements.append(advertisement)
+        advertisement._service_uuids.append(app.services[0].UUID)
+        app.bus.export(advertisement.path, advertisement)
+        manager = adapter.get_interface("org.bluez.LEAdvertisingManager1")
+        await manager.call_register_advertisement(advertisement.path, {})
+
+    app.start_advertising = start_advertising
+
+
 class _ReadSnapshot:
     """Keep one characteristic value across a central's ATT continuation reads."""
 
@@ -44,7 +82,7 @@ def _install_read_handler(server: Any) -> None:
     # when importing the proxy on other platforms or without BLE advertising.
     # pylint: disable=import-outside-toplevel,import-error
     from dbus_next import Message  # type: ignore[import-not-found]
-    from dbus_next.constants import MessageType  # type: ignore[import-not-found]
+    from dbus_next.constants import MessageType
 
     reads = {}
     for uuid in (FROMRADIO_UUID, FROMNUM_UUID):

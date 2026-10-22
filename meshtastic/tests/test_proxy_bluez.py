@@ -5,13 +5,67 @@ from __future__ import annotations
 import sys
 import types
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from meshtastic.interface_proxy._bluez import _install_read_handler
+from meshtastic.interface_proxy._bluez import (
+    _install_advertising,
+    _install_read_handler,
+)
 from meshtastic.interface_proxy.endpoints import BLEMailbox
 from meshtastic.interfaces.ble.constants import FROMNUM_UUID, FROMRADIO_UUID
+
+
+def test_bluez_advertisement_is_discoverable_and_owned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Request LE discoverability locally, retaining Bless's cleanup inventory."""
+    import asyncio
+
+    class Advertisement:
+        """Small backend fake exposing the advertisement lifecycle seam."""
+
+        def __init__(self, _kind: str, index: int, _app: Any) -> None:
+            self.path = f"/advertisement{index}"
+            self._service_uuids: list[str] = []
+
+    module = types.SimpleNamespace(
+        BlueZLEAdvertisement=Advertisement,
+        Type=types.SimpleNamespace(PERIPHERAL="peripheral"),
+    )
+    monkeypatch.setitem(
+        sys.modules, "bless.backends.bluezdbus.dbus.advertisement", module
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "dbus_next.constants",
+        types.SimpleNamespace(PropertyAccess=types.SimpleNamespace(READ="read")),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "dbus_next.service",
+        types.SimpleNamespace(dbus_property=lambda **_kw: property),
+    )
+    server = MagicMock()
+    server.app.advertisements = []
+    server.app.services = [types.SimpleNamespace(UUID="meshtastic-service")]
+    server.app.set_name = AsyncMock()
+    adapter = MagicMock()
+    manager = adapter.get_interface.return_value
+    manager.call_register_advertisement = AsyncMock()
+    _install_advertising(server)
+    asyncio.run(server.app.start_advertising(adapter))
+    advertisement = server.app.advertisements[0]
+    assert advertisement.Discoverable is True
+    assert advertisement._service_uuids == ["meshtastic-service"]
+    server.app.bus.export.assert_called_once_with(advertisement.path, advertisement)
+    manager.call_register_advertisement.assert_awaited_once_with(advertisement.path, {})
+    # The dependency's class and the adapter's global discoverability stay intact.
+    assert not hasattr(Advertisement, "Discoverable")
+    assert adapter.method_calls == [
+        ("get_interface", ("org.bluez.LEAdvertisingManager1",), {}),
+    ]
 
 
 def test_bluez_read_continuations_preserve_packet(

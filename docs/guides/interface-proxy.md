@@ -210,7 +210,10 @@ a T1000-E USB serial → BLE peripheral configuration download: 51 protobuf
 messages, including the matching configuration-complete token, with a maximum
 payload of 243 bytes. The proxy exited when that central disconnected. This
 download used a temporary Bless advertisement with `Discoverable=true`; that
-change did not resolve the Android failure and is not part of the gateway.
+change alone did not resolve the Android failure. The gateway now supplies
+that property for its own BlueZ advertisement, without changing desktop
+discoverability. With desktop discoverability off, Android observed firmware-style
+flags `0x06` and classified the proxy as an LE device.
 A second download passed with unmodified Bless on the Atheros controller,
 using a fresh, unpaired central connection from the Broadcom controller.
 An LE-only scan discovered the server and the controller connection list
@@ -233,7 +236,7 @@ were restored after the experiment.
 
 The gateway's characteristics are unencrypted and it does not implement
 firmware's fixed PIN pairing mode; `123456` is not configured as a proxy PIN.
-Android bonding remains unqualified.
+Android bonding depends on the host pairing agent; see the qualified setup below.
 
 Further TCP → BLE tests used the Docker meshtasticd simulator on loopback,
 with the Atheros controller hosting the peripheral and the Broadcom controller
@@ -257,3 +260,19 @@ both sides to record a completed bond and the same configuration download to
 finish. That agent was removed and the desktop agent restored after the test;
 it is not installed by the gateway. This separates local Bluetooth pairing
 authorization from the Meshtastic protocol bytes forwarded over TCP or serial.
+
+
+Android 2.8.3 qualification used an ADB-connected TCL T768S running Android 11,
+Docker meshtasticd TCP input, and the Broadcom controller as the peripheral.
+After pairing with a temporary, controller-restricted `NoInputNoOutput` agent,
+the app completed both configuration requests (tokens 69420 and 69421), showed
+the simulator node and firmware version, and exchanged heartbeats. An earlier
+failure dialog remained visible over the connected UI; the matching completion
+tokens and subsequent heartbeat traffic establish the successful data path.
+The temporary agent is test infrastructure, not installed by the proxy.
+Android reported MTU 512; BlueZ supplied 517 in its read options. A separate
+Android diagnostic client downloaded all 47 configuration messages at requested
+MTU 517. Requesting MTU 23 failed on the first nonempty read, so small-MTU
+interoperability is still unqualified despite the continuation-read regression
+fix. The Atheros controller also failed the phone's LE link establishment
+(status 133, native reason 0x3e) before any GATT request.
