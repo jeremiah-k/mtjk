@@ -12,7 +12,10 @@ import sys
 import threading
 from typing import Any
 
-from meshtastic.interface_proxy._bluez import _install_advertising, _install_read_handler
+from meshtastic.interface_proxy._bluez import (
+    _install_advertising,
+    _install_read_handler,
+)
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
@@ -194,7 +197,9 @@ class BLEPeripheralChannel:
         self._adapter_alias: Any = None
 
     @classmethod
-    async def start(cls, name: str) -> BLEPeripheralChannel:
+    async def start(
+        cls, name: str, *, adapter: str | None = None
+    ) -> BLEPeripheralChannel:
         """Start advertising the standard Meshtastic GATT service."""
         try:
             # Deferred optional dependency; the disable covers the import block below.
@@ -207,7 +212,9 @@ class BLEPeripheralChannel:
                 "BLE advertising requires optional 'bless' (install: pip install bless)"
             ) from exc
 
-        server = BlessServer(name=name)
+        server = BlessServer(
+            name=name, **({"adapter": adapter} if adapter is not None else {})
+        )
         channel = cls(server, BLEMailbox())
 
         def on_read(characteristic: Any, *_args: Any, **_kwargs: Any) -> bytearray:
@@ -247,11 +254,11 @@ class BLEPeripheralChannel:
             # Bless's BlueZ backend changes the host adapter Alias when it
             # starts advertising and clears it on stop. Preserve the operator's
             # original setting, including when advertising registration fails.
-            adapter = (
+            bluez_adapter = (
                 getattr(server, "adapter", None) if sys.platform == "linux" else None
             )
-            if adapter is not None:
-                channel._adapter_properties = adapter.get_interface(
+            if bluez_adapter is not None:
+                channel._adapter_properties = bluez_adapter.get_interface(
                     "org.freedesktop.DBus.Properties"
                 )
                 channel._adapter_alias = await channel._adapter_properties.call_get(
@@ -279,7 +286,7 @@ class BLEPeripheralChannel:
                 bytearray(b"\x00\x00\x00\x00"),
                 Perm.readable,
             )
-            if adapter is not None:
+            if bluez_adapter is not None:
                 _install_read_handler(server)
             await server.start()
         except BaseException as exc:

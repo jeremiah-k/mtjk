@@ -14,6 +14,7 @@ import threading
 import time
 from typing import IO, Any, Callable
 
+from meshtastic._transport_selection import _connect_tcp, _network_addresses
 from meshtastic.stream_interface import (
     WRITE_PROGRESS_TIMEOUT_SECONDS,
     StreamInterface,
@@ -49,7 +50,7 @@ def _is_transport_fd_state_value_error(exc: ValueError) -> bool:
     return any(marker in message for marker in _TRANSPORT_FD_STATE_VALUEERROR_MARKERS)
 
 
-class TCPInterface(StreamInterface):
+class TCPInterface(StreamInterface):  # pylint: disable=too-many-instance-attributes
     """Interface class for meshtastic devices over a TCP link."""
 
     DEFAULT_CONNECT_TIMEOUT = 10.0
@@ -82,6 +83,7 @@ class TCPInterface(StreamInterface):
         noNodes: bool = False,
         timeout: float = 300.0,
         connectTimeout: float | None = DEFAULT_CONNECT_TIMEOUT,
+        networkInterface: str | None = None,
     ) -> None:
         """Initialize a TCPInterface for a meshtastic device and optionally establish a TCP connection.
 
@@ -105,6 +107,9 @@ class TCPInterface(StreamInterface):
             Timeout in seconds for socket connect attempts (default: 10.0).
             ``None`` omits the timeout parameter, allowing the platform socket
             default to apply.
+        networkInterface : str | None
+            Local NIC name or source IP to bind for every connection attempt.
+            Routing still follows the operating system's routing table.
         """
         if connectTimeout is not None:
             if (
@@ -126,6 +131,7 @@ class TCPInterface(StreamInterface):
         self.portNumber: int = portNumber
         self._connect_now: bool = connectNow
         self._connect_timeout: float | None = connectTimeout
+        self._network_interface = networkInterface
         # Pre-assign base-class attributes so __repr__ stays safe even if
         # myConnect() raises before StreamInterface.__init__ runs.
         self.debugOut = debugOut
@@ -133,6 +139,8 @@ class TCPInterface(StreamInterface):
         self.noNodes = noNodes
 
         self.socket: socket.socket | None = None
+        if networkInterface is not None:
+            _network_addresses(networkInterface)
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = self.DEFAULT_MAX_RECONNECT_ATTEMPTS
         self._reconnect_backoff = self.DEFAULT_RECONNECT_BACKOFF
@@ -187,6 +195,8 @@ class TCPInterface(StreamInterface):
             rep += f", portNumber={self.portNumber!r}"
         if self.noNodes:
             rep += ", noNodes=True"
+        if self._network_interface is not None:
+            rep += f", networkInterface={self._network_interface!r}"
         rep += ")"
         return rep
 
@@ -272,7 +282,14 @@ class TCPInterface(StreamInterface):
         """
         logger.debug("Connecting to %s", self.hostname)
         server_address = (self.hostname, self.portNumber)
-        if self._connect_timeout is None:
+        if self._network_interface is not None:
+            connected_socket = _connect_tcp(
+                self.hostname,
+                self.portNumber,
+                self._network_interface,
+                self._connect_timeout,
+            )
+        elif self._connect_timeout is None:
             connected_socket = socket.create_connection(server_address)
         else:
             connected_socket = socket.create_connection(

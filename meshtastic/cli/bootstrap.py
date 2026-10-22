@@ -24,6 +24,12 @@ from bleak.exc import BleakError
 
 import meshtastic.cli.config_preview as cli_config_preview
 from meshtastic._core_constants import BROADCAST_ADDR
+from meshtastic._transport_selection import (
+    _list_ble_adapters,
+    _list_network_interfaces,
+    _network_addresses,
+    _validate_ble_adapter,
+)
 from meshtastic.cli.context import CliExit
 from meshtastic.cli.context import _terminate_cli as _terminate_cli_with_exit
 from meshtastic.cli.messaging_service_actions import _node_json_error, _node_query_error
@@ -208,6 +214,7 @@ _DRY_RUN_CONFLICTING_ACTIONS: tuple[_DryRunActionFlag, ...] = (
     ("list_fields", "--list-fields"),
     ("describe_field", "--describe-field"),
     ("ble_scan", "--ble-scan"),
+    ("list_interfaces", "--list-interfaces"),
     ("power_riden", "--power-riden"),
     ("power_ppk2_meter", "--power-ppk2-meter"),
     ("power_ppk2_supply", "--power-ppk2-supply"),
@@ -262,6 +269,41 @@ def _validate_and_normalize_args(
     """Validate pre-connect arguments and apply historical default mutations."""
     if cli_config_preview.preview_requested(args):
         _validate_dry_run_invocation(args, parser)
+    if getattr(args, "list_interfaces", False):
+        incompatible = tuple(
+            flag
+            for flag in _DRY_RUN_CONFLICTING_ACTIONS
+            if flag[0] != "list_interfaces"
+        ) + (
+            ("set", "--set"),
+            ("configure", "--configure"),
+            ("host", "--host"),
+            ("ble", "--ble"),
+            ("port", "--port"),
+            ("ble_adapter", "--ble-adapter"),
+            ("tcp_interface", "--tcp-interface"),
+        )
+        conflicts = [
+            label
+            for name, label in incompatible
+            if _action_requested(getattr(args, name, None))
+        ]
+        if conflicts:
+            parser.error(
+                "--list-interfaces cannot be combined with: " + ", ".join(conflicts)
+            )
+    ble_adapter = getattr(args, "ble_adapter", None)
+    tcp_interface = getattr(args, "tcp_interface", None)
+    try:
+        _validate_ble_adapter(ble_adapter)
+        if tcp_interface is not None:
+            _network_addresses(tcp_interface)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if ble_adapter is not None and not (args.ble or args.ble_scan):
+        parser.error("--ble-adapter requires --ble or --ble-scan")
+    if tcp_interface is not None and not args.host:
+        parser.error("--tcp-interface requires --host")
     if error := _node_query_error(args) or _node_json_error(args):
         parser.error(error)
     if args.quiet and (args.debug or args.listen or args.debuglib):
@@ -323,6 +365,23 @@ def _run_preconnect_action(
     if args.support:
         hooks.support_info()
         _terminate_cli(hooks, "", 0)
+    if getattr(args, "list_interfaces", False):
+        print("Network interfaces (bind to a local address; OS routing still applies):")
+        try:
+            interfaces = _list_network_interfaces()
+        except OSError as exc:
+            print(f"Network: {exc}")
+        else:
+            for name, label, addresses in interfaces:
+                print(f"  {name} ({label}): {', '.join(addresses) or 'no addresses'}")
+        try:
+            adapters = asyncio.run(_list_ble_adapters())
+        except OSError as exc:
+            print(f"Bluetooth: {exc}")
+        else:
+            for name, label, address, powered in adapters:
+                print(f"  {name} ({label}): {address}, powered={powered}")
+        return True
     as_json = getattr(args, "json", False)
     if args.list_fields:
         hooks.print_available_config_fields(as_json=as_json)
@@ -449,6 +508,11 @@ def _open_transport(
                     noNodes=args.no_nodes,
                     timeout=args.timeout,
                     auto_reconnect=args.ble_auto_reconnect,
+                    **(
+                        {"bleAdapter": args.ble_adapter}
+                        if getattr(args, "ble_adapter", None) is not None
+                        else {}
+                    ),
                 )
             )
             return ble
@@ -470,6 +534,11 @@ def _open_transport(
                     noProto=args.noproto,
                     noNodes=args.no_nodes,
                     timeout=args.timeout,
+                    **(
+                        {"networkInterface": args.tcp_interface}
+                        if getattr(args, "tcp_interface", None) is not None
+                        else {}
+                    ),
                 )
             )
             return tcp
@@ -535,7 +604,13 @@ def _run_connected_session(
 
         if args.ble_scan:
             logger.debug("BLE scan starting")
-            for device in hooks.ble_interface.scan():
+            for device in hooks.ble_interface.scan(
+                **(
+                    {"adapter": args.ble_adapter}
+                    if getattr(args, "ble_adapter", None) is not None
+                    else {}
+                )
+            ):
                 print(f"Found: name='{device.name}' address='{device.address}'")
             _terminate_cli(hooks, "BLE scan finished", 0)
 
@@ -611,6 +686,10 @@ def run_common(
             downstream=proxy_out,
             allow_public=getattr(args, "interface_proxy_allow_public", False),
             ble_name=name,
+            ble_adapter=getattr(args, "ble_adapter", None),
+            peripheral_adapter=getattr(args, "interface_proxy_ble_adapter", None),
+            network_interface=getattr(args, "tcp_interface", None),
+            bind_interface=getattr(args, "interface_proxy_bind_interface", None),
         )
         try:
             options.validate()
@@ -621,11 +700,13 @@ def run_common(
             asyncio.run(serve(options))
         except KeyboardInterrupt:
             logger.info("Exiting interface proxy due to keyboard interrupt")
-        except (OSError, RuntimeError, OverflowError, BleakError) as exc:
+        except (OSError, ValueError, RuntimeError, OverflowError, BleakError) as exc:
             _terminate_cli(hooks, f"Interface proxy failed: {exc}", 1)
         return
     if (
         getattr(args, "interface_proxy_allow_public", False)
+        or getattr(args, "interface_proxy_ble_adapter", None) is not None
+        or getattr(args, "interface_proxy_bind_interface", None) is not None
         or getattr(args, "interface_proxy_ble_name", "Meshtastic_0000")
         != "Meshtastic_0000"
     ):

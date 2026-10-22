@@ -10,7 +10,7 @@ import re
 import sys
 from collections.abc import Callable
 from threading import Event, RLock
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDBusError, BleakDeviceNotFoundError, BleakError
@@ -369,6 +369,8 @@ class ClientManager:
         state_lock: RLock,
         thread_coordinator: ThreadCoordinator,
         error_handler: "BLEErrorHandler",
+        *,
+        adapter: str | None = None,
     ) -> None:
         """Initialize a ClientManager with the managers, synchronization primitive, and error handler required to manage BLEClient lifecycle.
 
@@ -387,6 +389,7 @@ class ClientManager:
         self.state_lock = state_lock
         self.thread_coordinator = thread_coordinator
         self.error_handler = error_handler
+        self._adapter = adapter
 
     def _thread_create_thread(
         self,
@@ -471,6 +474,9 @@ class ClientManager:
         'BLEClient'
             A BLEClient instance bound to `device` with the disconnect callback configured.
         """
+        transport_options: dict[str, Any] = {}
+        if self._adapter is not None:
+            transport_options["bluez"] = {"adapter": self._adapter}
         return BLEClient(
             device,
             disconnected_callback=disconnect_callback,
@@ -480,6 +486,7 @@ class ClientManager:
                 else BLEConfig.CONNECTION_TIMEOUT
             ),
             pair=pair_on_connect,
+            **transport_options,
         )
 
     def create_client(
