@@ -288,6 +288,11 @@ loaded configuration after an explicit Connect action. The recovered server
 used the ordinary CLI with explicit controller/source-interface flags; no
 backend factory override was needed. It was left running for the phone.
 
+The user subsequently changed settings through the connected app. The session
+later ended when the simulator container exited with code 1 and was removed by
+Docker. This confirms sustained configuration access, but does not qualify
+automatic recovery after an upstream exit or establish why the simulator exited.
+
 Android's HCI summary independently showed classic SSP authentication failures
 and a subsequent successful encrypted LE connection in the explicit-LE test.
 This supports investigating the app's automatic bonding transport on a cached

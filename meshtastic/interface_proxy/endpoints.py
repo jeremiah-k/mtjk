@@ -12,7 +12,10 @@ import sys
 import threading
 from typing import Any
 
-from meshtastic.interface_proxy._bluez import _install_advertising, _install_read_handler
+from meshtastic.interface_proxy._bluez import (
+    _install_advertising,
+    _install_read_handler,
+)
 from meshtastic.interface_proxy.wire import FrameDecoder, frame, validate_payload
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
