@@ -119,6 +119,22 @@ def test_async_tcp_tries_compatible_sources(monkeypatch: pytest.MonkeyPatch) -> 
     ]
 
 
+@pytest.mark.parametrize(
+    "destination,sources",
+    [("127.0.0.1", ["::1"]), ("::1", ["127.0.0.1"])],
+)
+def test_async_tcp_rejects_numeric_host_with_incompatible_source_family(
+    monkeypatch: pytest.MonkeyPatch, destination: str, sources: list[str]
+) -> None:
+    """Fail a literal family mismatch before attempting an unrelated connection."""
+    monkeypatch.setattr(selection, "_network_addresses", lambda _name: sources)
+    connect = AsyncMock()
+    monkeypatch.setattr(asyncio, "open_connection", connect)
+    with pytest.raises(OSError, match="no address compatible"):
+        asyncio.run(selection._open_tcp_connection(destination, 4403, "loop"))
+    connect.assert_not_awaited()
+
+
 def test_ble_adapter_survives_client_creation_and_repeated_scans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
