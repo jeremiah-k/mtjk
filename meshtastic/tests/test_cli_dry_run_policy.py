@@ -233,6 +233,8 @@ _DRY_RUN_INERT_DESTS = frozenset(
         "host",
         "port",
         "ble",
+        "ble_adapter",
+        "tcp_interface",
         "ble_auto_reconnect",
         "timeout",
         "no_nodes",
@@ -266,6 +268,8 @@ _DRY_RUN_INERT_DESTS = frozenset(
         "interface_proxy_out",
         "interface_proxy_allow_public",
         "interface_proxy_ble_name",
+        "interface_proxy_ble_adapter",
+        "interface_proxy_bind_interface",
     }
 )
 
