@@ -25,6 +25,24 @@ __all__ = ["ConnectionCancelledError"]
 _P = _ParamSpec("_P")
 _T = _TypeVar("_T")
 _POLL_SECONDS = 0.05
+# Winsock uses distinct numeric connect-in-progress codes. Fall back to the
+# documented WSA values to keep this path testable on non-Windows hosts.
+_IN_PROGRESS_CONNECT_ERRORS = frozenset(
+    {
+        _errno.EINPROGRESS,
+        _errno.EWOULDBLOCK,
+        _errno.EALREADY,
+        _errno.EINTR,
+        *(
+            getattr(_errno, name, number)
+            for name, number in (
+                ("WSAEWOULDBLOCK", 10035),
+                ("WSAEINPROGRESS", 10036),
+                ("WSAEALREADY", 10037),
+            )
+        ),
+    }
+)
 _scope = _threading.local()
 
 
@@ -206,12 +224,7 @@ def _connect_socket(address: tuple[str, int], timeout: float | None) -> _socket.
             sock.setblocking(False)
             code = sock.connect_ex(target)
             if code not in (0, _errno.EISCONN):
-                if code not in {
-                    _errno.EINPROGRESS,
-                    _errno.EWOULDBLOCK,
-                    _errno.EALREADY,
-                    _errno.EINTR,
-                }:
+                if code not in _IN_PROGRESS_CONNECT_ERRORS:
                     raise OSError(code, "TCP connection failed")
                 deadline = (
                     None

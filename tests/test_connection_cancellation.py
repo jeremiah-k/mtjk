@@ -229,8 +229,10 @@ def test_cancel_during_serial_open_releases_native_port(
     monkeypatch.setattr(
         "meshtastic.serial_interface.serial.Serial", lambda **kwargs: stream
     )
-    with pytest.raises(ConnectionCancelledError):
+    with pytest.raises(ConnectionCancelledError) as error:
         SerialInterface(str(path), cancelEvent=event)
+    assert error.value.__cause__ is None
+    assert not getattr(error.value, "__notes__", None)
     stream.close.assert_called_once()
 
 
@@ -361,3 +363,102 @@ def test_cancellation_error_retains_type_and_message_across_process_serializatio
     assert restored.args == error.args
     assert restored.message == error.message
     assert isinstance(restored, MeshInterface.MeshInterfaceError)
+
+
+@pytest.mark.parametrize("pending_code", [10035, 10036, 10037])
+def test_tcp_winsock_in_progress_connect_waits_for_completion(
+    monkeypatch: pytest.MonkeyPatch, pending_code: int
+) -> None:
+    """Portable Winsock simulation must use selector readiness and SO_ERROR."""
+    from unittest.mock import call
+
+    from meshtastic.cancellation import _connect_socket
+
+    sock = MagicMock()
+    sock.connect_ex.return_value = pending_code
+    sock.getsockopt.return_value = 0
+    selector = MagicMock()
+    selector.__enter__.return_value = selector
+    selector.select.return_value = [(object(), 2)]
+    monkeypatch.setattr(
+        "meshtastic.cancellation._socket.getaddrinfo",
+        lambda *_args: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 12345))
+        ],
+    )
+    monkeypatch.setattr("meshtastic.cancellation._socket.socket", lambda *_args: sock)
+    monkeypatch.setattr(
+        "meshtastic.cancellation._selectors.DefaultSelector", lambda: selector
+    )
+
+    assert _connect_socket(("127.0.0.1", 12345), 2) is sock
+    selector.register.assert_called_once_with(sock, 2)
+    sock.getsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_ERROR)
+    assert sock.setblocking.call_args_list == [call(False), call(True)]
+    sock.close.assert_not_called()
+
+
+def test_tcp_winsock_connect_error_is_read_from_so_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signaled selector does not prove a TCP handshake succeeded."""
+    from meshtastic.cancellation import _connect_socket
+
+    sock = MagicMock()
+    sock.connect_ex.return_value = 10035
+    sock.getsockopt.return_value = 10061  # WSAECONNREFUSED
+    selector = MagicMock()
+    selector.__enter__.return_value = selector
+    selector.select.return_value = [(object(), 2)]
+    monkeypatch.setattr(
+        "meshtastic.cancellation._socket.getaddrinfo",
+        lambda *_args: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 12345))
+        ],
+    )
+    monkeypatch.setattr("meshtastic.cancellation._socket.socket", lambda *_args: sock)
+    monkeypatch.setattr(
+        "meshtastic.cancellation._selectors.DefaultSelector", lambda: selector
+    )
+
+    with pytest.raises(OSError) as error:
+        _connect_socket(("127.0.0.1", 12345), 2)
+    assert error.value.errno == 10061
+    sock.close.assert_called_once()
+
+
+def test_cancelled_partial_tcp_construction_closes_without_false_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Early TCP cancellation must not require StreamInterface's unbuilt lock."""
+    event = threading.Event()
+    sock, peer = socket.socketpair()
+
+    def cancel_before_base_init(self: TCPInterface) -> None:
+        self.socket = sock
+        event.set()
+
+    monkeypatch.setattr(TCPInterface, "myConnect", cancel_before_base_init)
+    monkeypatch.setattr(
+        TCPInterface, "_drain_closing_socket", staticmethod(lambda *_a, **_kw: None)
+    )
+    try:
+        with pytest.raises(ConnectionCancelledError) as error:
+            TCPInterface("127.0.0.1", cancelEvent=event)
+        assert error.value.__cause__ is None
+        assert not getattr(error.value, "__notes__", None)
+        assert sock.fileno() == -1
+    finally:
+        sock.close()
+        peer.close()
+
+
+def test_partial_stream_close_without_base_init_closes_native_handle() -> None:
+    """The shared rollback can retire a serial stream before its lock exists."""
+    stream = MagicMock()
+    instance = object.__new__(StreamInterface)
+    instance.stream = stream
+    instance.close()
+    stream.close.assert_called_once()
+    assert instance.stream is None
+    assert instance._wantExit

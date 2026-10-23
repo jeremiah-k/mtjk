@@ -317,7 +317,7 @@ class StreamInterface(MeshInterface):
 
     def _close_stream_safely(self) -> None:
         """Best-effort close and clear of the underlying stream handle."""
-        s = self.stream
+        s = getattr(self, "stream", None)
         if s is not None:
             with contextlib.suppress(*STREAM_CLOSE_EXCEPTIONS):
                 s.close()
@@ -515,8 +515,21 @@ class StreamInterface(MeshInterface):
         All shutdown state transitions are synchronized with connect() via
         _connect_lock to prevent a concurrent connect() from clearing the
         shutdown intent and restarting the reader against a closed stream.
+
+        If cancellation interrupts a concrete constructor before this lock
+        exists, only its already-created native stream is closed. TCP's own
+        close() then retires any socket, and the MeshInterface state has not
+        yet been initialized or adopted.
         """
-        with self._connect_lock:
+        connect_lock = getattr(self, "_connect_lock", None)
+        if connect_lock is None:
+            # Serial/TCP may cancel before StreamInterface.__init__ creates its
+            # lock. The subclasses own native handles at that point; closing
+            # their stream here also permits TCP.close() to retire its socket.
+            self._wantExit = True
+            self._close_stream_safely()
+            return
+        with connect_lock:
             if self._stream_close_in_progress:
                 return
             self._stream_close_in_progress = True
