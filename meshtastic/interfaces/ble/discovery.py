@@ -398,7 +398,12 @@ def _parse_scan_response(
 class DiscoveryManager:
     """Orchestrates BLE device scanning."""
 
-    def __init__(self, client_factory: Callable[..., Any] | None = None) -> None:
+    def __init__(
+        self,
+        client_factory: Callable[..., Any] | None = None,
+        *,
+        adapter: str | None = None,
+    ) -> None:
         """Initialize a DiscoveryManager that orchestrates BLE scanning.
 
         Parameters
@@ -410,6 +415,7 @@ class DiscoveryManager:
         """
         # Allow test overrides via meshtastic.ble_interface monkeypatch (backwards compatibility)
         self.client_factory = client_factory
+        self._adapter = adapter
         self._client: (
             BLEClient
             | DiscoveryClientProtocol
@@ -648,6 +654,8 @@ class DiscoveryManager:
                 "timeout": BLEConfig.BLE_SCAN_TIMEOUT,
                 "return_adv": True,
             }
+            if self._adapter is not None:
+                discover_kwargs["bluez"] = {"adapter": self._adapter}
             if not target_identifier:
                 discover_kwargs["service_uuids"] = [SERVICE_UUID]
 

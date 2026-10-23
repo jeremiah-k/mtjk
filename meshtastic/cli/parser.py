@@ -258,6 +258,31 @@ def addConnectionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
         "Interface proxy (experimental)",
         "Forward raw Meshtastic radio packets between a device and an exposed endpoint.",
     )
+    outer.add_argument(
+        "--ble-adapter",
+        metavar="HCI",
+        help="Linux BLE controller for the client or proxy input, e.g. hci0",
+    )
+    outer.add_argument(
+        "--tcp-interface",
+        metavar="INTERFACE",
+        help="Local NIC name or source IP for the TCP client or proxy input",
+    )
+    outer.add_argument(
+        "--list-interfaces",
+        action="store_true",
+        help="List local network interfaces and Linux BLE controllers",
+    )
+    proxy.add_argument(
+        "--interface-proxy-ble-adapter",
+        metavar="HCI",
+        help="Linux controller for BLE peripheral output, e.g. hci1",
+    )
+    proxy.add_argument(
+        "--interface-proxy-bind-interface",
+        metavar="INTERFACE",
+        help="Local NIC or IP for TCP output; overrides the URI host",
+    )
     proxy.add_argument(
         "--interface-proxy-in",
         metavar="SOURCE",

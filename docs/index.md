@@ -13,6 +13,7 @@ These guides describe the interfaces and maintenance practices of `mtjk`, a main
 - [Lockdown](guides/lockdown.md) — USB-only local lockdown workflow and its limitations.
 - [Firmware region presets](guides/region-presets.md) — advertised region/preset capabilities and conservative validation.
 - [Interface proxy (experimental)](guides/interface-proxy.md) — raw-link exposure over TCP, a POSIX PTY, or experimental BLE GATT.
+- [Local transport selection](guides/transport-selection.md) — choose a Bluetooth controller or local network interface.
 
 ## Compatibility and project maintenance
 
