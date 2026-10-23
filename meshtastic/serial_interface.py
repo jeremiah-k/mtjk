@@ -241,7 +241,6 @@ class SerialInterface(StreamInterface):
         MeshInterfaceError
             When multiple serial ports are detected and none was explicitly specified.
         """
-        _check_cancelled(cancelEvent)
         self.noProto = noProto
         self.stream = None  # Initialize early for safe cleanup
         self._dev_path_auto_detected = False

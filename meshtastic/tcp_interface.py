@@ -119,7 +119,6 @@ class TCPInterface(StreamInterface):
             releases partial resources. It is not retained by a connected interface.
 
         """
-        _check_cancelled(cancelEvent)
         if connectTimeout is not None:
             if (
                 isinstance(connectTimeout, bool)
@@ -366,9 +365,17 @@ class TCPInterface(StreamInterface):
 
     def _close_socket_and_join_reader(self) -> None:
         """Release the TCP handle even when shared close cleanup fails."""
-        with self._reconnect_lock:
-            sock = self.socket
+        # The cancellation wrapper can call close() while the constructor is
+        # still validating arguments, before the reconnect lock exists. No
+        # other thread can own this partial instance at that point.
+        reconnect_lock = getattr(self, "_reconnect_lock", None)
+        if reconnect_lock is None:
+            sock = getattr(self, "socket", None)
             self.socket = None
+        else:
+            with reconnect_lock:
+                sock = self.socket
+                self.socket = None
         try:
             if sock is not None:
                 deadline = time.monotonic() + TCP_CLOSE_DRAIN_TIMEOUT_SECONDS

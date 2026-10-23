@@ -40,10 +40,11 @@ path. Native cleanup remains usable after cancellation. ConnectionCancelledError
 is a MeshInterface.MeshInterfaceError subclass, so callers can distinguish
 operator cancellation without treating it as a transport outage or retrying it.
 
-The scope is the synchronous constructor call, including nested SDK setup. The
-signal is isolated to the calling thread and is not retained by the connected
-interface. Setting it after construction does not disconnect an established
-session or cancel unrelated operations. To close an established interface, call
+Cancellation is scoped to one synchronous constructor invocation, including
+nested SDK setup. Its caller may set the shared `threading.Event` from
+another thread; only the constructing invocation observes it. The event is
+not retained by the connected interface. Setting it after construction does
+not disconnect an established session or cancel unrelated operations. To close an established interface, call
 close(). Keep the event set until the constructor has finished; do not clear it
 while setup is in progress.
 
@@ -66,3 +67,16 @@ is required.
 Cancellation does not imply that a message was delivered or failed. This API
 controls connection construction; delivery and acknowledgement contracts remain
 separate.
+
+Protocol-startup rollback delegates to the concrete transport's close path.
+For TCP, this releases the socket before the final reader join, rather than
+waiting for a reader that cannot wake until its transport closes. Construction
+cancellation is masked during this teardown so partial serial cleanup can finish.
+
+BLE construction cancellation waits for the native coroutine's cancellation
+cleanup before closing its transport. Cancelling its concurrent future alone is
+not proof that cleanup has finished: BlueZ may still be awaiting a Disconnect
+reply on the same D-Bus connection. This retirement wait uses the existing
+five-second disconnect budget. If the backend exceeds that budget, a warning
+records the incomplete cleanup and ordinary best-effort teardown proceeds;
+cancellation cannot force an uncooperative backend to release its resources.

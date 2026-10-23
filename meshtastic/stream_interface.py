@@ -15,6 +15,7 @@ from google.protobuf.message import DecodeError
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
 from meshtastic.cancellation import _acquire_lock, _cancellable_init, _check_cancelled
 from meshtastic.cancellation import _sleep as _connection_sleep
+from meshtastic.cancellation import _uncancelled_cleanup
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.transport_retry import _linear_retry_delay
@@ -288,10 +289,11 @@ class StreamInterface(MeshInterface):
         except Exception:
             # If protocol startup fails after reader launch, tear down to avoid
             # leaked background threads and partial connection state.
+            # Delegate to the transport owner: a TCP socket must be closed
+            # before joining a reader blocked in recv(). Teardown must remain
+            # usable even after the construction signal has been set.
             with contextlib.suppress(Exception):
-                self._shared_close()
-            with contextlib.suppress(Exception):
-                self._join_reader_thread()
+                _uncancelled_cleanup(self.close)()
             raise
 
     def _ensure_stream_for_connect_locked(self, *, requires_stream: bool) -> None:

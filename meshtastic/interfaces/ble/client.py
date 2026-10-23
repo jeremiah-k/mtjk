@@ -10,7 +10,7 @@ import weakref
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from threading import Lock, RLock, current_thread
+from threading import Event, Lock, RLock, current_thread
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 from uuid import UUID
 
@@ -22,6 +22,7 @@ from bleak.exc import BleakError
 from meshtastic.cancellation import (
     ConnectionCancelledError,
     _check_cancelled,
+    _current_event,
     _uncancelled_cleanup,
     _wait_future,
 )
@@ -84,6 +85,37 @@ def _log_macos_stdout_workaround_unavailable_once(reason: str) -> None:
             return
         _MACOS_WORKAROUND_LOGGED_UNAVAILABLE = True
     logger.debug("macOS CoreBluetooth workaround skipped: %s.", reason)
+
+
+class _CoroutineRetirement:
+    """Distinguish future cancellation from native coroutine cleanup completion."""
+
+    def __init__(self, coro: Coroutine[Any, Any, Any]) -> None:
+        self._coro = coro
+        self._lock = Lock()
+        self._started = False
+        self._abandoned = False
+        self._done = Event()
+
+    async def run(self) -> Any:
+        """Transfer the native coroutine to the runner unless already abandoned."""
+        with self._lock:
+            if self._abandoned:
+                return None
+            self._started = True
+        try:
+            return await self._coro
+        finally:
+            self._done.set()
+
+    def retire(self, timeout: float) -> bool:
+        """Close an unstarted coroutine or wait a bounded time for native cleanup."""
+        with self._lock:
+            if not self._started:
+                self._abandoned = True
+                self._coro.close()
+                self._done.set()
+        return self._done.wait(timeout)
 
 
 class BLEClient:
@@ -1195,7 +1227,15 @@ class BLEClient:
             except ConnectionCancelledError:
                 self._close_coroutine_safely(coro)
                 raise
-            future = self._async_run(coro)
+            retirement = (
+                _CoroutineRetirement(coro) if _current_event() is not None else None
+            )
+            try:
+                future = self._async_run(retirement.run() if retirement else coro)
+            except BaseException:
+                if retirement is not None:
+                    retirement.retire(0)
+                raise
             self._with_pending_futures(
                 lambda pending_futures: pending_futures.add(future)
             )
@@ -1245,6 +1285,17 @@ class BLEClient:
             # direct coroutine cancellation mapping consistent.
             raise self.BLEError(BLECLIENT_ERROR_CANCELLED) from e
         finally:
+            # Future.cancel() acknowledges only the request. Bleak may still be
+            # awaiting BlueZ Disconnect after cancellation or a startup timeout.
+            if (
+                retirement is not None
+                and future.cancelled()
+                and not retirement.retire(DISCONNECT_TIMEOUT_SECONDS)
+            ):
+                logger.warning(
+                    "BLE construction cancellation cleanup exceeded %.1fs",
+                    DISCONNECT_TIMEOUT_SECONDS,
+                )
             self._with_pending_futures(
                 lambda pending_futures: pending_futures.discard(future)
             )

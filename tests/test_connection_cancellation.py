@@ -113,6 +113,7 @@ def test_tcp_socket_connect_is_interruptible(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_tcp_configuration_wait_releases_socket_and_reader(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Real loopback I/O is retired when a peer accepts but never sends config."""
     entered = threading.Event()
@@ -148,6 +149,7 @@ def test_tcp_configuration_wait_releases_socket_and_reader(
         assert len(instances) == 1
         assert instances[0].socket is None
         assert not instances[0]._rxThread.is_alive()
+        assert "Reader thread did not exit within shutdown timeout" not in caplog.text
     finally:
         listener.close()
         for instance in instances:
@@ -462,3 +464,46 @@ def test_partial_stream_close_without_base_init_closes_native_handle() -> None:
     stream.close.assert_called_once()
     assert instance.stream is None
     assert instance._wantExit
+
+
+def test_cancel_during_tcp_argument_validation_before_state_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Early cancellation must not require uninitialized TCP socket locks."""
+    event = threading.Event()
+
+    def cancel_on_validation(_value: float) -> bool:
+        event.set()
+        return False
+
+    monkeypatch.setattr("meshtastic.tcp_interface.math.isfinite", cancel_on_validation)
+    with pytest.raises(ConnectionCancelledError) as error:
+        TCPInterface(
+            "127.0.0.1", connectNow=False, connectTimeout=2.0, cancelEvent=event
+        )
+    # The validation error is the real cause, not an AttributeError from close().
+    assert isinstance(error.value.__cause__, ValueError)
+    assert not getattr(error.value, "__notes__", None)
+
+
+def test_serial_cancel_after_entry_uses_initialized_cleanup_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancellation after decorator entry must not hit a pre-stream check."""
+    event = threading.Event()
+    original_is_set = event.is_set
+    calls = 0
+
+    def set_after_first_check() -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            event.set()
+        return original_is_set()
+
+    monkeypatch.setattr(event, "is_set", set_after_first_check)
+    monkeypatch.setattr("meshtastic.util.findPorts", lambda **_kwargs: [])
+    with pytest.raises(ConnectionCancelledError) as error:
+        SerialInterface(None, noProto=True, connectNow=False, cancelEvent=event)
+    assert error.value.__cause__ is None
+    assert not getattr(error.value, "__notes__", None)
