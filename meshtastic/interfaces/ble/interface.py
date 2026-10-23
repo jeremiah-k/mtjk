@@ -47,6 +47,12 @@ from bleak.exc import BleakDBusError, BleakError
 
 import meshtastic.interfaces.ble.constants as _ble_constants
 from meshtastic._publishing import publishing_thread as publishingThread
+from meshtastic.cancellation import (
+    _acquire_lock,
+    _cancellable_init,
+    _check_cancelled,
+    _uncancelled_cleanup,
+)
 from meshtastic.interfaces.ble.client import BLEClient
 from meshtastic.interfaces.ble.compat_adapter import (
     _get_declared_callable,
@@ -231,6 +237,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
 
     BLEError = MeshtasticBLEError
 
+    @_cancellable_init
     def __init__(
         self,
         address: str | None = None,
@@ -241,6 +248,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         *,
         auto_reconnect: bool = False,
         pair_on_connect: bool = False,
+        cancelEvent: threading.Event | None = None,
     ) -> None:
         """Initialize the BLEInterface, configure background threads, and attempt an initial connection to a Meshtastic BLE device.
 
@@ -265,11 +273,16 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         timeout : float
             Connection timeout in seconds. (Default value = 300.0)
 
+        cancelEvent : threading.Event | None
+            Optional caller-owned event. Setting it cancels construction and
+            releases partial resources. It is not retained by a connected interface.
+
         Raises
         ------
         BLEInterface.BLEError
             If the initial connection or configuration fails.
         """
+        _check_cancelled(cancelEvent)
 
         # Thread safety and state management
         # Unified state-based lock system replacing multiple locks and boolean flags
@@ -556,7 +569,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         try:
             for key in ordered_keys:
                 addr_lock = stack.enter_context(_addr_lock_context(key))
-                stack.enter_context(addr_lock)
+                stack.enter_context(_acquire_lock(addr_lock))
         except BaseException:
             stack.close()
             raise
@@ -2847,6 +2860,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                 # once we have `_connect_lock` to avoid the handoff race.
                 with management_lock:
                     while self._management_inflight > 0:
+                        _check_cancelled()
                         self._validate_connection_preconditions()
                         if management_wait_started is None:
                             management_wait_started = time.monotonic()
@@ -2912,7 +2926,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                         addr_lock = stack.enter_context(
                             _addr_lock_context(reservation_key)
                         )
-                        stack.enter_context(addr_lock)
+                        stack.enter_context(_acquire_lock(addr_lock))
                     for reservation_key in reservation_keys:
                         # Re-check after lock acquisition to close TOCTOU windows.
                         self._raise_if_duplicate_connect(
@@ -2921,7 +2935,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                             resolved_address=resolved_connect_target,
                         )
 
-                    with self._connect_lock:
+                    with _acquire_lock(self._connect_lock):
                         with management_lock:
                             if self._management_inflight > 0:
                                 continue
@@ -3164,6 +3178,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         """
         self.close(timeout=timeout)
 
+    @_uncancelled_cleanup
     def close(self, timeout: float | None = None) -> None:
         """Shut down the BLE interface and release associated resources.
 

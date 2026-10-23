@@ -29,6 +29,8 @@ from google.protobuf.message import Message
 
 import meshtastic._port_discovery as _port_discovery  # pylint: disable=consider-using-from-import
 from meshtastic._deadline import _remaining_timeout
+from meshtastic.cancellation import _check_cancelled
+from meshtastic.cancellation import _sleep as _connection_sleep
 from meshtastic.supported_device import SupportedDevice
 from meshtastic.version import PACKAGE_NAME, get_active_version
 
@@ -493,12 +495,14 @@ class Timeout:
         bool
             `True` if all named attributes are present on `target` and evaluate to true before the timeout, `False` otherwise.
         """
+        _check_cancelled()
         attr_names = tuple(attrs)
         self.reset()
         while time.time() < self.expireTime:
+            _check_cancelled()
             if all(getattr(target, attr_name, None) for attr_name in attr_names):
                 return True
-            time.sleep(_remaining_timeout(self.sleepInterval))
+            _connection_sleep(_remaining_timeout(self.sleepInterval))
         _remaining_timeout(self.expireTimeout)
         return False
 

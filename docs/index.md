@@ -9,6 +9,7 @@ These guides describe the interfaces and maintenance practices of `mtjk`, a main
 - [Cached node queries](guides/node-queries.md) — `queryNodes` and versioned `--nodes --json` output.
 - [Fresh configuration reads](guides/configuration-reads.md) — `readConfig`, `readModuleConfig`, `readPreference`, and request failure semantics.
 - [Embedded commands](guides/embedded-commands.md) — `executeCommand`, captured output, connection ownership, and bounded waits.
+- [Connection cancellation](guides/connection-cancellation.md) — caller-owned setup cancellation, cleanup and embedding limits.
 - [BLE integration](guides/ble.md) — lifecycle, reconnect, and BLE behavior.
 - [Lockdown](guides/lockdown.md) — USB-only local lockdown workflow and its limitations.
 - [Firmware region presets](guides/region-presets.md) — advertised region/preset capabilities and conservative validation.

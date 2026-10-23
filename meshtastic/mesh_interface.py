@@ -30,6 +30,7 @@ from meshtastic._deadline import _remaining_timeout
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
 from meshtastic._publishing import publishing_thread as publishingThread
 from meshtastic._response_types import ResponseHandler
+from meshtastic.cancellation import _cancellable_init, _check_cancelled
 from meshtastic.mesh_interface_runtime.flows import (
     DEFAULT_TELEMETRY_TYPE,
     TelemetryType,
@@ -289,12 +290,15 @@ class MeshInterface:  # pylint: disable=R0902
     MeshInterfaceError = _MeshInterfaceError
     """Historical nested exception alias preserved for public compatibility."""
 
+    @_cancellable_init
     def __init__(
         self,
         debugOut: IO[str] | Callable[[str], Any] | None = None,
         noProto: bool = False,
         noNodes: bool = False,
         timeout: float = 300.0,
+        *,
+        cancelEvent: threading.Event | None = None,
     ) -> None:
         """Initialize the MeshInterface and configure runtime options.
 
@@ -311,7 +315,12 @@ class MeshInterface:  # pylint: disable=R0902
             only other configuration will be requested. (Default value = False)
         timeout : float
             Default timeout in seconds for operations that wait for replies.
+        cancelEvent : threading.Event | None
+            Optional caller-owned event. Setting it cancels construction and
+            releases partial resources. It is not retained by a connected interface.
+
         """
+        _check_cancelled(cancelEvent)
         self.debugOut = debugOut
         self.nodes: dict[str, dict[str, Any]] | None = None
         self.isConnected: threading.Event = threading.Event()
@@ -1629,11 +1638,13 @@ class MeshInterface:  # pylint: disable=R0902
         Exception
             Re-raises a stored fatal exception if one occurred during connection.
         """
+        _check_cancelled()
         if not self.noProto:
             deadline = time.monotonic() + _remaining_timeout(timeout)
             abort_check = getattr(self, "_connect_wait_should_abort", None)
             connected = False
             while time.monotonic() < deadline:
+                _check_cancelled()
                 remaining = deadline - time.monotonic()
                 if self.isConnected.wait(min(CONNECT_WAIT_POLL_SECONDS, remaining)):
                     connected = True
@@ -1651,6 +1662,7 @@ class MeshInterface:  # pylint: disable=R0902
                             self._last_disconnect_source or "unknown",
                         )
                         raise MeshInterface.MeshInterfaceError(abort_reason)
+            _check_cancelled()
             if not connected:
                 if self.failure is not None:
                     raise self.failure

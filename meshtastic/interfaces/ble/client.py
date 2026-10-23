@@ -19,6 +19,12 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
+from meshtastic.cancellation import (
+    ConnectionCancelledError,
+    _check_cancelled,
+    _uncancelled_cleanup,
+    _wait_future,
+)
 from meshtastic.interfaces.ble.compat_adapter import (
     _get_declared_member,
     _resolve_declared_callable,
@@ -1023,6 +1029,7 @@ class BLEClient:
         """
         return self.stopNotify(*args, timeout=timeout, **kwargs)
 
+    @_uncancelled_cleanup
     def close(self, timeout: float | None = None) -> None:
         """Close the BLEClient and perform a best-effort shutdown.
 
@@ -1183,6 +1190,11 @@ class BLEClient:
             #   - FutureCancelledError / asyncio.CancelledError ->
             #       self.BLEError(BLECLIENT_ERROR_CANCELLED)
             #   - Bleak* exceptions propagate so interface wrappers can convert them consistently.
+            try:
+                _check_cancelled()
+            except ConnectionCancelledError:
+                self._close_coroutine_safely(coro)
+                raise
             future = self._async_run(coro)
             self._with_pending_futures(
                 lambda pending_futures: pending_futures.add(future)
@@ -1212,7 +1224,7 @@ class BLEClient:
                 else:
                     with contextlib.suppress(ValueError, OSError, AttributeError):
                         stdout.flush()
-            return future.result(timeout)
+            return _wait_future(future, timeout)
         except SystemExit:  # pylint: disable=W0706
             raise
         except KeyboardInterrupt:  # pylint: disable=W0706
