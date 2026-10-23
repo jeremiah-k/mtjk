@@ -597,8 +597,8 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         """Mark one or more address registry keys as disconnected.
 
         Ignores None or empty keys. Updates the global address registry so the interface is no longer recorded as the
-        owner of each provided key; this is performed under the registry and per-address locks to ensure consistent
-        state.
+        owner of each provided key. Registry updates use atomic owner checks without waiting for another
+        interface's per-address connection reservation.
 
         Parameters
         ----------
@@ -608,13 +608,11 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         ordered_keys = self._sorted_address_keys(*keys)
         if not ordered_keys:
             return
-        # Do not hold _REGISTRY_LOCK while waiting on per-address locks.
-        # _mark_disconnected() acquires _REGISTRY_LOCK internally after the
-        # address locks are held, which avoids registry<->address deadlocks
-        # with concurrent connect/disconnect paths.
-        with self._lock_ordered_address_keys(ordered_keys):
-            for key in ordered_keys:
-                _mark_disconnected(key, owner=self)
+        # The registry removal is atomic and owner-checked. Waiting for a
+        # per-address reservation here can deadlock cancellation of a caller
+        # that never acquired that reservation or owned its connection.
+        for key in ordered_keys:
+            _mark_disconnected(key, owner=self)
 
     def _handle_disconnect(
         self,

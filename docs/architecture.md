@@ -241,3 +241,12 @@ facades.
 Git history is the authoritative record for that evolution. This document is
 intentionally about the architecture that should be maintained now, not a
 chronological refactor log.
+
+## Terminal BLE ownership cleanup
+
+Terminal disconnect removes only the calling interface's registry claims. The
+registry checks ownership atomically under its own lock. Cleanup does not wait
+for a per-address reservation owned by another constructor: a caller that never
+acquired that reservation has no transport ownership to retire through it.
+Connected publication retains its ordered address reservations, and active lock
+holders keep their registry entries until their existing contexts are released.
