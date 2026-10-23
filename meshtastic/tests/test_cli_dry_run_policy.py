@@ -259,6 +259,13 @@ _DRY_RUN_INERT_DESTS = frozenset(
         "lockdown_max_session_seconds",
         "lockdown_valid_until",
         "lockdown_wait",
+        # Interface-proxy flags never reach the preview path: run_common
+        # refuses --dry-run and bare proxy-only options before dry-run
+        # validation runs, so they cannot fail open here.
+        "interface_proxy_in",
+        "interface_proxy_out",
+        "interface_proxy_allow_public",
+        "interface_proxy_ble_name",
     }
 )
 
