@@ -8,6 +8,7 @@ import contextlib
 import logging
 import os
 import sys
+import threading
 import time
 import types
 from typing import IO, Any, BinaryIO, Callable
@@ -23,6 +24,12 @@ except ImportError:
 import serial  # type: ignore[import-untyped]
 
 import meshtastic.util
+from meshtastic.cancellation import (
+    ConnectionCancelledError,
+    _cancellable_init,
+    _check_cancelled,
+)
+from meshtastic.cancellation import _sleep as _connection_sleep
 from meshtastic.stream_interface import StreamInterface
 from meshtastic.transport_retry import _RetryWindow
 
@@ -114,29 +121,34 @@ class SerialInterface(StreamInterface):
             serial_kwargs.get("exclusive", False),
         )
         stream = serial.Serial(**serial_kwargs)
-        stream.port = self.devPath
-        # Keep DTR asserted so USB CDC output remains active on nRF52 boards.
-        stream.dtr = True
-        # Keep RTS deasserted to avoid accidental reset-line pulses on some adapters.
-        stream.rts = False
-        stream.open()
-        logger.debug(
-            "Serial stream opened: port=%s is_open=%s dtr=%s rts=%s",
-            self.devPath,
-            getattr(stream, "is_open", None),
-            getattr(stream, "dtr", None),
-            getattr(stream, "rts", None),
-        )
+        try:
+            stream.port = self.devPath
+            # Keep DTR asserted so USB CDC output remains active on nRF52 boards.
+            stream.dtr = True
+            # Keep RTS deasserted to avoid accidental reset-line pulses on some adapters.
+            stream.rts = False
+            stream.open()
+            _check_cancelled()
+            logger.debug(
+                "Serial stream opened: port=%s is_open=%s dtr=%s rts=%s",
+                self.devPath,
+                getattr(stream, "is_open", None),
+                getattr(stream, "dtr", None),
+                getattr(stream, "rts", None),
+            )
 
-        if sys.platform != "win32":
-            self._clear_hupcl_on_fd(stream.fileno())
-            time.sleep(SERIAL_SETTLING_DELAY)
+            if sys.platform != "win32":
+                self._clear_hupcl_on_fd(stream.fileno())
+                _connection_sleep(SERIAL_SETTLING_DELAY)
 
-        stream.flush()
-        time.sleep(SERIAL_SETTLING_DELAY)
-        if stream.in_waiting:
-            stream.reset_input_buffer()
-        return stream
+            stream.flush()
+            _connection_sleep(SERIAL_SETTLING_DELAY)
+            if stream.in_waiting:
+                stream.reset_input_buffer()
+            return stream
+        except BaseException:
+            stream.close()
+            raise
 
     @staticmethod
     def _clear_hupcl_on_fd(fd: int) -> None:
@@ -188,6 +200,7 @@ class SerialInterface(StreamInterface):
         return ports[0]
 
     # pylint: disable=R0917
+    @_cancellable_init
     def __init__(
         self,
         devPath: str | None = None,
@@ -196,6 +209,8 @@ class SerialInterface(StreamInterface):
         connectNow: bool = True,
         noNodes: bool = False,
         timeout: float = 300.0,
+        *,
+        cancelEvent: threading.Event | None = None,
     ) -> None:
         """Initialize the SerialInterface and open a serial connection to a Meshtastic device when available.
 
@@ -216,6 +231,10 @@ class SerialInterface(StreamInterface):
             Disable node discovery and management when True. (Default value = False)
         timeout : float
             Time in seconds to wait for replies or other operations. (Default value = 300.0)
+
+        cancelEvent : threading.Event | None
+            Optional caller-owned event. Setting it cancels construction and
+            releases partial resources. It is not retained by a connected interface.
 
         Raises
         ------
@@ -314,6 +333,8 @@ class SerialInterface(StreamInterface):
                     SERIAL_CONNECT_MAX_ATTEMPTS,
                 )
                 return
+            except ConnectionCancelledError:
+                raise
             except Exception as exc:
                 if not self._is_retryable_connect_error(exc):
                     logger.log(
@@ -361,7 +382,7 @@ class SerialInterface(StreamInterface):
                     self.stream = None
                 if self._dev_path_auto_detected:
                     self.devPath = None
-                time.sleep(retry_delay)
+                _connection_sleep(retry_delay)
 
     def _ensure_stream_for_connect_locked(self, *, requires_stream: bool) -> None:
         """Open/reopen serial stream atomically under StreamInterface connect lock."""
@@ -453,9 +474,9 @@ class SerialInterface(StreamInterface):
                 OSError, ValueError, serial.SerialException, *_TERMIOS_ERRORS
             ):
                 stream.flush()
-                time.sleep(SERIAL_SETTLING_DELAY)
+                _connection_sleep(SERIAL_SETTLING_DELAY)
                 stream.flush()
-                time.sleep(SERIAL_SETTLING_DELAY)
+                _connection_sleep(SERIAL_SETTLING_DELAY)
         logger.debug("Closing Serial stream")
         try:
             super().close()

@@ -13,6 +13,9 @@ import serial  # type: ignore[import-untyped]
 from google.protobuf.message import DecodeError
 
 from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceError
+from meshtastic.cancellation import _acquire_lock, _cancellable_init, _check_cancelled
+from meshtastic.cancellation import _sleep as _connection_sleep
+from meshtastic.cancellation import _uncancelled_cleanup
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.transport_retry import _linear_retry_delay
@@ -130,6 +133,7 @@ class StreamInterface(MeshInterface):
             """Initialize with a provided or default stream-closed message."""
             super().__init__(message)
 
+    @_cancellable_init
     def __init__(  # pylint: disable=R0917
         self,
         debugOut: IO[str] | Callable[[str], Any] | None = None,
@@ -137,6 +141,8 @@ class StreamInterface(MeshInterface):
         connectNow: bool = True,
         noNodes: bool = False,
         timeout: float = 300.0,
+        *,
+        cancelEvent: threading.Event | None = None,
     ) -> None:
         """Initialize the StreamInterface, prepare its reader thread, and optionally open and configure the underlying stream connection.
 
@@ -157,6 +163,10 @@ class StreamInterface(MeshInterface):
         timeout : float
             Seconds to wait for replies and configuration operations. (Default value = 300.0)
 
+        cancelEvent : threading.Event | None
+            Optional caller-owned event. Setting it cancels construction and
+            releases partial resources. It is not retained by a connected interface.
+
         Raises
         ------
         StreamInterfaceError
@@ -164,6 +174,7 @@ class StreamInterface(MeshInterface):
             `self.stream` and `noProto` is False (indicates
             StreamInterface is abstract).
         """
+        _check_cancelled(cancelEvent)
 
         # Initialize disconnect provenance early so pylint (and callers) see a
         # defined attribute even if initialization aborts before stream setup.
@@ -230,7 +241,7 @@ class StreamInterface(MeshInterface):
         requires_stream = not _provides_own_stream
         # Check if thread has already been started (threads can only be started once)
         # If ident is not None, the thread was started before and needs recreation.
-        with self._connect_lock:
+        with _acquire_lock(self._connect_lock):
             if self._stream_close_in_progress:
                 logger.warning(
                     "connect() called while close() is in progress; ignoring request"
@@ -255,7 +266,9 @@ class StreamInterface(MeshInterface):
                 # resynchronization before starting a new reader thread.
                 p: bytes = bytes([START2] * WAKE_BYTE_COUNT)
                 self._write_bytes(p)
-                time.sleep(DEVICE_WAKE_DELAY)  # give device time to start running
+                _connection_sleep(
+                    DEVICE_WAKE_DELAY
+                )  # give device time to start running
             if self._rxThread.ident is not None:
                 self._rxThread = threading.Thread(
                     target=self._reader, args=(), daemon=True, name="stream reader"
@@ -276,10 +289,11 @@ class StreamInterface(MeshInterface):
         except Exception:
             # If protocol startup fails after reader launch, tear down to avoid
             # leaked background threads and partial connection state.
+            # Delegate to the transport owner: a TCP socket must be closed
+            # before joining a reader blocked in recv(). Teardown must remain
+            # usable even after the construction signal has been set.
             with contextlib.suppress(Exception):
-                self._shared_close()
-            with contextlib.suppress(Exception):
-                self._join_reader_thread()
+                _uncancelled_cleanup(self.close)()
             raise
 
     def _ensure_stream_for_connect_locked(self, *, requires_stream: bool) -> None:
@@ -305,7 +319,7 @@ class StreamInterface(MeshInterface):
 
     def _close_stream_safely(self) -> None:
         """Best-effort close and clear of the underlying stream handle."""
-        s = self.stream
+        s = getattr(self, "stream", None)
         if s is not None:
             with contextlib.suppress(*STREAM_CLOSE_EXCEPTIONS):
                 s.close()
@@ -503,8 +517,21 @@ class StreamInterface(MeshInterface):
         All shutdown state transitions are synchronized with connect() via
         _connect_lock to prevent a concurrent connect() from clearing the
         shutdown intent and restarting the reader against a closed stream.
+
+        If cancellation interrupts a concrete constructor before this lock
+        exists, only its already-created native stream is closed. TCP's own
+        close() then retires any socket, and the MeshInterface state has not
+        yet been initialized or adopted.
         """
-        with self._connect_lock:
+        connect_lock = getattr(self, "_connect_lock", None)
+        if connect_lock is None:
+            # Serial/TCP may cancel before StreamInterface.__init__ creates its
+            # lock. The subclasses own native handles at that point; closing
+            # their stream here also permits TCP.close() to retire its socket.
+            self._wantExit = True
+            self._close_stream_safely()
+            return
+        with connect_lock:
             if self._stream_close_in_progress:
                 return
             self._stream_close_in_progress = True

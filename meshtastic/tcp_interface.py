@@ -4,7 +4,6 @@ This module provides the TCPInterface class which handles communication with
 Meshtastic devices via TCP/IP network connections.
 """
 
-# pylint: disable=R0917
 import contextlib
 import logging
 import math
@@ -14,6 +13,13 @@ import threading
 import time
 from typing import IO, Any, Callable
 
+# pylint: disable=R0917
+from meshtastic.cancellation import (
+    _cancellable_init,
+    _check_cancelled,
+    _connect_socket,
+    _current_event,
+)
 from meshtastic.stream_interface import (
     WRITE_PROGRESS_TIMEOUT_SECONDS,
     StreamInterface,
@@ -72,6 +78,7 @@ class TCPInterface(StreamInterface):
     DEFAULT_RECONNECT_MAX_DELAY = 30.0
     DEFAULT_RECONNECT_SLEEP_SLICE = 0.25
 
+    @_cancellable_init
     def __init__(
         self,
         hostname: str,
@@ -82,6 +89,8 @@ class TCPInterface(StreamInterface):
         noNodes: bool = False,
         timeout: float = 300.0,
         connectTimeout: float | None = DEFAULT_CONNECT_TIMEOUT,
+        *,
+        cancelEvent: threading.Event | None = None,
     ) -> None:
         """Initialize a TCPInterface for a meshtastic device and optionally establish a TCP connection.
 
@@ -105,6 +114,10 @@ class TCPInterface(StreamInterface):
             Timeout in seconds for socket connect attempts (default: 10.0).
             ``None`` omits the timeout parameter, allowing the platform socket
             default to apply.
+        cancelEvent : threading.Event | None
+            Optional caller-owned event. Setting it cancels construction and
+            releases partial resources. It is not retained by a connected interface.
+
         """
         if connectTimeout is not None:
             if (
@@ -272,13 +285,16 @@ class TCPInterface(StreamInterface):
         """
         logger.debug("Connecting to %s", self.hostname)
         server_address = (self.hostname, self.portNumber)
-        if self._connect_timeout is None:
+        if _current_event() is not None:
+            connected_socket = _connect_socket(server_address, self._connect_timeout)
+        elif self._connect_timeout is None:
             connected_socket = socket.create_connection(server_address)
         else:
             connected_socket = socket.create_connection(
                 server_address, timeout=self._connect_timeout
             )
         try:
+            _check_cancelled()
             connected_socket.settimeout(None)
         except Exception:
             self._close_socket_handle(connected_socket)
@@ -349,9 +365,17 @@ class TCPInterface(StreamInterface):
 
     def _close_socket_and_join_reader(self) -> None:
         """Release the TCP handle even when shared close cleanup fails."""
-        with self._reconnect_lock:
-            sock = self.socket
+        # The cancellation wrapper can call close() while the constructor is
+        # still validating arguments, before the reconnect lock exists. No
+        # other thread can own this partial instance at that point.
+        reconnect_lock = getattr(self, "_reconnect_lock", None)
+        if reconnect_lock is None:
+            sock = getattr(self, "socket", None)
             self.socket = None
+        else:
+            with reconnect_lock:
+                sock = self.socket
+                self.socket = None
         try:
             if sock is not None:
                 deadline = time.monotonic() + TCP_CLOSE_DRAIN_TIMEOUT_SECONDS

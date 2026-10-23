@@ -636,3 +636,13 @@ consumers should tolerate unknown fields and missing optional observations.
 The schema envelope and byte encoding are maintained compatibility contracts.
 The internal node database remains mutable for historical callers; a query
 result does not expose shared mutable cache records.
+
+## Opt-in constructor cancellation
+
+The shared interfaces and SerialInterface, TCPInterface and BLEInterface accept
+keyword-only cancelEvent=None. Existing positional parameters and default waits
+remain callable. ConnectionCancelledError is available from meshtastic.cancellation
+and extends MeshInterface.MeshInterfaceError. The signal applies only while the
+constructor is running; it does not become a live-session cancellation policy.
+See [connection cancellation](guides/connection-cancellation.md) for usage and
+native-operation limits.

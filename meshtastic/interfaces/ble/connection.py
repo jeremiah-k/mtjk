@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDBusError, BleakDeviceNotFoundError, BleakError
 
+from meshtastic.cancellation import ConnectionCancelledError, _check_cancelled
 from meshtastic.interfaces.ble.client import BLEClient
 from meshtastic.interfaces.ble.compat_adapter import (
     _get_declared_callable,
@@ -1978,6 +1979,7 @@ class ConnectionOrchestrator:
 
     def _raise_if_interface_closing(self) -> None:
         """Abort connection work when shutdown is already in progress."""
+        _check_cancelled()
         with self.state_lock:
             is_closing = self._state_is_closing()
         raw_closed = getattr(self.interface, "_closed", False)
@@ -2108,6 +2110,11 @@ class ConnectionOrchestrator:
                 emit_connected_side_effects=emit_connected_side_effects,
             )
             return client
+        except ConnectionCancelledError:
+            if client:
+                self._client_manager_safe_close_client(client)
+            self._transition_failure_to_disconnected("Connection cancelled")
+            raise
         except BLEConnectionTimeoutError:
             if client:
                 self._client_manager_safe_close_client(client)
