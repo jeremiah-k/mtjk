@@ -13,6 +13,7 @@ These guides describe the interfaces and maintenance practices of `mtjk`, a main
 - [BLE integration](guides/ble.md) — lifecycle, reconnect, and BLE behavior.
 - [Lockdown](guides/lockdown.md) — USB-only local lockdown workflow and its limitations.
 - [Firmware region presets](guides/region-presets.md) — advertised region/preset capabilities and conservative validation.
+- [Interface proxy (experimental)](guides/interface-proxy.md) — raw-link exposure over TCP, a POSIX PTY, or experimental BLE GATT.
 
 ## Compatibility and project maintenance
 
