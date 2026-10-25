@@ -366,7 +366,9 @@ def addConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help=(
             "Get a preferences field. Use --list-fields to print all available fields"
             " and --describe-field for schema metadata. Can use either snake_case or camelCase"
-            " format. (ex: 'power.ls_secs' or 'power.lsSecs')"
+            " format. (ex: 'power.ls_secs' or 'power.lsSecs') Requested values print as"
+            " stored, including secret-bearing fields such as 'security.private_key' or"
+            " 'network.wifi_psk'."
         ),
         nargs=1,
         action="append",

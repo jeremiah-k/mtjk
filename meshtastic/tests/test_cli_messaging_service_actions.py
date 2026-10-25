@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import logging
+from types import SimpleNamespace
 from typing import Any, NoReturn, cast
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
+import meshtastic.__main__ as main_module
 from meshtastic.cli import messaging_service_actions as actions
 from meshtastic.cli.context import ActionOutcome, CliContext
 from meshtastic.cli.messaging_service_actions import (
@@ -18,7 +22,7 @@ from meshtastic.cli.messaging_service_actions import (
     _handle_messaging_actions,
 )
 from meshtastic.mesh_interface import MeshInterface
-from meshtastic.protobuf import portnums_pb2
+from meshtastic.protobuf import localonly_pb2, portnums_pb2
 
 
 def _args(**overrides: Any) -> argparse.Namespace:
@@ -375,7 +379,9 @@ def test_information_get_routes_preference_output_through_cli_print() -> None:
 
     _handle_information_actions(context, _hooks(get_pref=get_pref, cli_print=cli_print))
 
-    get_pref.assert_called_once_with(node, "lora.region", cli_print=cli_print)
+    get_pref.assert_called_once_with(
+        node, "lora.region", cli_print=cli_print, allow_secrets=True
+    )
     cli_print.assert_any_call("Completed getting preferences")
 
 
@@ -398,7 +404,9 @@ def test_information_get_keeps_results_visible_with_separate_quiet_sink() -> Non
         ),
     )
 
-    get_pref.assert_called_once_with(node, "lora.region", cli_print=preference_output)
+    get_pref.assert_called_once_with(
+        node, "lora.region", cli_print=preference_output, allow_secrets=True
+    )
     preference_output.assert_called_once_with("Completed getting preferences")
 
 
@@ -490,6 +498,58 @@ def test_information_get_accepts_legacy_two_argument_hook() -> None:
     )
     assert reads == [(node, "lora.region")]
     assert output == ["Completed getting preferences"]
+
+
+@pytest.mark.unit
+def test_information_get_accepts_sink_aware_hook_without_allow_secrets() -> None:
+    """Hooks predating allow_secrets keep the sink-aware calling convention."""
+    interface = _interface_double()
+    interface.getNode.return_value = node = MagicMock()
+    context = _context(interface, get=[["lora.region"]])
+    calls: list[tuple[Any, str, Any]] = []
+    output: list[str] = []
+
+    def sink_aware_get_pref(
+        remote_node: Any, pref_name: str, *, cli_print: Any
+    ) -> bool:
+        calls.append((remote_node, pref_name, cli_print))
+        return True
+
+    _handle_information_actions(
+        context, _hooks(get_pref=sink_aware_get_pref, cli_print=output.append)
+    )
+    assert calls == [(node, "lora.region", output.append)]
+    assert output == ["Completed getting preferences"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_information_get_explicit_read_shows_secret_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An explicit --get of a secret field prints the stored value unredacted."""
+    private_key = bytes(range(32))
+    encoded = base64.b64encode(private_key).decode("utf-8")
+    node = SimpleNamespace(
+        localConfig=localonly_pb2.LocalConfig(),
+        moduleConfig=localonly_pb2.LocalModuleConfig(),
+        requestConfig=MagicMock(),
+    )
+    node.localConfig.security.private_key = private_key
+    interface = _interface_double()
+    interface.getNode.return_value = node
+    output: list[str] = []
+
+    with caplog.at_level(logging.DEBUG, logger="meshtastic.__main__"):
+        _handle_information_actions(
+            _context(interface, get=[["security.private_key"]]),
+            _hooks(cli_print=output.append, get_pref=main_module.getPref),
+        )
+
+    assert f"security.private_key: base64:{encoded}" in output
+    assert not any("<redacted>" in line for line in output)
+    assert encoded not in caplog.text
+    assert "security.private_key: <redacted>" in caplog.text
 
 
 @pytest.mark.unit

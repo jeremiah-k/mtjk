@@ -1,5 +1,6 @@
 """Exercise the public embedded entry point over a shared real interface."""
 
+import base64
 import importlib
 import sys
 import threading
@@ -182,6 +183,36 @@ def test_get_uses_fresh_response_and_captures_quiet_preference_output(
     assert "lora.hop_limit: 3" in result.output
     assert client.localNode.localConfig.lora.hop_limit == 7
     assert packets and client.responseHandlers == {}
+    cast(Mock, client.close).assert_not_called()
+    assert capsys.readouterr() == ("", "")
+
+
+def test_get_shows_explicitly_requested_secret_values(
+    client: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An explicit --get of a secret field prints the stored value unredacted."""
+    private_key = bytes(range(32))
+    encoded = base64.b64encode(private_key).decode("utf-8")
+
+    def send(envelope: mesh_pb2.ToRadio) -> None:
+        raw = admin_pb2.AdminMessage()
+        raw.get_config_response.security.private_key = private_key
+        deliver(
+            client,
+            {
+                "from": envelope.packet.to,
+                "decoded": {"requestId": envelope.packet.id, "admin": {"raw": raw}},
+            },
+        )
+
+    monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    result = executeCommand(client, ["--get", "security.private_key", "--quiet"])
+    assert result.succeeded
+    assert f"security.private_key: base64:{encoded}" in result.output
+    assert "<redacted>" not in result.output
+    assert client.responseHandlers == {}
     cast(Mock, client.close).assert_not_called()
     assert capsys.readouterr() == ("", "")
 

@@ -345,12 +345,21 @@ def _call_get_pref(
 
     Select the calling convention from the hook signature, not by catching a
     TypeError raised inside the hook (which would incorrectly execute it twice).
+    ``--get`` is an explicit operator request for the named field or section,
+    so hooks that accept ``allow_secrets`` receive ``True`` and print stored
+    secret values (debug logging keeps its own redaction).
     """
     try:
         signature = inspect.signature(get_pref)
     except (TypeError, ValueError):
         # An opaque callable is treated as the current sink-aware contract.
         return get_pref(node, name, cli_print=cli_print)
+    try:
+        signature.bind(node, name, cli_print=cli_print, allow_secrets=True)
+    except TypeError:
+        pass
+    else:
+        return get_pref(node, name, cli_print=cli_print, allow_secrets=True)
     try:
         signature.bind(node, name, cli_print=cli_print)
     except TypeError:
