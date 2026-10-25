@@ -87,6 +87,8 @@ unsupported action combinations before any transport is initialized.
 print their stored values without redaction — including secret-bearing ones
 such as `security.private_key` or `network.wifi_psk` — while debug logging
 still records those values redacted so shared logs do not retain credentials.
+Preference output renders terminal control characters inert, so a crafted
+stored value cannot drive the operator's terminal.
 
 Configuration-section acquisition has one private owner
 (`meshtastic.cli.config_readiness`): the `--set` and `--configure` apply and

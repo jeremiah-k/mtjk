@@ -379,9 +379,11 @@ def test_information_get_routes_preference_output_through_cli_print() -> None:
 
     _handle_information_actions(context, _hooks(get_pref=get_pref, cli_print=cli_print))
 
-    get_pref.assert_called_once_with(
-        node, "lora.region", cli_print=cli_print, allow_secrets=True
-    )
+    call = get_pref.call_args
+    assert call.args == (node, "lora.region")
+    assert call.kwargs["allow_secrets"] is True
+    call.kwargs["cli_print"]("lora.region: 8")
+    cli_print.assert_any_call("lora.region: 8")
     cli_print.assert_any_call("Completed getting preferences")
 
 
@@ -404,10 +406,13 @@ def test_information_get_keeps_results_visible_with_separate_quiet_sink() -> Non
         ),
     )
 
-    get_pref.assert_called_once_with(
-        node, "lora.region", cli_print=preference_output, allow_secrets=True
-    )
-    preference_output.assert_called_once_with("Completed getting preferences")
+    call = get_pref.call_args
+    assert call.args == (node, "lora.region")
+    assert call.kwargs["allow_secrets"] is True
+    preference_output.assert_any_call("Completed getting preferences")
+    call.kwargs["cli_print"]("network.wifi_psk: plain")
+    preference_output.assert_any_call("network.wifi_psk: plain")
+    ordinary_output.assert_not_called()
 
 
 @pytest.mark.unit
@@ -506,20 +511,21 @@ def test_information_get_accepts_sink_aware_hook_without_allow_secrets() -> None
     interface = _interface_double()
     interface.getNode.return_value = node = MagicMock()
     context = _context(interface, get=[["lora.region"]])
-    calls: list[tuple[Any, str, Any]] = []
+    calls: list[tuple[Any, str]] = []
     output: list[str] = []
 
     def sink_aware_get_pref(
         remote_node: Any, pref_name: str, *, cli_print: Any
     ) -> bool:
-        calls.append((remote_node, pref_name, cli_print))
+        cli_print("lora.region: 8")
+        calls.append((remote_node, pref_name))
         return True
 
     _handle_information_actions(
         context, _hooks(get_pref=sink_aware_get_pref, cli_print=output.append)
     )
-    assert calls == [(node, "lora.region", output.append)]
-    assert output == ["Completed getting preferences"]
+    assert calls == [(node, "lora.region")]
+    assert output == ["lora.region: 8", "Completed getting preferences"]
 
 
 @pytest.mark.unit
@@ -550,6 +556,53 @@ def test_information_get_explicit_read_shows_secret_values(
     assert not any("<redacted>" in line for line in output)
     assert encoded not in caplog.text
     assert "security.private_key: <redacted>" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_information_get_escapes_terminal_controls_in_preference_values() -> None:
+    """Stored device values must not drive the operator's terminal."""
+    node = SimpleNamespace(
+        localConfig=localonly_pb2.LocalConfig(),
+        moduleConfig=localonly_pb2.LocalModuleConfig(),
+        requestConfig=MagicMock(),
+    )
+    node.localConfig.network.wifi_psk = "psk\x1b[31mred\x07"
+    interface = _interface_double()
+    interface.getNode.return_value = node
+    output: list[str] = []
+
+    _handle_information_actions(
+        _context(interface, get=[["network.wifi_psk"]]),
+        _hooks(cli_print=output.append, get_pref=main_module.getPref),
+    )
+
+    joined = "".join(output)
+    assert "\x1b" not in joined
+    assert "\x07" not in joined
+    assert r"network.wifi_psk: psk\x1b[31mred\x07" in joined
+
+
+@pytest.mark.unit
+def test_information_get_forwards_allow_secrets_without_sink_parameter() -> None:
+    """Hooks taking allow_secrets but no cli_print still get the secret request."""
+    interface = _interface_double()
+    interface.getNode.return_value = node = MagicMock()
+    context = _context(interface, get=[["security.private_key"]])
+    calls: list[tuple[Any, str, bool]] = []
+    output: list[str] = []
+
+    def sinkless_get_pref(
+        remote_node: Any, pref_name: str, *, allow_secrets: bool
+    ) -> bool:
+        calls.append((remote_node, pref_name, allow_secrets))
+        return True
+
+    _handle_information_actions(
+        context, _hooks(get_pref=sinkless_get_pref, cli_print=output.append)
+    )
+    assert calls == [(node, "security.private_key", True)]
+    assert output == ["Completed getting preferences"]
 
 
 @pytest.mark.unit
