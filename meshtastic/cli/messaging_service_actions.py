@@ -345,18 +345,31 @@ def _call_get_pref(
 
     Select the calling convention from the hook signature, not by catching a
     TypeError raised inside the hook (which would incorrectly execute it twice).
+    ``--get`` is an explicit operator request for the named field or section,
+    so every inspectable hook shape that can receive ``allow_secrets`` gets
+    ``True`` and prints stored secret values (debug logging keeps its own
+    redaction). Truly opaque callables keep the plain sink-aware call:
+    attempting ``allow_secrets`` blind there would misclassify a TypeError
+    raised inside the hook and run it twice.
     """
     try:
         signature = inspect.signature(get_pref)
     except (TypeError, ValueError):
         # An opaque callable is treated as the current sink-aware contract.
         return get_pref(node, name, cli_print=cli_print)
-    try:
-        signature.bind(node, name, cli_print=cli_print)
-    except TypeError:
-        signature.bind(node, name)
-        return get_pref(node, name)
-    return get_pref(node, name, cli_print=cli_print)
+    conventions: tuple[dict[str, Any], ...] = (
+        {"cli_print": cli_print, "allow_secrets": True},
+        {"cli_print": cli_print},
+        {"allow_secrets": True},
+    )
+    for call_kwargs in conventions:
+        try:
+            signature.bind(node, name, **call_kwargs)
+        except TypeError:
+            continue
+        return get_pref(node, name, **call_kwargs)
+    signature.bind(node, name)
+    return get_pref(node, name)
 
 
 def _parse_sort_spec(spec: str) -> tuple[str, str | None]:
@@ -535,10 +548,17 @@ def _handle_information_actions(
         # Preference data is a requested result, not a progress banner: keep
         # it visible even when the standalone CLI is running with --quiet.
         output = hooks.preference_print or hooks.cli_print
+
+        def safe_output(message: str) -> None:
+            # Stored values are device-controlled and now print verbatim
+            # (including secrets); inert their terminal controls so a
+            # crafted value cannot drive the operator's terminal.
+            output(_escape_terminal_controls(message))
+
         for pref in args.get:
-            found = _call_get_pref(hooks.get_pref, node, pref[0], output) or found
+            found = _call_get_pref(hooks.get_pref, node, pref[0], safe_output) or found
         if found:
-            output("Completed getting preferences")
+            safe_output("Completed getting preferences")
 
     if args.nodes:
         context.outcome.close_now = True
