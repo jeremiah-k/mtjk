@@ -9,6 +9,9 @@ import threading
 import time
 from typing import IO, Any, TypeAlias
 
+from google.protobuf.json_format import MessageToDict
+from google.protobuf.message import Message
+
 try:
     import print_color  # type: ignore[import-untyped]
 except ImportError:
@@ -20,13 +23,9 @@ from tabulate import tabulate
 import meshtastic.node
 from meshtastic._command_scope import _get_command_output
 from meshtastic._core_constants import BROADCAST_ADDR, BROADCAST_NUM, LOCAL_ADDR
-from meshtastic.nodes import NodeQueryResult
+from meshtastic.nodes import _INTERNAL_NODE_FIELDS, NodeQueryResult
 from meshtastic.protobuf import mesh_pb2
-from meshtastic.util import (
-    convert_mac_addr,
-    messageToJson,
-    remove_keys_from_dict,
-)
+from meshtastic.util import convert_mac_addr, messageToJson
 
 from . import node_data, node_presentation
 from .ports import _NodeViewPort
@@ -73,12 +72,15 @@ def _timeago(delta_secs: int) -> str:
 
 def _normalize_json_serializable(value: object) -> JSONValue:
     """Recursively normalize common non-JSON-native values into JSON-safe forms."""
+    if isinstance(value, Message):
+        return _normalize_json_serializable(MessageToDict(value))
     if isinstance(value, (bytes, bytearray, memoryview)):
         return "base64:" + base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, dict):
         return {
             str(key): _normalize_json_serializable(inner_value)
             for key, inner_value in value.items()
+            if key not in _INTERNAL_NODE_FIELDS
         }
     if isinstance(value, (list, tuple, set)):
         return [_normalize_json_serializable(item) for item in value]
@@ -185,8 +187,9 @@ class NodeView:
     def show_info(self, file: IO[str] | None = None) -> str:
         """Return a human-readable JSON summary of the mesh interface including owner, local node info, metadata, and known nodes.
 
-        The summary omits internal node fields (`raw`, `decoded`, `payload`) and normalizes stored MAC addresses
-        to a human-readable form before formatting.
+        The summary omits internal packet and session-key fields recursively,
+        including inside list-wrapped observations, and formats MAC addresses
+        for display.
 
         Parameters
         ----------
@@ -215,11 +218,10 @@ class NodeView:
             metadata = f"\nMetadata: {messageToJson(metadata_info)}"
         mesh = "\n\nNodes in mesh: "
         nodes: dict[str, JSONValue] = {}
-        for n in nodes_snapshot:
-            keys_to_remove = ("raw", "decoded", "payload")
-            n2 = remove_keys_from_dict(keys_to_remove, n)
-
-            user = n2.get("user")
+        for node in nodes_snapshot:
+            # The serializer excludes sensitive keys in dictionaries inside
+            # lists as well as direct child dictionaries.
+            user = node.get("user")
             if not isinstance(user, dict):
                 continue
 
@@ -235,7 +237,7 @@ class NodeView:
 
             node_id = user.get("id")
             if node_id is not None:
-                nodes[str(node_id)] = _normalize_json_serializable(n2)
+                nodes[str(node_id)] = _normalize_json_serializable(node)
         infos = owner + myinfo + metadata + mesh + str(json.dumps(nodes, indent=2))
         if file is None:
             file = sys.stdout

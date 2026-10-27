@@ -15,7 +15,16 @@ __all__ = ("NodeQueryResult",)
 JSONValue: TypeAlias = (
     None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 )
-_INTERNAL_NODE_FIELDS = frozenset({"raw", "decoded", "payload", "adminSessionPassKey"})
+_INTERNAL_NODE_FIELDS = frozenset(
+    {
+        "raw",
+        "decoded",
+        "payload",
+        "adminSessionPassKey",
+        "sessionPasskey",
+        "session_passkey",
+    }
+)
 
 
 def _json_value(value: Any) -> JSONValue:
@@ -25,7 +34,11 @@ def _json_value(value: Any) -> JSONValue:
     if isinstance(value, (bytes, bytearray, memoryview)):
         return "base64:" + base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
+        return {
+            str(key): _json_value(item)
+            for key, item in value.items()
+            if key not in _INTERNAL_NODE_FIELDS
+        }
     if isinstance(value, (list, tuple)):
         return [_json_value(item) for item in value]
     if isinstance(value, float) and not math.isfinite(value):
@@ -91,14 +104,5 @@ class NodeQueryResult:
             "matched": self.matched,
             "returned": self.returned,
             "truncated": self.truncated,
-            "nodes": [
-                _json_value(
-                    {
-                        key: value
-                        for key, value in node.items()
-                        if key not in _INTERNAL_NODE_FIELDS
-                    }
-                )
-                for node in self.nodes
-            ],
+            "nodes": [_json_value(node) for node in self.nodes],
         }
