@@ -156,10 +156,9 @@ class TCPInterface(StreamInterface):
         self._reconnect_attempt_in_progress = False
         self._fatal_disconnect = False
 
-        if connectNow:
-            self.myConnect()
-
         try:
+            if connectNow:
+                self.myConnect()
             super().__init__(
                 debugOut=debugOut,
                 noProto=noProto,
@@ -167,7 +166,7 @@ class TCPInterface(StreamInterface):
                 noNodes=noNodes,
                 timeout=timeout,
             )
-        except Exception:
+        except BaseException:
             # myConnect() runs before base init so ensure we don't leak socket
             # resources if StreamInterface setup fails.
             sock = self.socket
@@ -293,22 +292,24 @@ class TCPInterface(StreamInterface):
             connected_socket = socket.create_connection(
                 server_address, timeout=self._connect_timeout
             )
+        discard_redundant_socket = False
+        closing = False
         try:
             _check_cancelled()
             connected_socket.settimeout(None)
-        except Exception:
+            with self._reconnect_lock:
+                if getattr(self, "_wantExit", False):
+                    closing = True
+                elif self.socket is not None:
+                    discard_redundant_socket = True
+                else:
+                    self.socket = connected_socket
+                    self._fatal_disconnect = False
+        except BaseException:
+            # Until self.socket adopts the handle, all exit paths—including
+            # KeyboardInterrupt and SystemExit—must retire the native socket.
             self._close_socket_handle(connected_socket)
             raise
-        discard_redundant_socket = False
-        closing = False
-        with self._reconnect_lock:
-            if getattr(self, "_wantExit", False):
-                closing = True
-            elif self.socket is not None:
-                discard_redundant_socket = True
-            else:
-                self.socket = connected_socket
-                self._fatal_disconnect = False
         if closing or discard_redundant_socket:
             self._close_socket_handle(connected_socket)
             if closing:

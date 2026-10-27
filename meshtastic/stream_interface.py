@@ -223,11 +223,17 @@ class StreamInterface(MeshInterface):
                     self.__class__.__name__,
                 )
             else:
-                self.connect()
-                if not noProto:
-                    # connect() waits only for transport-connected state; constructor
-                    # still waits for full config materialization for legacy behavior.
-                    self.waitForConfig()
+                try:
+                    self.connect()
+                    if not noProto:
+                        # connect() waits only for transport-connected state; constructor
+                        # still waits for full config materialization for legacy behavior.
+                        self.waitForConfig()
+                except BaseException:
+                    # Construction owns the reader until both startup waits finish.
+                    with contextlib.suppress(Exception):
+                        _uncancelled_cleanup(self.close)()
+                    raise
 
     def connect(self) -> None:
         """Establish the connection to the radio and start the background reader and configuration process.
@@ -286,7 +292,7 @@ class StreamInterface(MeshInterface):
                 else:
                     self._wait_connected(timeout=connect_wait_timeout)
                 self._stable_path = self._resolve_stable_path()
-        except Exception:
+        except BaseException:
             # If protocol startup fails after reader launch, tear down to avoid
             # leaked background threads and partial connection state.
             # Delegate to the transport owner: a TCP socket must be closed
