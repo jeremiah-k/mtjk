@@ -212,17 +212,24 @@ def test_logdef_rejects_unsupported_arrow_field_types() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("interval", [0, -0.001, -1.0])
-def test_power_logger_rejects_non_positive_interval(
+@pytest.mark.parametrize(
+    "interval", [0, -0.001, -1.0, float("nan"), float("inf"), -float("inf")]
+)
+def test_power_logger_rejects_invalid_interval(
     interval: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PowerLogger should reject interval <= 0 to prevent hot-loop threads."""
-    monkeypatch.setattr("meshtastic.slog.slog.FeatherWriter", _FakeWriter)
-    monkeypatch.setattr("meshtastic.slog.slog.threading.Thread", _FakeThread)
+    """Invalid intervals fail before allocating a writer or starting a sampler."""
+    writer = MagicMock()
+    thread = MagicMock()
+    monkeypatch.setattr("meshtastic.slog.slog.FeatherWriter", writer)
+    monkeypatch.setattr("meshtastic.slog.slog.threading.Thread", thread)
 
     meter = MagicMock()
     with pytest.raises(ValueError, match="interval must be > 0 seconds"):
         PowerLogger(meter, "unused-path", interval=interval)
+    writer.assert_not_called()
+    thread.assert_not_called()
+    meter.close.assert_not_called()
 
 
 @pytest.mark.unit
