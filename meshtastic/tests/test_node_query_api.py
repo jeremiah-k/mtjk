@@ -1,6 +1,7 @@
 """Exercise the public node query contract and its JSON CLI consumer."""
 
 import argparse
+import io
 import json
 import threading
 from collections.abc import Iterator
@@ -11,13 +12,14 @@ from unittest.mock import patch
 import pytest
 
 from meshtastic import __main__ as cli_main
+from meshtastic._protocol_runtime import _on_admin_receive
 from meshtastic.cli.context import ActionOutcome, CliContext
 from meshtastic.cli.dispatch import _dispatch_connected
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
 from meshtastic.cli.parser import parse_cli_args
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.mesh_interface_runtime import node_data
-from meshtastic.protobuf import mesh_pb2
+from meshtastic.protobuf import admin_pb2, mesh_pb2
 
 pytestmark = pytest.mark.unit
 
@@ -208,6 +210,141 @@ def _dispatch_json(interface: MeshInterface, argv: list[str]) -> list[str]:
             hooks,
         )
     return lines
+
+
+@pytest.mark.parametrize("use_cli", [False, True])
+def test_json_omits_cached_admin_packet_bodies(
+    interface: MeshInterface, use_cli: bool
+) -> None:
+    """Receive metadata survives JSON export without serialized admin secrets."""
+    interface.nodes = {}
+    admin = admin_pb2.AdminMessage(session_passkey=b"test-session-key")
+    admin.get_config_response.network.wifi_psk = "test-network-password"
+    payload = admin.SerializeToString()
+    _on_admin_receive(
+        interface,
+        {
+            "from": 2,
+            "to": 1,
+            "rxTime": 40,
+            "decoded": {
+                "portnum": "ADMIN_APP",
+                "payload": payload,
+                "admin": {"raw": admin},
+            },
+        },
+    )
+    result = interface.queryNodes(roleFilter=["client"], hwModelFilter=["rak"])
+    if use_cli:
+        document = json.loads(
+            _dispatch_json(
+                interface, ["--nodes", "--json", "--role", "client", "--hwmodel", "rak"]
+            )[0]
+        )
+    else:
+        document = result.toDict()
+
+    record = document["nodes"][0]
+    assert record["lastReceived"] == {"from": 2, "to": 1, "rxTime": 40}
+    assert "adminSessionPassKey" not in record
+    assert result.nodes[0]["lastReceived"]["decoded"]["payload"] == payload
+    assert result.nodes[0]["adminSessionPassKey"] == b"test-session-key"
+    assert admin.session_passkey == b"test-session-key"
+
+
+def test_json_omits_internal_fields_inside_nested_observations(
+    interface: MeshInterface,
+) -> None:
+    """Nested lists and dictionaries apply the same export boundary as nodes."""
+    node = cast("dict[int, dict[str, Any]]", interface.nodesByNum)[2]
+    node["history"] = [
+        {
+            "timestamp": 50,
+            "payload": object(),
+            "raw": object(),
+            "decoded": object(),
+            "adminSessionPassKey": b"test-session-key",
+        }
+    ]
+
+    document: dict[str, Any] = interface.queryNodes(
+        roleFilter=["client"], hwModelFilter=["rak"]
+    ).toDict()
+
+    assert document["nodes"][0]["history"] == [{"timestamp": 50}]
+    assert "payload" in node["history"][0]
+
+
+def test_node_exports_strip_keys_inside_list_observations(
+    interface: MeshInterface,
+) -> None:
+    """List-wrapped cached admin observations must not bypass redaction."""
+    node = cast("dict[int, dict[str, Any]]", interface.nodesByNum)[2]
+    node["user"]["id"] = "!00000002"
+    node["history"] = [
+        {
+            "rxTime": 72,
+            "decoded": {"payload": b"secret-raw-packet"},
+            "adminSessionPassKey": b"secret-admin-key",
+            "sessionPasskey": b"secret-proto-key",
+            "session_passkey": b"secret-native-key",
+            "nested": [{"payload": b"second-raw-packet", "snr": -4}],
+        }
+    ]
+    interface.nodes = {"!00000002": node}
+
+    json_document = cast(
+        "dict[str, Any]",
+        interface.queryNodes(roleFilter=["client"], hwModelFilter=["rak"]).toDict(),
+    )
+    expected_history = [{"rxTime": 72, "nested": [{"snr": -4}]}]
+    assert json_document["nodes"][0]["history"] == expected_history
+
+    info = interface.showInfo(file=io.StringIO())
+    info_nodes = json.loads(info.split("Nodes in mesh: ", 1)[1])
+    assert info_nodes["!00000002"]["history"] == expected_history
+    assert "secret-raw-packet" not in info
+    assert "secret-admin-key" not in info
+    assert "secret-proto-key" not in info
+    assert node["history"][0]["adminSessionPassKey"] == b"secret-admin-key"
+    assert node["history"][0]["decoded"]["payload"] == b"secret-raw-packet"
+
+
+@pytest.mark.parametrize("use_info", [False, True])
+def test_json_filters_session_passkeys_in_nested_protobuf(
+    interface: MeshInterface, use_info: bool
+) -> None:
+    """A cached protobuf is normalized after applying the same secret policy."""
+    node = cast("dict[int, dict[str, Any]]", interface.nodesByNum)[2]
+    node["user"]["id"] = "!00000002"
+    node["observation"] = admin_pb2.AdminMessage(session_passkey=b"not-for-json")
+    if use_info:
+        interface.nodes = {"!00000002": node}
+        info = interface.showInfo(file=io.StringIO())
+        exported = json.loads(info.split("Nodes in mesh: ", 1)[1])["!00000002"]
+    else:
+        result = cast(
+            "dict[str, Any]",
+            interface.queryNodes(roleFilter=["client"], hwModelFilter=["rak"]).toDict(),
+        )
+        exported = result["nodes"][0]
+
+    assert exported["observation"] == {}
+    assert node["observation"].session_passkey == b"not-for-json"
+
+
+def test_info_omits_cached_admin_session_keys(interface: MeshInterface) -> None:
+    """The human-readable node summary does not expose the active admin key."""
+    node = cast("dict[int, dict[str, Any]]", interface.nodesByNum)[2]
+    node["user"]["id"] = "!00000002"
+    node["adminSessionPassKey"] = b"test-session-key"
+    interface.nodes = {"!00000002": node}
+
+    output = interface.showInfo(file=io.StringIO())
+
+    assert "adminSessionPassKey" not in output
+    assert "Bravo" in output
+    assert node["adminSessionPassKey"] == b"test-session-key"
 
 
 def test_cli_json_emits_exactly_one_document_through_the_sink(

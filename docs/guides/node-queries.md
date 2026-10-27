@@ -31,6 +31,10 @@ For machine-readable command output, use `mtjk --nodes --json`, optionally with
 the cache's camelCase spelling; measurements and timestamps remain numeric.
 `result.toDict()` produces the same document in Python. Bytes use `base64:` plus
 Base64, protobuf values use protobuf JSON conventions, and non-finite numbers
-become null. Internal packet payloads and administrative session keys are omitted
-from JSON. Other actions and table-only `--show-fields` cannot be combined with
+become null. Internal fields (`raw`, `decoded`, `payload`,
+`adminSessionPassKey`, and protobuf `sessionPasskey`/`session_passkey`) are omitted recursively
+from JSON, including inside list-wrapped observations and `lastReceived`;
+receive metadata remains available. `--info` uses the same exclusion policy.
+The detached Python records retain their full cached contents. Other actions
+and table-only `--show-fields` cannot be combined with
 `--nodes --json`.
