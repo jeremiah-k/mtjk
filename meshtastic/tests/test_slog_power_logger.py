@@ -1,7 +1,8 @@
 """Unit tests for power logging behavior in slog.py."""
 
-import importlib
+import importlib.util
 import logging
+import sys
 import threading
 import typing
 import warnings
@@ -173,9 +174,7 @@ def test_slog_directory_collision_error_includes_path_and_attempts() -> None:
 def test_slog_arrow_data_type_type_checking_alias_branch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reload slog with TYPE_CHECKING enabled to exercise ArrowDataType type-alias branch."""
-    original_type_checking = typing.TYPE_CHECKING
-    original_data_type = pa.DataType
+    """Exercise the Arrow type alias without replacing live slog class identities."""
 
     class _SubscriptableDataType:
         """Minimal stand-in that supports class subscription syntax."""
@@ -184,15 +183,16 @@ def test_slog_arrow_data_type_type_checking_alias_branch(
         def __class_getitem__(cls, _item: Any) -> type["_SubscriptableDataType"]:
             return cls
 
-    try:
-        monkeypatch.setattr(typing, "TYPE_CHECKING", True)
-        monkeypatch.setattr(pa, "DataType", _SubscriptableDataType)
-        reloaded = importlib.reload(slog_module)
-        assert reloaded.ArrowDataType is _SubscriptableDataType
-    finally:
-        monkeypatch.setattr(typing, "TYPE_CHECKING", original_type_checking)
-        monkeypatch.setattr(pa, "DataType", original_data_type)
-        importlib.reload(slog_module)
+    spec = importlib.util.spec_from_file_location(
+        "meshtastic.slog._type_alias_probe", slog_module.__file__
+    )
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, probe)
+    monkeypatch.setattr(typing, "TYPE_CHECKING", True)
+    monkeypatch.setattr(pa, "DataType", _SubscriptableDataType)
+    spec.loader.exec_module(probe)
+    assert probe.ArrowDataType is _SubscriptableDataType
 
 
 @pytest.mark.unit
