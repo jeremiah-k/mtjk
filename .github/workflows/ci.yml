@@ -141,6 +141,15 @@ jobs:
       - name: Lint shell scripts
         run: .trunk/trunk check --filter=shellcheck bin/*.sh
 
+  dependency-audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - *checkout_step
+      - name: Scan locked dependencies
+        run: make audit-deps
+
   formatting:
     name: Formatting (trunk)
     runs-on: ubuntu-latest

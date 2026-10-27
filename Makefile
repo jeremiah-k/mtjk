@@ -1,4 +1,4 @@
-.PHONY: all clean test ci ci-base lint lint-tests docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
+.PHONY: all clean test ci ci-base lint lint-tests audit-deps docs cov open-coverage virt virt-meshtasticd virt-smokevirt-meshtasticd simradio smoke1 smoke1-destructive slow install check-artifacts examples protobufs protobufs-update api-baseline api-baseline-master field-reference FORCE
 
 UV_RUN := uv run --locked
 API_BASELINE_FILE := meshtastic/tests/api_baselines/api_baseline.json
@@ -95,6 +95,11 @@ lint:
 # lint tests with the canonical Ruff version (same scope as CI)
 lint-tests:
 	.trunk/trunk check --filter=ruff meshtastic/tests tests
+
+# Scan the complete lockfile against live advisories, including existing findings.
+audit-deps:
+	.trunk/trunk tools install osv-scanner
+	.trunk/tools/osv-scanner scan source --lockfile uv.lock
 
 # show the slowest unit tests
 slow:
