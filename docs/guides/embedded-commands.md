@@ -54,7 +54,12 @@ Output capture uses invocation-local reporters and reader-thread callback
 contexts. It does not replace stdout or stderr, change logging configuration,
 or populate legacy CLI globals. Requested node, preference, telemetry, position,
 and traceroute results are captured, including under --quiet. Preference reads
-request fresh device sections and preserve the existing CLI's secret redaction.
+request fresh device sections. Explicit --get reads include stored secret values
+in both CommandResult.output and output callbacks, including when an entire
+section is requested. Treat that output as sensitive. Preference-formatting
+debug messages redact secrets, but full protocol debug logs can contain raw
+configuration messages and serialized payloads. Terminal control characters in
+preference output are escaped.
 
 The default output limit is 64 KiB of UTF-8 text. Set maxOutputBytes to another
 positive integer to change it. Text is truncated at a character boundary and

@@ -1,5 +1,11 @@
 # CLI configuration and verification
 
+`--get` prints the stored value of each requested field or section, including credentials such as `network.wifi_psk` and `security.private_key`. A section read such as `mtjk --get security` also includes its secret-bearing fields. Treat captured or redirected preference output as sensitive. Terminal control characters in preference output are escaped.
+
+Preference-formatting debug messages redact secret values. Full protocol debug logs can contain raw configuration messages and serialized payloads, so treat `--debug` logs as sensitive too.
+
+Embedded `executeCommand` preference reads follow the same output policy, including captured `CommandResult.output` and output callbacks. Use [fresh configuration reads](configuration-reads.md) when an application needs typed values rather than CLI text.
+
 Local CLI configuration writes are verified against fresh device state. After a local `--set` batch is written and committed, and after a local `--configure` reconnect/reload, the CLI re-reads the affected `LocalConfig`/`LocalModuleConfig` sections from the device and compares them to the requested values. A mismatch, a section that never reloads, or a failed verification readback returns a nonzero exit status and names the fields or sections involved. Only successful readback is reported as a verified apply. When part of a batch cannot be read back, an observed mismatch in another section is retained and fails the command; unknown state cannot erase evidence of a rejected value.
 
 A local `--set` batch or `--configure` document containing `lora.region` attempts the same bounded verification. A channel URL changing the region, including UNSET, follows the same configure policy. If the device cannot return fresh configuration, it reports that the requested changes were sent, not verified, and returns zero for the completed send. Firmware 2.8 applies LoRa settings live; first-time region provisioning can generate an identity, and firmware 2.6/2.7 can reboot for radio changes. A responsive device that returns different values still fails verification. Consumers must not interpret an unverified send as proof that the device applied the batch.

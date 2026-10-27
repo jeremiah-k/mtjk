@@ -85,8 +85,9 @@ unsupported action combinations before any transport is initialized.
 
 `--get` reads are explicit operator requests: requested fields and sections
 print their stored values without redaction — including secret-bearing ones
-such as `security.private_key` or `network.wifi_psk` — while debug logging
-still records those values redacted so shared logs do not retain credentials.
+such as `security.private_key` or `network.wifi_psk`. Preference-formatting
+debug messages redact these values, but protocol debug logs can contain raw
+configuration messages and serialized payloads and must be treated as sensitive.
 Preference output renders terminal control characters inert, so a crafted
 stored value cannot drive the operator's terminal.
 
