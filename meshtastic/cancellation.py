@@ -219,8 +219,9 @@ def _connect_socket(address: tuple[str, int], timeout: float | None) -> _socket.
     effective_timeout = _socket.getdefaulttimeout() if timeout is None else timeout
     for family, kind, protocol, _, target in addresses:
         _check_cancelled()
-        sock = _socket.socket(family, kind, protocol)
+        sock: _socket.socket | None = None
         try:
+            sock = _socket.socket(family, kind, protocol)
             sock.setblocking(False)
             code = sock.connect_ex(target)
             if code not in (0, _errno.EISCONN):
@@ -254,9 +255,11 @@ def _connect_socket(address: tuple[str, int], timeout: float | None) -> _socket.
             return sock
         except OSError as exc:
             error = exc
-            sock.close()
+            if sock is not None:
+                sock.close()
         except BaseException:
-            sock.close()
+            if sock is not None:
+                sock.close()
             raise
     if error is not None:
         raise error
