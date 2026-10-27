@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import io
 import logging
+import math
 import os
 import re
 import threading
@@ -159,7 +160,7 @@ POWER_LOG_SCHEMA_METADATA: dict[bytes | str, bytes | str] = {
     ),
 }
 POWER_LOGGER_JOIN_TIMEOUT = 1.0
-INTERVAL_REQUIRED_MESSAGE = "interval must be > 0 seconds"
+INTERVAL_REQUIRED_MESSAGE = "interval must be > 0 seconds and finite"
 DIR_NAME_REQUIRED_MESSAGE = "dir_name must be a non-empty path when provided"
 SAMPLE_FAILURE_WARNING_COOLDOWN_SECONDS = 5.0
 SAMPLE_FAILURE_WARNING_BURST_COUNT = 3
@@ -195,7 +196,8 @@ class PowerLogger:
         file_path : str | None
             Path to the output Feather file where readings will be written.
         interval : float
-            Time in seconds between automatic samples. Must be > 0 (default 0.002).
+            Time in seconds between automatic samples. Must be finite and > 0
+            (default 0.002).
         **compat_kwargs : Any
             Legacy keyword compatibility:
             - `pMeter`: historical constructor name for `p_meter`.
@@ -203,7 +205,7 @@ class PowerLogger:
         Raises
         ------
         ValueError
-            If interval is not a positive number.
+            If interval is not a finite positive number.
         """
         legacy_p_meter = compat_kwargs.pop("pMeter", None)
         if compat_kwargs:
@@ -221,7 +223,7 @@ class PowerLogger:
             raise TypeError("PowerLogger requires a PowerMeter instance")
         if file_path is None:
             raise TypeError("PowerLogger requires file_path")
-        if interval <= 0:
+        if interval <= 0 or not math.isfinite(interval):
             raise ValueError(INTERVAL_REQUIRED_MESSAGE)
         self._p_meter = p_meter
         self.writer = FeatherWriter(file_path)
