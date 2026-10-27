@@ -18,6 +18,9 @@ repo:
   # workflow.
   trunk_branch: develop
 lint:
+  files:
+    - name: uv-lockfile
+      filenames: [uv.lock]
   disabled:
     - bandit
     - oxipng
@@ -57,6 +60,10 @@ lint:
         - tests/**
         - meshtastic/tests/**
   definitions:
+    # The plugin's lockfile matcher omits uv.lock even though OSV supports it.
+    - name: osv-scanner
+      files: [lockfile, uv-lockfile]
+      cache_results: false
     - name: mypy-uv
       description: Run mypy via uv using the project's pinned dependencies.
       files: [python, python-interface]

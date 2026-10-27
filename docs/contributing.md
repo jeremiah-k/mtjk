@@ -231,6 +231,8 @@ scanners. Their pins live in `.trunk/trunk.yaml`; do not copy them into a
 second versions file. The standalone Ruff CI job reads its install version
 directly from that configuration through `bin/check_quality_tool_versions.py`.
 
+Run `make audit-deps` to check all packages in `uv.lock` against live OSV advisories using Trunk's pinned scanner. The dedicated CI job runs the same command and fails on any unsuppressed advisory, including findings in unchanged dependencies. Trunk also recognizes `uv.lock` during ordinary OSV checks; advisory results are not cached because the database changes independently of the lockfile.
+
 uv owns the Python environment and pins project-aware Python tools such as
 Pylint and Mypy in `pyproject.toml` and `uv.lock`. Trunk's
 `pylint-uv` and `mypy-uv` definitions orchestrate those
