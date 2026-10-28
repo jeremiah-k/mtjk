@@ -71,7 +71,7 @@ mesh-analysis = "meshtastic.analysis.__main__:main [analysis]"
 
 [dependency-groups]
 dev = [
-  "hypothesis==6.170.12",
+  "hypothesis==6.170.13",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
   "pytest-timeout==2.4.0",
