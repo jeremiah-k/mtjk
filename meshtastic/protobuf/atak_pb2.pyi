@@ -3677,6 +3677,7 @@ class TAKPacketV2(_message.Message):
     REMARKS_FIELD_NUMBER: _builtins.int
     ENVIRONMENT_FIELD_NUMBER: _builtins.int
     SENSOR_FOV_FIELD_NUMBER: _builtins.int
+    START_EPOCH_LO14_FIELD_NUMBER: _builtins.int
     MARTI_FIELD_NUMBER: _builtins.int
     CHAT_FIELD_NUMBER: _builtins.int
     AIRCRAFT_FIELD_NUMBER: _builtins.int
@@ -3797,6 +3798,67 @@ class TAKPacketV2(_message.Message):
     when the original CoT event carried non-empty remarks text.
     GeoChat messages carry their text in GeoChat.message instead.
     Empty string (proto3 default) means no remarks were present.
+    """
+    start_epoch_lo14: _builtins.int
+    """
+    Low 14 bits of the event's `start` time, as epoch seconds.
+
+    Restores a value the format otherwise drops entirely. The parser reads `time`
+    and `stale` only to derive `stale_seconds`, and never reads `start` at all, so
+    the builder has nothing to rebuild it from and sets `time = start = now` at
+    decode. A CoT that spent 40 s crossing the mesh therefore arrives stamped as
+    the freshest thing on the map, and no receiver can tell a 2-second-old
+    position from a 40-second-old one, which makes correct ordering of two
+    reports for one UID impossible.
+
+    14 bits rather than a full timestamp: any tag at 16 or above costs a 2-byte
+    key, and a value below 16384 fits a 2-byte varint where epoch seconds needs
+    five, so the field costs 4 bytes on the wire instead of 7.
+
+    SENDERS: populate this only when `start` is within 8192 s of transmission,
+    and omit it otherwise. The encoding cannot express an older start and a
+    receiver cannot detect one: an out-of-range value reconstructs silently as a
+    plausible recent time in the wrong window. Transit and clock skew spend part
+    of that budget, so treat roughly two hours as the practical limit.
+
+    RECEIVERS: rebuild the full value by selecting the candidate NEAREST your own
+    clock. Do not splice the low bits onto your current window.
+
+      delta = ((carried - now) % 16384 + 24576) % 16384 - 8192   // [-8192, 8191]
+      start = now + delta
+
+    (The + 24576 keeps the second remainder non-negative under both C and Python
+    remainder semantics.)
+
+    The naive `(now & ~0x3FFF) | carried` is wrong at a window boundary in BOTH
+    directions, not just one. For a boundary B, a sender `start` of B read by a
+    receiver whose clock is at B - 1 yields B - 16384: a fresh event that appears
+    4.55 hours old, which no future-side sanity check will catch. Nearest-
+    candidate is exact whenever the true start is within 8192 s of the receiver's
+    clock, which subsumes any realistic transit plus skew.
+
+    Treat the result as trustworthy for ORDERING packets from a single sender,
+    where a constant clock offset cancels out. Before using it as an absolute
+    age, bound it: reject a start more than a few seconds in the future, or more
+    than about an hour in the past, and fall back to decode time. Keep both
+    bounds well inside the 8192 s half-window, because past that the
+    reconstruction is wrong rather than merely implausible.
+
+    Ordering assumes the producer advances `start` on each emission, which ATAK
+    does because it sets `start = time`. A producer that holds `start` fixed
+    across updates cannot be ordered by this field.
+
+    `optional` is deliberate, despite the v0.4.0 `altitude` experiment above
+    finding `optional` net-negative: that regressed because a genuine 0 m
+    altitude is common, whereas `start` mod 16384 is 0 for one second in 16384.
+    Here explicit presence costs essentially nothing and distinguishes "sender
+    did not populate this" from a legitimate zero.
+
+    Tag 43 rather than the 27 held above for "future top-level annotations",
+    which is what this is: un-reserving 27 trips buf's RESERVED_MESSAGE_NO_DELETE
+    under the FILE breaking category this module enables, and every tag at 16 or
+    above costs the same 2-byte key, so the fresh tag is free. Move it to 27 if
+    you would rather except the rule.
     """
     raw_detail: _builtins.bytes
     """
@@ -3939,6 +4001,7 @@ class TAKPacketV2(_message.Message):
         remarks: _builtins.str = ...,
         environment: Global___TAKEnvironment | None = ...,
         sensor_fov: Global___SensorFov | None = ...,
+        start_epoch_lo14: _builtins.int | None = ...,
         marti: Global___Marti | None = ...,
         chat: Global___GeoChat | None = ...,
         aircraft: Global___AircraftTrack | None = ...,
@@ -3953,9 +4016,9 @@ class TAKPacketV2(_message.Message):
         taktalk: Global___TakTalkMessage | None = ...,
         taktalk_room: Global___TakTalkRoomData | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "start_epoch_lo14", b"start_epoch_lo14", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "start_epoch_lo14", b"start_epoch_lo14", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "task", b"task", "team", b"team", "uid", b"uid"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__environment: _TypeAlias = _typing.Literal["environment"]  # noqa: Y015
     _WhichOneofArgType__environment: _TypeAlias = _typing.Literal["_environment", b"_environment"]  # noqa: Y015
@@ -3963,6 +4026,8 @@ class TAKPacketV2(_message.Message):
     _WhichOneofArgType__marti: _TypeAlias = _typing.Literal["_marti", b"_marti"]  # noqa: Y015
     _WhichOneofReturnType__sensor_fov: _TypeAlias = _typing.Literal["sensor_fov"]  # noqa: Y015
     _WhichOneofArgType__sensor_fov: _TypeAlias = _typing.Literal["_sensor_fov", b"_sensor_fov"]  # noqa: Y015
+    _WhichOneofReturnType__start_epoch_lo14: _TypeAlias = _typing.Literal["start_epoch_lo14"]  # noqa: Y015
+    _WhichOneofArgType__start_epoch_lo14: _TypeAlias = _typing.Literal["_start_epoch_lo14", b"_start_epoch_lo14"]  # noqa: Y015
     _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     @_typing.overload
@@ -3971,6 +4036,8 @@ class TAKPacketV2(_message.Message):
     def WhichOneof(self, oneof_group: _WhichOneofArgType__marti) -> _WhichOneofReturnType__marti | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__sensor_fov) -> _WhichOneofReturnType__sensor_fov | None: ...
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__start_epoch_lo14) -> _WhichOneofReturnType__start_epoch_lo14 | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType_payload_variant) -> _WhichOneofReturnType_payload_variant | None: ...
 
