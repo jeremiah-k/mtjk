@@ -4130,6 +4130,8 @@ class FromRadio(_message.Message):
     DEVICEUICONFIG_FIELD_NUMBER: _builtins.int
     LOCKDOWN_STATUS_FIELD_NUMBER: _builtins.int
     REGION_PRESETS_FIELD_NUMBER: _builtins.int
+    DISPLAY_FRAME_FIELD_NUMBER: _builtins.int
+    DISPLAY_PALETTE_FIELD_NUMBER: _builtins.int
     id: _builtins.int
     """
     The packet id, used to allow the phone to request missing read packets from the FIFO,
@@ -4255,6 +4257,21 @@ class FromRadio(_message.Message):
         any group carries no constraint info and should not be restricted.
         """
 
+    @_builtins.property
+    def display_frame(self) -> Global___DisplayFrame:
+        """
+        One chunk of the device's display framebuffer, sent while display
+        mirroring is active (see AdminMessage.set_display_mirror and
+        AdminMessage.get_display_frame_request).
+        """
+
+    @_builtins.property
+    def display_palette(self) -> Global___DisplayPalette:
+        """
+        One chunk of the color palette referenced by display_frame's
+        palette_signature (see DisplayPalette).
+        """
+
     def __init__(
         self,
         *,
@@ -4277,16 +4294,309 @@ class FromRadio(_message.Message):
         deviceuiConfig: _device_ui_pb2.DeviceUIConfig | None = ...,
         lockdown_status: Global___LockdownStatus | None = ...,
         region_presets: Global___LoRaRegionPresetMap | None = ...,
+        display_frame: Global___DisplayFrame | None = ...,
+        display_palette: Global___DisplayPalette | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "display_frame", b"display_frame", "display_palette", b"display_palette", "fileInfo", b"fileInfo", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "fileInfo", b"fileInfo", "id", b"id", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["channel", b"channel", "clientNotification", b"clientNotification", "config", b"config", "config_complete_id", b"config_complete_id", "deviceuiConfig", b"deviceuiConfig", "display_frame", b"display_frame", "display_palette", b"display_palette", "fileInfo", b"fileInfo", "id", b"id", "lockdown_status", b"lockdown_status", "log_record", b"log_record", "metadata", b"metadata", "moduleConfig", b"moduleConfig", "mqttClientProxyMessage", b"mqttClientProxyMessage", "my_info", b"my_info", "node_info", b"node_info", "packet", b"packet", "payload_variant", b"payload_variant", "queueStatus", b"queueStatus", "rebooted", b"rebooted", "region_presets", b"region_presets", "xmodemPacket", b"xmodemPacket"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["packet", "my_info", "node_info", "config", "log_record", "config_complete_id", "rebooted", "moduleConfig", "channel", "queueStatus", "xmodemPacket", "metadata", "mqttClientProxyMessage", "fileInfo", "clientNotification", "deviceuiConfig", "lockdown_status", "region_presets"]  # noqa: Y015
+    _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["packet", "my_info", "node_info", "config", "log_record", "config_complete_id", "rebooted", "moduleConfig", "channel", "queueStatus", "xmodemPacket", "metadata", "mqttClientProxyMessage", "fileInfo", "clientNotification", "deviceuiConfig", "lockdown_status", "region_presets", "display_frame", "display_palette"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
     def WhichOneof(self, oneof_group: _WhichOneofArgType_payload_variant) -> _WhichOneofReturnType_payload_variant | None: ...
 
 Global___FromRadio: _TypeAlias = FromRadio  # noqa: Y015
+
+@_typing.final
+class DisplayFrame(_message.Message):
+    """
+    A chunk of the device's display framebuffer, streamed to the local client
+    over BLE/serial/TCP. Frames larger than one chunk are split by byte offset;
+    a chunk with offset + data length == total_size completes the frame.
+    This is application-level chunking of a framebuffer into several complete
+    FromRadio messages, and is unrelated to ClientApiChunkedPayload, which
+    splits ONE serialized FromRadio across a small BLE MTU. A frame cannot ride
+    that wrapper: FromRadio is statically capped at MAX_TO_FROM_RADIO_SIZE, far
+    below a full framebuffer. The two compose - a chunked-transport client
+    receives these frames through it.
+
+    Chunks of one frame arrive contiguously (no other display_frame between
+    them; display_palette messages may interleave) and in offset order, so a
+    client never has to reorder. It does have to check for loss: the queue to
+    the client drops its oldest entry when full, and a frame in flight can be
+    truncated when mirroring is disabled. A client MUST verify that offset
+    equals the number of bytes it has already accumulated for this frame_id,
+    and discard the partial frame on any gap or frame_id change. An incomplete
+    frame must never be rendered.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    class _Format:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _FormatEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[DisplayFrame._Format.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        FORMAT_UNSPECIFIED: DisplayFrame._Format.ValueType  # 0
+        """
+        Default; should not be sent.
+        """
+        MONO_VLSB: DisplayFrame._Format.ValueType  # 1
+        """
+        1 bit per pixel, vertical LSB-first pages (SSD1306/OLEDDisplay layout):
+        byte index = x + (y / 8) * width, bit index = y % 8.
+        """
+        RGB565: DisplayFrame._Format.ValueType  # 2
+        """
+        16 bits per pixel, RGB565 in little-endian byte order, rows tightly
+        packed. Used with the partial-update rect fields: data covers only
+        the rectangle. Streamed by LVGL-based color UIs.
+        """
+
+    class Format(_Format, metaclass=_FormatEnumTypeWrapper):
+        """
+        Pixel encodings of the framebuffer bytes.
+        """
+
+    FORMAT_UNSPECIFIED: DisplayFrame.Format.ValueType  # 0
+    """
+    Default; should not be sent.
+    """
+    MONO_VLSB: DisplayFrame.Format.ValueType  # 1
+    """
+    1 bit per pixel, vertical LSB-first pages (SSD1306/OLEDDisplay layout):
+    byte index = x + (y / 8) * width, bit index = y % 8.
+    """
+    RGB565: DisplayFrame.Format.ValueType  # 2
+    """
+    16 bits per pixel, RGB565 in little-endian byte order, rows tightly
+    packed. Used with the partial-update rect fields: data covers only
+    the rectangle. Streamed by LVGL-based color UIs.
+    """
+
+    WIDTH_FIELD_NUMBER: _builtins.int
+    HEIGHT_FIELD_NUMBER: _builtins.int
+    FORMAT_FIELD_NUMBER: _builtins.int
+    FRAME_ID_FIELD_NUMBER: _builtins.int
+    OFFSET_FIELD_NUMBER: _builtins.int
+    TOTAL_SIZE_FIELD_NUMBER: _builtins.int
+    DATA_FIELD_NUMBER: _builtins.int
+    RECT_X_FIELD_NUMBER: _builtins.int
+    RECT_Y_FIELD_NUMBER: _builtins.int
+    RECT_WIDTH_FIELD_NUMBER: _builtins.int
+    RECT_HEIGHT_FIELD_NUMBER: _builtins.int
+    PALETTE_SIGNATURE_FIELD_NUMBER: _builtins.int
+    width: _builtins.int
+    """
+    Display width in pixels.
+    """
+    height: _builtins.int
+    """
+    Display height in pixels.
+    """
+    format: Global___DisplayFrame.Format.ValueType
+    """
+    Pixel encoding of data.
+    """
+    frame_id: _builtins.int
+    """
+    Frame counter, constant across the chunks of one frame, so a change
+    marks the start of a new frame. It cannot reveal loss WITHIN a frame,
+    since every chunk of that frame carries the same value; only offset
+    contiguity can. Increments per captured frame, wraps at uint32 range,
+    and restarts from 1 on device reboot, so treat any change as "a new
+    frame" rather than as an ordering guarantee.
+    """
+    offset: _builtins.int
+    """
+    Byte offset of this chunk within the full frame buffer.
+    """
+    total_size: _builtins.int
+    """
+    Total size in bytes of the full frame buffer.
+    """
+    data: _builtins.bytes
+    """
+    The framebuffer bytes for this chunk.
+    """
+    rect_x: _builtins.int
+    """
+    Optional partial-update rectangle (dirty-rect streaming from LVGL-based
+    color UIs, format RGB565). A zero rect_width or rect_height means the
+    full panel in that axis, so data carries the pixels of the resulting
+    rectangle and offset/total_size describe that rectangle's own buffer;
+    width/height above always remain the full display dimensions, and each
+    rectangle is an independently completed unit under its own frame_id.
+    MONO_VLSB frames never set these fields.
+    """
+    rect_y: _builtins.int
+    """
+    See rect_x.
+    """
+    rect_width: _builtins.int
+    """
+    See rect_x.
+    """
+    rect_height: _builtins.int
+    """
+    See rect_x.
+    """
+    palette_signature: _builtins.int
+    """
+    Identity of the DisplayPalette that colorizes this frame, matching
+    DisplayPalette.signature. 0 when the device renders monochrome (no
+    color panel); clients without the referenced palette yet should render
+    monochrome until its chunks arrive.
+    """
+    def __init__(
+        self,
+        *,
+        width: _builtins.int = ...,
+        height: _builtins.int = ...,
+        format: Global___DisplayFrame.Format.ValueType = ...,
+        frame_id: _builtins.int = ...,
+        offset: _builtins.int = ...,
+        total_size: _builtins.int = ...,
+        data: _builtins.bytes = ...,
+        rect_x: _builtins.int = ...,
+        rect_y: _builtins.int = ...,
+        rect_width: _builtins.int = ...,
+        rect_height: _builtins.int = ...,
+        palette_signature: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["data", b"data", "format", b"format", "frame_id", b"frame_id", "height", b"height", "offset", b"offset", "palette_signature", b"palette_signature", "rect_height", b"rect_height", "rect_width", b"rect_width", "rect_x", b"rect_x", "rect_y", b"rect_y", "total_size", b"total_size", "width", b"width"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DisplayFrame: _TypeAlias = DisplayFrame  # noqa: Y015
+
+@_typing.final
+class DisplayPalette(_message.Message):
+    """
+    Colorization palette for DisplayFrame streams from devices that paint the
+    1bpp base UI onto a color panel. The panel applies per-region on/off
+    colors at flush time; streaming the same region table lets a client
+    render the mirror in the panel's true colors at 1bpp bandwidth.
+    Sent as FromRadio.display_palette, split by region index when the table
+    exceeds one message; re-sent only when the region layout or theme changes
+    (the signature changes with it). Regions are ordered by table index; a
+    region with a higher table index overrides lower-indexed ones where they
+    overlap, regardless of chunk boundaries. A client holding partial chunks
+    of a signature that no longer matches incoming chunks should discard
+    them. All colors are RGB565 in logical bit layout (RRRRRGGGGGGBBBBB).
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    @_typing.final
+    class ColorRegion(_message.Message):
+        """
+        One colorized rectangle of the display.
+        """
+
+        DESCRIPTOR: _descriptor.Descriptor
+
+        X_FIELD_NUMBER: _builtins.int
+        Y_FIELD_NUMBER: _builtins.int
+        WIDTH_FIELD_NUMBER: _builtins.int
+        HEIGHT_FIELD_NUMBER: _builtins.int
+        ON_COLOR_FIELD_NUMBER: _builtins.int
+        OFF_COLOR_FIELD_NUMBER: _builtins.int
+        x: _builtins.int
+        """
+        Region origin and size in pixels.
+        """
+        y: _builtins.int
+        """
+        See x.
+        """
+        width: _builtins.int
+        """
+        See x.
+        """
+        height: _builtins.int
+        """
+        See x.
+        """
+        on_color: _builtins.int
+        """
+        RGB565 drawn for set (1) pixels inside this region.
+        """
+        off_color: _builtins.int
+        """
+        RGB565 drawn for clear (0) pixels inside this region.
+        """
+        def __init__(
+            self,
+            *,
+            x: _builtins.int = ...,
+            y: _builtins.int = ...,
+            width: _builtins.int = ...,
+            height: _builtins.int = ...,
+            on_color: _builtins.int = ...,
+            off_color: _builtins.int = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["height", b"height", "off_color", b"off_color", "on_color", b"on_color", "width", b"width", "x", b"x", "y", b"y"]  # noqa: Y015
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+    SIGNATURE_FIELD_NUMBER: _builtins.int
+    DEFAULT_ON_COLOR_FIELD_NUMBER: _builtins.int
+    DEFAULT_OFF_COLOR_FIELD_NUMBER: _builtins.int
+    REGION_OFFSET_FIELD_NUMBER: _builtins.int
+    REGION_TOTAL_FIELD_NUMBER: _builtins.int
+    REGIONS_FIELD_NUMBER: _builtins.int
+    signature: _builtins.int
+    """
+    Identity of this palette; DisplayFrame.palette_signature references it.
+    Changes whenever the region table or theme changes. Never 0, which
+    DisplayFrame.palette_signature reserves for monochrome.
+    """
+    default_on_color: _builtins.int
+    """
+    RGB565 for set pixels outside all regions. The region_offset 0 chunk is authoritative.
+    """
+    default_off_color: _builtins.int
+    """
+    RGB565 for clear pixels outside all regions. The region_offset 0 chunk is authoritative.
+    """
+    region_offset: _builtins.int
+    """
+    Table index of the first region in this chunk.
+    """
+    region_total: _builtins.int
+    """
+    Total regions in the complete palette; region_offset + regions length
+    == region_total completes it.
+    """
+    @_builtins.property
+    def regions(self) -> _containers.RepeatedCompositeFieldContainer[Global___DisplayPalette.ColorRegion]:
+        """
+        The regions of this chunk, in table order.
+        """
+
+    def __init__(
+        self,
+        *,
+        signature: _builtins.int = ...,
+        default_on_color: _builtins.int = ...,
+        default_off_color: _builtins.int = ...,
+        region_offset: _builtins.int = ...,
+        region_total: _builtins.int = ...,
+        regions: _abc.Iterable[Global___DisplayPalette.ColorRegion] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["default_off_color", b"default_off_color", "default_on_color", b"default_on_color", "region_offset", b"region_offset", "region_total", b"region_total", "regions", b"regions", "signature", b"signature"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DisplayPalette: _TypeAlias = DisplayPalette  # noqa: Y015
 
 @_typing.final
 class LockdownStatus(_message.Message):
@@ -4861,6 +5171,7 @@ class DeviceMetadata(_message.Message):
     HASPKC_FIELD_NUMBER: _builtins.int
     EXCLUDED_MODULES_FIELD_NUMBER: _builtins.int
     HAS_XEDDSA_FIELD_NUMBER: _builtins.int
+    DISPLAY_FIELD_NUMBER: _builtins.int
     firmware_version: _builtins.str
     """
     Device firmware version string
@@ -4915,6 +5226,15 @@ class DeviceMetadata(_message.Message):
     Indicates whether this firmware build includes XEdDSA packet signature verification.
     This is a read-only capability and must be false when XEdDSA is not compiled in.
     """
+    @_builtins.property
+    def display(self) -> Global___DisplayInfo:
+        """
+        Describes the device's screen when one is present; absent on display-less
+        builds. Lets clients gate display-mirroring UI (see DisplayFrame) and
+        adapt to the panel, e.g. expect slow refresh from EINK, or offer
+        tap-to-touch when has_touch is set.
+        """
+
     def __init__(
         self,
         *,
@@ -4931,14 +5251,131 @@ class DeviceMetadata(_message.Message):
         hasPKC: _builtins.bool = ...,
         excluded_modules: _builtins.int = ...,
         has_xeddsa: _builtins.bool = ...,
+        display: Global___DisplayInfo | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["display", b"display"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["canShutdown", b"canShutdown", "device_state_version", b"device_state_version", "excluded_modules", b"excluded_modules", "firmware_version", b"firmware_version", "hasBluetooth", b"hasBluetooth", "hasEthernet", b"hasEthernet", "hasPKC", b"hasPKC", "hasRemoteHardware", b"hasRemoteHardware", "hasWifi", b"hasWifi", "has_xeddsa", b"has_xeddsa", "hw_model", b"hw_model", "position_flags", b"position_flags", "role", b"role"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["canShutdown", b"canShutdown", "device_state_version", b"device_state_version", "display", b"display", "excluded_modules", b"excluded_modules", "firmware_version", b"firmware_version", "hasBluetooth", b"hasBluetooth", "hasEthernet", b"hasEthernet", "hasPKC", b"hasPKC", "hasRemoteHardware", b"hasRemoteHardware", "hasWifi", b"hasWifi", "has_xeddsa", b"has_xeddsa", "hw_model", b"hw_model", "position_flags", b"position_flags", "role", b"role"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeviceMetadata: _TypeAlias = DeviceMetadata  # noqa: Y015
+
+@_typing.final
+class DisplayInfo(_message.Message):
+    """
+    Static description of a device's display, sent inside DeviceMetadata
+    during the connection handshake.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    class _PanelClass:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _PanelClassEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[DisplayInfo._PanelClass.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        PANEL_CLASS_UNSPECIFIED: DisplayInfo._PanelClass.ValueType  # 0
+        """
+        Unknown, or selected at runtime (e.g. a native build's configured panel).
+        """
+        OLED: DisplayInfo._PanelClass.ValueType  # 1
+        """
+        Monochrome OLED (SSD1306/SH1106 family).
+        """
+        LCD: DisplayInfo._PanelClass.ValueType  # 2
+        """
+        Monochrome LCD (ST7567 family).
+        """
+        TFT: DisplayInfo._PanelClass.ValueType  # 3
+        """
+        Color TFT.
+        """
+        EINK: DisplayInfo._PanelClass.ValueType  # 4
+        """
+        E-ink panel: refresh is slow and full-screen; clients should prefer
+        one-shot frame requests over continuous mirroring.
+        """
+        HUB75: DisplayInfo._PanelClass.ValueType  # 5
+        """
+        LED matrix (HUB75).
+        """
+
+    class PanelClass(_PanelClass, metaclass=_PanelClassEnumTypeWrapper):
+        """
+        Physical panel technology, as a hint for client rendering and refresh
+        expectations.
+        """
+
+    PANEL_CLASS_UNSPECIFIED: DisplayInfo.PanelClass.ValueType  # 0
+    """
+    Unknown, or selected at runtime (e.g. a native build's configured panel).
+    """
+    OLED: DisplayInfo.PanelClass.ValueType  # 1
+    """
+    Monochrome OLED (SSD1306/SH1106 family).
+    """
+    LCD: DisplayInfo.PanelClass.ValueType  # 2
+    """
+    Monochrome LCD (ST7567 family).
+    """
+    TFT: DisplayInfo.PanelClass.ValueType  # 3
+    """
+    Color TFT.
+    """
+    EINK: DisplayInfo.PanelClass.ValueType  # 4
+    """
+    E-ink panel: refresh is slow and full-screen; clients should prefer
+    one-shot frame requests over continuous mirroring.
+    """
+    HUB75: DisplayInfo.PanelClass.ValueType  # 5
+    """
+    LED matrix (HUB75).
+    """
+
+    WIDTH_FIELD_NUMBER: _builtins.int
+    HEIGHT_FIELD_NUMBER: _builtins.int
+    FORMAT_FIELD_NUMBER: _builtins.int
+    PANEL_CLASS_FIELD_NUMBER: _builtins.int
+    HAS_TOUCH_FIELD_NUMBER: _builtins.int
+    width: _builtins.int
+    """
+    Display width in pixels.
+    """
+    height: _builtins.int
+    """
+    Display height in pixels.
+    """
+    format: Global___DisplayFrame.Format.ValueType
+    """
+    Pixel encoding that DisplayFrame streams from this device will use.
+    """
+    panel_class: Global___DisplayInfo.PanelClass.ValueType
+    """
+    Physical panel technology.
+    """
+    has_touch: _builtins.bool
+    """
+    True when the panel accepts touch input; clients may map taps on a
+    mirrored frame to AdminMessage.send_input_event touch coordinates.
+    """
+    def __init__(
+        self,
+        *,
+        width: _builtins.int = ...,
+        height: _builtins.int = ...,
+        format: Global___DisplayFrame.Format.ValueType = ...,
+        panel_class: Global___DisplayInfo.PanelClass.ValueType = ...,
+        has_touch: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["format", b"format", "has_touch", b"has_touch", "height", b"height", "panel_class", b"panel_class", "width", b"width"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DisplayInfo: _TypeAlias = DisplayInfo  # noqa: Y015
 
 @_typing.final
 class LoRaPresetGroup(_message.Message):
