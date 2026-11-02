@@ -35,7 +35,7 @@ def _install_advertising(server: Any) -> None:
         """Only this proxy's advertisement overrides discoverability."""
 
         @dbus_property(access=PropertyAccess.READ)  # type: ignore[untyped-decorator]
-        def Discoverable(self) -> "b":  # type: ignore[name-defined]  # pylint: disable=invalid-name
+        def Discoverable(self) -> "b":  # type: ignore[name-defined]  # pylint: disable=invalid-name  # noqa: F821
             """Advertise general LE discoverability independently of the host."""
             return True
 
