@@ -27,7 +27,7 @@ from meshtastic.nodes import _INTERNAL_NODE_FIELDS, NodeQueryResult
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.util import convert_mac_addr, messageToJson
 
-from . import node_data, node_presentation
+from . import node_data, node_presentation, node_summary
 from .ports import _NodeViewPort
 
 JSONValue: TypeAlias = (
@@ -456,6 +456,40 @@ class NodeView:
         hidden = result.matched - len(shown_nodes)
         if hidden > 0:
             output += f"\n… and {hidden} more not shown"
+        return output
+
+    def show_summary(self) -> str:
+        """Render and print a compact at-a-glance summary of the local node and mesh.
+
+        Snapshot shared state under the node database lock, format the summary
+        outside the lock, then publish it through the command output sink.
+
+        Returns
+        -------
+        summary : str
+            The formatted summary text that was printed.
+        """
+        with self._node_db_lock:
+            node_records = copy.deepcopy(list((self.nodes_by_num or {}).values()))
+            metadata_info = self.metadata
+            my_info = self.my_info
+        local_node = self.local_node
+        local_num: int | None = None
+        if my_info is not None and my_info.my_node_num:
+            local_num = my_info.my_node_num
+        elif local_node is not None:
+            local_num = local_node.nodeNum
+
+        output = node_summary._format_summary(
+            local_node=local_node,
+            local_num=local_num,
+            long_name=self.get_long_name(),
+            short_name=self.get_short_name(),
+            node_records=node_records,
+            metadata=metadata_info,
+        )
+        reporter = _get_command_output() or print
+        reporter(output)
         return output
 
     def get_node(

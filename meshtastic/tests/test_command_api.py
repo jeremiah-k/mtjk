@@ -238,8 +238,14 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
             )
 
     monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    # The rejection variant resolves synchronously during send, but the
+    # command budget also covers parser construction and dispatch; keep it
+    # generous so slow CI runners cannot race the deadline. The timeout
+    # variant must stay tight so the wait expires promptly.
     result = executeCommand(
-        client, ["--dest", "!00000002", "--get", "lora.hopLimit"], timeout=0.03
+        client,
+        ["--dest", "!00000002", "--get", "lora.hopLimit"],
+        timeout=1.0 if reject else 0.03,
     )
     assert result.exitCode == 1
     assert isinstance(

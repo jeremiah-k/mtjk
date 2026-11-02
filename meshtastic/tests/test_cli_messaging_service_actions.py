@@ -40,6 +40,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
         "get_canned_message": False,
         "get_ringtone": False,
         "info": False,
+        "summary": False,
         "get": None,
         "nodes": False,
         "show_fields": None,

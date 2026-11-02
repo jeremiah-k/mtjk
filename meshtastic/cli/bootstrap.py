@@ -144,6 +144,7 @@ _DRY_RUN_CONFLICTING_ACTIONS: tuple[_DryRunActionFlag, ...] = (
     ("gpio_watch", "--gpio-watch"),
     ("ota_update", "--ota-update"),
     ("info", "--info"),
+    ("summary", "--summary"),
     ("nodes", "--nodes"),
     ("pos_fields", "--pos-fields"),
     ("show_fields", "--show-fields"),

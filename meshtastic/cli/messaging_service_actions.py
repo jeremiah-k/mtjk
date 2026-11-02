@@ -560,6 +560,32 @@ def _handle_information_actions(
         if found:
             safe_output("Completed getting preferences")
 
+    if args.summary:
+        context.outcome.close_now = True
+        if args.dest != BROADCAST_ADDR:
+            hooks.cli_print("Showing a summary of a remote node is not supported.")
+            hooks.cli_print(
+                "Use the '--get' command for a specific configuration "
+                "(e.g. 'lora') instead."
+            )
+            context.outcome.stop_processing = True
+            return
+        # Ensure local config, channels, and metadata are loaded before the
+        # summary reads them, mirroring the --info flow.
+        interface.getNode(args.dest, **context.get_node_kwargs)
+        # Requested results stay visible even under --quiet and remain
+        # capturable by embedded dispatchers, matching the --info policy.
+        output = hooks.preference_print or hooks.cli_print
+        output("")
+        interface.showSummary()
+        output("")
+        pypi_version = hooks.newer_version()
+        if pypi_version:
+            output(
+                f"*** A newer version v{pypi_version} is available!"
+                f' Consider running "{hooks.install_upgrade_hint}" ***\n'
+            )
+
     if args.nodes:
         context.outcome.close_now = True
         if args.dest != BROADCAST_ADDR:
