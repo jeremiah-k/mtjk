@@ -12,7 +12,7 @@ This module provides targeted tests for specific uncovered code paths:
 
 import logging
 import sys
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -827,10 +827,30 @@ def test_active_key_verification_action_suppresses_generic_notification_output(
 
 
 @pytest.mark.unit
-def test_non_key_client_notification_is_ignored(
+def test_non_key_client_notification_renders_with_type_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The generic subscriber remains silent for unrelated ClientNotifications."""
+    """The generic subscriber labels unrelated ClientNotifications by type."""
+    notification = mesh_pb2.ClientNotification(message="Sending resumes in 5 minutes.")
+    notification.type = (
+        mesh_pb2.ClientNotification.NotificationType.DUTY_CYCLE_LIMIT_EXCEEDED
+    )
+    prints: list[str] = []
+    monkeypatch.setattr(main_module, "_current_invocation_args", lambda: None)
+    monkeypatch.setattr(main_module, "_cli_print", prints.append)
+
+    main_module.onClientNotification(notification, MagicMock())
+
+    assert prints == [
+        "Notification (Duty Cycle Limit Exceeded): Sending resumes in 5 minutes."
+    ]
+
+
+@pytest.mark.unit
+def test_untyped_client_notification_renders_plain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Firmware that does not set a type renders without a label."""
     notification = mesh_pb2.ClientNotification(message="unrelated")
     prints: list[str] = []
     monkeypatch.setattr(main_module, "_current_invocation_args", lambda: None)
@@ -838,7 +858,25 @@ def test_non_key_client_notification_is_ignored(
 
     main_module.onClientNotification(notification, MagicMock())
 
-    assert prints == []
+    assert prints == ["Notification: unrelated"]
+
+
+@pytest.mark.unit
+def test_unknown_client_notification_type_renders_plain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A type value from newer firmware renders without a label."""
+    notification = mesh_pb2.ClientNotification(message="mystery")
+    notification.type = cast(
+        "mesh_pb2.ClientNotification.NotificationType.ValueType", 999
+    )
+    prints: list[str] = []
+    monkeypatch.setattr(main_module, "_current_invocation_args", lambda: None)
+    monkeypatch.setattr(main_module, "_cli_print", prints.append)
+
+    main_module.onClientNotification(notification, MagicMock())
+
+    assert prints == ["Notification: mystery"]
 
 
 @pytest.mark.unit
