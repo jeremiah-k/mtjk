@@ -30,6 +30,7 @@ import meshtastic.cli.device_actions as cli_device_actions
 import meshtastic.cli.dispatch as cli_dispatch
 import meshtastic.cli.invocation as cli_invocation
 import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
+import meshtastic.cli.notification_rendering as cli_notification_rendering
 import meshtastic.cli.preference_runtime as cli_preference_runtime
 import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
@@ -687,14 +688,17 @@ def _on_receive_with_sink(
 def onClientNotification(
     notification: mesh_pb2.ClientNotification, interface: MeshInterface
 ) -> None:
-    """Render spontaneous key-verification notifications for long-lived CLI sessions.
+    """Render spontaneous client notifications for long-lived CLI sessions.
 
     Parameters
     ----------
     notification : mesh_pb2.ClientNotification
         Notification packet decoded from the ``meshtastic.clientNotification``
-        pubsub topic. Only key-verification variants are rendered; all other
-        notification types are intentionally ignored.
+        pubsub topic. Key-verification variants render through their dedicated
+        flow; every other notification renders its message prefixed by the
+        schema label for its type (for example ``Notification (Duty Cycle Limit
+        Exceeded): ...``). Firmware that does not set a type falls back to
+        ``Notification: ...``.
 
     interface : MeshInterface
         Interface that received the notification. Unused by this handler and
@@ -711,16 +715,19 @@ def onClientNotification(
     args = _current_invocation_args()
     if args is not None and getattr(args, "key_verify", None):
         return
-    if notification.WhichOneof("payload_variant") not in {
-        "key_verification_number_inform",
-        "key_verification_number_request",
-        "key_verification_final",
-    }:
-        return
     try:
-        cli_device_actions._render_key_verification_notification(  # noqa: SLF001
-            notification, "", _cli_print
-        )
+        if notification.WhichOneof("payload_variant") in {
+            "key_verification_number_inform",
+            "key_verification_number_request",
+            "key_verification_final",
+        }:
+            cli_device_actions._render_key_verification_notification(  # noqa: SLF001
+                notification, "", _cli_print
+            )
+        else:
+            cli_notification_rendering._render_client_notification(  # noqa: SLF001
+                notification, _cli_print
+            )
     except Exception as ex:
         logger.warning("Error rendering client notification: %s", ex)
 
