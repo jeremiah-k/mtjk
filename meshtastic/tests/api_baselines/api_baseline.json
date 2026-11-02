@@ -34,6 +34,7 @@
     "sendWaypoint": "(self, name:str, description:str, icon:int | str, expire:int, waypoint_id:int | None=None, latitude:float=0.0, longitude:float=0.0, destinationId:int | str=BROADCAST_ADDR, wantAck:bool=True, wantResponse:bool=False, channelIndex:int=0, hopLimit:int | None=None)",
     "showInfo": "(self, file:IO[str] | None=None)",
     "showNodes": "(self, includeSelf:bool=True, showFields:list[str] | None=None, *, roleFilter:list[str] | None=None, hwModelFilter:list[str] | None=None, sortField:str | None=None, sortDirection:str | None=None, limit:int=0)",
+    "showSummary": "(self)",
     "waitForAckNak": "(self)",
     "waitForConfig": "(self)",
     "waitForPosition": "(self, request_id:int | None=None)",

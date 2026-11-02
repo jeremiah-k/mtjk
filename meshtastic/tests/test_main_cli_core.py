@@ -647,6 +647,63 @@ def test_main_info_with_tcp_interface(capsys: pytest.CaptureFixture[str]) -> Non
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_main_summary(
+    capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify that invoking the CLI with `--summary` connects and calls showSummary.
+
+    Patches SerialInterface with a mock that prints a recognizable marker from
+    showSummary, then asserts stdout contains "Connected to radio" and the
+    marker, stderr is empty, and the SerialInterface constructor was invoked.
+
+    """
+    sys.argv = ["", "--summary"]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+
+    def _mock_show_summary() -> str:
+        """Print a recognizable marker to stdout to simulate showSummary()."""
+        print("inside mocked showSummary")
+        return "inside mocked showSummary"
+
+    iface.showSummary.side_effect = _mock_show_summary
+    with caplog.at_level(logging.DEBUG):
+        with patch(
+            "meshtastic.serial_interface.SerialInterface", return_value=iface
+        ) as mo:
+            main()
+            out, err = capsys.readouterr()
+            assert re.search(r"Connected to radio", out, re.MULTILINE)
+            assert re.search(r"inside mocked showSummary", out, re.MULTILINE)
+            assert err == ""
+            mo.assert_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_main_summary_with_remote_dest(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify that `--summary` with a remote dest explains it is unsupported."""
+    sys.argv = ["", "--summary", "--dest", "!12345678"]
+    mt_config.args = sys.argv  # type: ignore[assignment]
+
+    iface = MagicMock(autospec=SerialInterface)
+    iface.__enter__ = MagicMock(return_value=iface)
+    iface.__exit__ = MagicMock(return_value=None)
+
+    with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
+        main()
+        out, _err = capsys.readouterr()
+        assert re.search(r"Showing a summary of a remote node is not supported", out)
+        iface.showSummary.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_main_no_proto(capsys: pytest.CaptureFixture[str]) -> None:
     """Test --noproto (using --info for output)."""
     sys.argv = ["", "--info", "--noproto"]

@@ -747,6 +747,17 @@ class MeshInterface:  # pylint: disable=R0902
             limit=limit,
         )
 
+    def showSummary(self) -> str:
+        """Produce a compact at-a-glance summary of the local node and mesh.
+
+        Renders the local node identity, radio settings, recent mesh activity,
+        and active channels as sectioned tables instead of the raw JSON dumps
+        used by ``showInfo``.
+
+        Delegates to self.node_view.show_summary().
+        """
+        return self._node_view.show_summary()
+
     def getNode(
         self,
         nodeId: str,

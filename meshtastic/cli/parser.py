@@ -687,7 +687,8 @@ def addPositionConfigArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 def addLocalActionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """Register CLI arguments for local-only actions that query or display information from the local node.
 
-    Adds --info (display radio configuration), --nodes (print a formatted node list), and
+    Adds --info (display radio configuration), --summary (at-a-glance summary of
+    the local node and mesh), --nodes (print a formatted node list), and
     --show-fields (comma-separated fields to display with --nodes).
 
     Parameters
@@ -708,6 +709,12 @@ def addLocalActionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     group.add_argument(
         "--info",
         help="Read and display the radio config information",
+        action="store_true",
+    )
+
+    group.add_argument(
+        "--summary",
+        help="Show an at-a-glance summary of the local node, radio, mesh, and channels",
         action="store_true",
     )
 

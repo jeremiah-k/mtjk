@@ -38,3 +38,12 @@ receive metadata remains available. `--info` uses the same exclusion policy.
 The detached Python records retain their full cached contents. Other actions
 and table-only `--show-fields` cannot be combined with
 `--nodes --json`.
+
+## At-a-glance summary
+
+`mtjk --summary` prints a compact view of the local node instead of the raw
+JSON dumps used by `--info`: identity, firmware, and BLE address (as reported
+by firmware), LoRa radio settings and airtime, a mesh overview with the most
+recently heard nodes, and the active channel list. It is a read-only local
+action; like `--info`, it is not supported for remote destinations.
+`MeshInterface.showSummary()` returns the same text from Python.
