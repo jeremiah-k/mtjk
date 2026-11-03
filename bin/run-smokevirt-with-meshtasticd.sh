@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Pinned meshtasticd simulator image.
-MESHTASTICD_IMAGE="${MESHTASTICD_IMAGE:-meshtastic/meshtasticd:2.8.1-alpha-debian@sha256:b1519a2eb29b274dbb50009ed7d5aea63839bc01550e2af957fd3e97b3867938}"
+MESHTASTICD_IMAGE="${MESHTASTICD_IMAGE:-meshtastic/meshtasticd:2.8.2-alpha-debian@sha256:9f629e391d673ec3dd7ad81ac7ed6a346ef2ffa8848d9a3b72b9bde69bb24ee2}"
 MESHTASTICD_CONTAINER="${MESHTASTICD_CONTAINER:-meshtasticd-smokevirt}"
 MESHTASTICD_HOST="${MESHTASTICD_HOST:-localhost:4401}"
 MESHTASTICD_PORT="${MESHTASTICD_PORT:-4401}"
