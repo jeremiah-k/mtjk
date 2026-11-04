@@ -4952,6 +4952,11 @@ class ClientNotification(_message.Message):
         """
         OTA refused: switching to the OTA partition failed.
         """
+        UNSIGNED_IDENTITY_UPDATE_IGNORED: ClientNotification._NotificationType.ValueType  # 49
+        """
+        A NodeInfo update without a valid signature tried to change a known node's name or role,
+        and packet_signature_policy (Balanced or Strict) refused it. The stored identity is kept.
+        """
 
     class NotificationType(_NotificationType, metaclass=_NotificationTypeEnumTypeWrapper):
         """
@@ -5154,6 +5159,11 @@ class ClientNotification(_message.Message):
     OTA_PARTITION_SWITCH_FAILED: ClientNotification.NotificationType.ValueType  # 48
     """
     OTA refused: switching to the OTA partition failed.
+    """
+    UNSIGNED_IDENTITY_UPDATE_IGNORED: ClientNotification.NotificationType.ValueType  # 49
+    """
+    A NodeInfo update without a valid signature tried to change a known node's name or role,
+    and packet_signature_policy (Balanced or Strict) refused it. The stored identity is kept.
     """
 
     REPLY_ID_FIELD_NUMBER: _builtins.int
