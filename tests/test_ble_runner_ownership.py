@@ -10,6 +10,7 @@ import asyncio
 import threading
 from collections.abc import Generator
 from concurrent.futures import Future
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -237,6 +238,16 @@ def test_restart_joins_retiring_owner_before_starting_new_one(
         runner._loop = None
         runner._stop_requested = True
 
+    original_join = retiring_owner.join
+
+    def join_without_instance_lock(timeout: float | None = None) -> None:
+        # RLock acquisition by this same thread would succeed even if held;
+        # check ownership directly rather than reacquiring the reentrant lock.
+        # _is_owned() is a CPython RLock implementation detail, hence the cast.
+        assert not cast(Any, runner._instance_lock)._is_owned()
+        original_join(timeout)
+
+    monkeypatch.setattr(retiring_owner, "join", join_without_instance_lock)
     assert runner._restart() is True
 
     assert start_calls == [True]
@@ -357,3 +368,55 @@ def test_submit_and_tracking_are_atomic_against_stop(
     assert errors == []
     # The future was tracked before stop() took its cancellation snapshot.
     assert pending.cancelled()
+
+
+def test_restart_reuses_published_loop_before_run_forever(
+    fresh_runner: BLECoroutineRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A published loop is still starting until its readiness callback runs."""
+    runner = fresh_runner
+    starting_owner = _StubbedOwnerThread(retires_on_join=False)
+    ready = threading.Event()
+    ready.set()
+    with runner._instance_lock:
+        runner._thread = cast(Any, starting_owner)
+        runner._loop = cast(Any, SimpleNamespace(is_running=lambda: False))
+        runner._loop_starting = True
+        runner._stop_requested = False
+    monkeypatch.setattr(runner, "_start_locked", lambda: ready)
+    assert runner._restart()
+    assert starting_owner.join_calls == []
+    assert runner._thread is cast(Any, starting_owner)
+
+
+def test_interrupted_native_start_retains_uncertain_owner(
+    fresh_runner: BLECoroutineRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupted native launch cannot be treated as provably unstarted."""
+    runner = fresh_runner
+
+    class _InterruptedThread:
+        ident = None
+
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        @staticmethod
+        def start() -> None:
+            raise KeyboardInterrupt()
+
+        @staticmethod
+        def is_alive() -> bool:
+            return False
+
+    monkeypatch.setattr(threading, "Thread", cast(Any, _InterruptedThread))
+    with runner._instance_lock:
+        with pytest.raises(KeyboardInterrupt):
+            runner._start_locked()
+        owner = runner._thread
+        assert owner is not None
+        assert runner._loop_starting is True
+    assert runner._stop(timeout=0.01) is False
+    assert runner._thread is owner

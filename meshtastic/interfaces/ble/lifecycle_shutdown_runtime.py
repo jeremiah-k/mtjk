@@ -875,6 +875,11 @@ class BLEShutdownLifecycleCoordinator:
             management_wait_poll_seconds=management_wait_poll_seconds,
         )
         if management_wait_timed_out is None:
+            # A previous bounded cleanup may have timed out while a worker
+            # stayed alive. A repeated close still needs to revisit it.
+            self._cleanup_thread_coordinator(
+                timeout=_remaining_optional_timeout(None),
+            )
             return
 
         try:

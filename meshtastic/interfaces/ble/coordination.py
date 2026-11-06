@@ -99,6 +99,9 @@ class ThreadCoordinator:
         self._lock = RLock()
         self._threads: list[Thread] = []
         self._pending_start: set[Thread] = set()
+        # Native launch can be interrupted before Thread.ident is published.
+        # An indeterminate owner is retained rather than replaced/discarded.
+        self._indeterminate_start: set[Thread] = set()
         # A separate handoff set distinguishes truly executing start() calls
         # from legacy/test helpers that reserve a pending thread directly.
         self._starting_now: set[Thread] = set()
@@ -255,23 +258,31 @@ class ThreadCoordinator:
         # immediately calls back into the coordinator
         if should_start:
             start_failed = False
+            known_prelaunch_failure = False
             try:
                 thread.start()
-            except BaseException:
+            except BaseException as exc:
                 start_failed = True
+                known_prelaunch_failure = isinstance(exc, (OSError, RuntimeError))
                 raise
             finally:
                 with self._lock:
                     if isinstance(thread, Thread):
                         self._pending_start.discard(thread)
                         self._starting_now.discard(thread)
-                    if start_failed and thread.ident is None:
+                    if (
+                        start_failed
+                        and thread.ident is None
+                        and known_prelaunch_failure
+                    ):
                         # A rejected native start has no runnable owner and
                         # must not remain a permanent 'pending' registration.
                         # Guard remove(): a concurrent cleanup may already have
                         # retired the failed registration.
                         if thread in self._threads:
                             self._threads.remove(thread)
+                    elif start_failed:
+                        self._indeterminate_start.add(thread)
                     # cleanup() may have run after we released the lock but before
                     # thread.start(); if so, join this now-started thread below so
                     # we don't leave it detached from coordinator shutdown.
@@ -497,9 +508,18 @@ class ThreadCoordinator:
             # Retain live workers and threads whose start() is still in flight
             # after the lock-free handoff in _start_thread(). A later cleanup
             # can join the former; the starter retires the latter on completion.
+            # An interrupted native start can remain ident-less briefly.
+            # Only retire its indeterminate marker after a verifiable exit.
+            self._indeterminate_start = {
+                thread
+                for thread in self._indeterminate_start
+                if thread.ident is None or thread.is_alive()
+            }
             self._threads = [
                 thread
                 for thread in self._threads
-                if thread.is_alive() or thread in self._starting_now
+                if thread.is_alive()
+                or thread in self._starting_now
+                or thread in self._indeterminate_start
             ]
             self._pending_start.intersection_update(self._starting_now)

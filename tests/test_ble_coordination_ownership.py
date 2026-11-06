@@ -8,6 +8,7 @@ refused.
 
 import threading
 from collections.abc import Generator
+from unittest.mock import patch
 
 import pytest
 
@@ -174,3 +175,56 @@ def test_cleanup_wakes_waiters_holding_event_references(
     assert coordinator._get_event("ownership-event") is None
     assert coordinator._wait_for_event("ownership-event", timeout=0.01) is False
     assert coordinator._create_event("ownership-event").is_set() is True
+
+
+def test_interrupted_native_thread_start_is_still_owned_for_cleanup() -> None:
+    """Post-launch interrupt cannot detach a still-running coordinator worker."""
+    coordinator = ThreadCoordinator()
+    release = threading.Event()
+    worker = coordinator._create_thread(target=release.wait, name="interrupted")
+    assert isinstance(worker, threading.Thread)
+    actual_start = worker.start
+
+    def interrupted_start() -> None:
+        actual_start()
+        raise KeyboardInterrupt()
+
+    try:
+        with patch.object(worker, "start", side_effect=interrupted_start):
+            with pytest.raises(KeyboardInterrupt):
+                coordinator._start_thread(worker)
+        assert worker.is_alive()
+        assert worker in coordinator._threads
+        release.set()
+        coordinator._cleanup()
+        assert not worker.is_alive()
+    finally:
+        release.set()
+        worker.join(timeout=2.0)
+
+
+@pytest.mark.unit
+def test_repeated_coordinator_cleanup_joins_retained_live_worker(
+    short_join_timeout: None,
+) -> None:
+    coordinator = ThreadCoordinator()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def worker() -> None:
+        entered.set()
+        release.wait(timeout=_WAIT_TIMEOUT)
+
+    thread = coordinator._create_thread(target=worker, name="retain-close-retry")
+    assert isinstance(thread, threading.Thread)
+    coordinator._start_thread(thread)
+    assert entered.wait(_WAIT_TIMEOUT)
+    coordinator._cleanup()
+    assert thread in coordinator._threads
+    with patch.object(thread, "join", wraps=thread.join) as join:
+        coordinator._cleanup()
+        join.assert_called_once_with(timeout=_SHORT_JOIN_TIMEOUT)
+    release.set()
+    thread.join(timeout=_WAIT_TIMEOUT)
+    coordinator._cleanup()
+    assert thread not in coordinator._threads
