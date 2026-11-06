@@ -7,13 +7,15 @@ maximum retry limits, and concurrent reconnection attempt handling.
 # pylint: disable=too-many-lines
 
 import logging
-from threading import TIMEOUT_MAX, Event, RLock
+from collections.abc import Callable
+from threading import TIMEOUT_MAX, Event, RLock, Thread
 from types import SimpleNamespace
-from typing import Any, Generator, cast
+from typing import TYPE_CHECKING, Any, Generator, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from meshtastic.interfaces.ble.coordination import ThreadCoordinator
 from meshtastic.interfaces.ble.gating import (
     _clear_all_registries,
     _mark_connected,
@@ -28,6 +30,9 @@ from meshtastic.interfaces.ble.reconnection import (
     ThreadCoordinatorMissingMethodError,
 )
 from meshtastic.interfaces.ble.state import BLEStateManager
+
+if TYPE_CHECKING:
+    from meshtastic.interfaces.ble.interface import BLEInterface
 
 
 @pytest.fixture(autouse=True)
@@ -361,6 +366,129 @@ class TestReconnectSchedulerClearReference:
             ),
         )
         scheduler._reconnect_thread = SimpleNamespace(ident=12345)  # type: ignore[assignment]
+        scheduler._clear_thread_reference()
+        assert scheduler._reconnect_thread is None
+
+
+class _OwnershipTestThread(Thread):
+    """A Thread-compatible fake with a stable identity but no native start."""
+
+    def __init__(self, identifier: int) -> None:
+        super().__init__(name=f"fake-reconnect-{identifier}")
+        self._test_ident = identifier
+
+    @property
+    def ident(self) -> int:
+        return self._test_ident
+
+    def is_alive(self) -> bool:
+        return True
+
+
+def _make_ownership_scheduler() -> (
+    tuple[ReconnectScheduler, list[_OwnershipTestThread], list[Callable[[], None]]]
+):
+    """Build a scheduler whose coordinator records worker creation and exit."""
+    created_threads: list[_OwnershipTestThread] = []
+    exit_callbacks: list[Callable[[], None]] = []
+
+    def create_thread(**coordinator_kwargs: Any) -> _OwnershipTestThread:
+        thread = _OwnershipTestThread(len(created_threads) + 1)
+        created_threads.append(thread)
+        worker_kwargs: dict[str, Any] = coordinator_kwargs["kwargs"]
+        exit_callbacks.append(worker_kwargs["on_exit"])
+        return thread
+
+    def start_thread(_thread: _OwnershipTestThread) -> None:
+        _ = _thread
+
+    coordinator = cast(
+        ThreadCoordinator,
+        SimpleNamespace(create_thread=create_thread, start_thread=start_thread),
+    )
+    interface = cast(
+        "BLEInterface",
+        SimpleNamespace(_is_connection_closing=False, _can_initiate_connection=True),
+    )
+    scheduler = ReconnectScheduler(
+        state_manager=BLEStateManager(),
+        state_lock=RLock(),
+        thread_coordinator=coordinator,
+        interface=interface,
+    )
+    return scheduler, created_threads, exit_callbacks
+
+
+class TestReconnectSchedulerOwnershipFence:
+    """Tests for fencing reconnect completion by worker identity."""
+
+    @pytest.mark.unit
+    def test_late_exit_from_old_worker_cannot_clear_successor(self) -> None:
+        """A late on_exit from a replaced worker cannot clear its successor."""
+        scheduler, threads, exit_callbacks = _make_ownership_scheduler()
+        shutdown_event = Event()
+
+        assert scheduler._schedule_reconnect(True, shutdown_event) is True
+        assert scheduler._reconnect_thread is threads[0]
+
+        # Scheduling is skipped while the first worker is still current.
+        assert scheduler._schedule_reconnect(True, shutdown_event) is False
+        assert len(threads) == 1
+
+        # The first worker exits normally and clears its own reference.
+        exit_callbacks[0]()
+        assert scheduler._reconnect_thread is None
+
+        # A successor generation is scheduled and becomes the current worker.
+        assert scheduler._schedule_reconnect(True, shutdown_event) is True
+        assert scheduler._reconnect_thread is threads[1]
+
+        # A late/duplicate completion from the old generation must not clear
+        # the successor; only the successor's own exit callback may.
+        exit_callbacks[0]()
+        assert scheduler._reconnect_thread is threads[1]
+        exit_callbacks[1]()
+        assert scheduler._reconnect_thread is None
+
+    @pytest.mark.unit
+    def test_stale_start_failure_cleanup_cannot_clear_successor(self) -> None:
+        """Stale start-failure cleanup cannot clear a successor thread."""
+        scheduler, threads, exit_callbacks = _make_ownership_scheduler()
+        shutdown_event = Event()
+
+        assert scheduler._schedule_reconnect(True, shutdown_event) is True
+        exit_callbacks[0]()
+        assert scheduler._reconnect_thread is None
+
+        assert scheduler._schedule_reconnect(True, shutdown_event) is True
+        assert scheduler._reconnect_thread is threads[1]
+
+        # Cleanup reporting the first generation's thread is a no-op while the
+        # successor owns the reference.
+        scheduler._clear_thread_reference(threads[0])
+        assert scheduler._reconnect_thread is threads[1]
+
+    @pytest.mark.unit
+    def test_start_failure_path_cannot_clear_successor(self) -> None:
+        """Exercise the actual exception handler rather than calling clear directly."""
+        scheduler, _threads, _exits = _make_ownership_scheduler()
+        successor = _OwnershipTestThread(999)
+
+        def fail_start(_thread: Thread) -> None:
+            # Simulate an old start failing after a successor was published.
+            scheduler._reconnect_thread = successor
+            raise OSError("native start failed")
+
+        scheduler._thread_start_thread = fail_start  # type: ignore[method-assign,assignment]
+        with pytest.raises(OSError, match="native start failed"):
+            scheduler._schedule_reconnect(True, Event())
+        assert scheduler._reconnect_thread is successor
+
+    @pytest.mark.unit
+    def test_clear_thread_reference_without_owner_is_unconditional(self) -> None:
+        """The legacy no-argument clear resets the reference unconditionally."""
+        scheduler, _threads, _exit_callbacks = _make_ownership_scheduler()
+        scheduler._reconnect_thread = _OwnershipTestThread(98765)
         scheduler._clear_thread_reference()
         assert scheduler._reconnect_thread is None
 

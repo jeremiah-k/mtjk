@@ -233,10 +233,20 @@ class ReconnectScheduler:
                 )
                 return False
 
+            # A replaced worker's late on_exit (or start-failure cleanup) must
+            # not clear the reference to its successor. Bind completion to the
+            # exact thread that owns this scheduling generation; the binding is
+            # assigned before the worker can start (create does not start it).
+            thread: ThreadLike | None = None
+
+            def on_worker_exit() -> None:
+                if thread is not None:
+                    self._clear_thread_reference(thread)
+
             thread = self._thread_create_thread(
                 target=self._reconnect_worker._attempt_reconnect_loop,
                 args=(shutdown_event,),
-                kwargs={"on_exit": self._clear_thread_reference},
+                kwargs={"on_exit": on_worker_exit},
                 name="BLEAutoReconnect",
                 daemon=True,
             )
@@ -251,27 +261,38 @@ class ReconnectScheduler:
                 logger.debug(
                     "Auto-reconnect thread did not start; clearing stale thread reference."
                 )
-                self._clear_thread_reference()
+                self._clear_thread_reference(thread)
                 return False
         except Exception:
-            self._clear_thread_reference()
+            self._clear_thread_reference(thread)
             raise
         return True
 
-    def _clear_thread_reference(self) -> None:
-        """Clear the internal reference to the running reconnect thread.
+    def _clear_thread_reference(self, owner: ThreadLike | None = None) -> None:
+        """Clear the reconnect worker reference when its ownership still matches.
+
+        With ``owner`` unset (legacy form) this clears unconditionally. With
+        ``owner`` set, the reference is cleared only when it still points at
+        that exact worker thread, so completion reported by a replaced
+        generation cannot discard its successor.
 
         This operation acquires the scheduler's state_lock and sets the internal
         reconnect thread reference to None to record that no background
         reconnect worker is active.
+
+        Parameters
+        ----------
+        owner : ThreadLike | None
+            Worker thread whose completion is being reported; ``None`` keeps
+            the legacy unconditional clear. (Default value = None)
 
         Returns
         -------
         None
         """
         with self.state_lock:
-            # Always clear the reference once the worker loop exits to match legacy behavior.
-            self._reconnect_thread = None
+            if owner is None or self._reconnect_thread is owner:
+                self._reconnect_thread = None
 
 
 class ReconnectWorker:
