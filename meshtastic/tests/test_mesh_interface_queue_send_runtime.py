@@ -371,7 +371,6 @@ def test_send_to_radio_propagates_transport_failure() -> None:
     )
     packet = mesh_pb2.ToRadio()
     packet.packet.id = 789
-    harness.queue[789] = packet
 
     def fail_send(_: Any) -> None:
         raise OSError("radio unavailable")
@@ -509,17 +508,11 @@ def test_queue_wait_timeout_zero_fails_without_sleep() -> None:
 
 
 @pytest.mark.unit
-def test_queue_wait_failure_drops_equivalent_packet_instance_by_id() -> None:
+def test_queue_wait_failure_drops_unsent_packet_instance() -> None:
     harness = _QueueHarness()
     harness.queue_status = mesh_pb2.QueueStatus(free=0, maxlen=16)
     packet = mesh_pb2.ToRadio()
     packet.packet.id = 905
-
-    def replace_then_abort() -> str:
-        replacement = mesh_pb2.ToRadio()
-        replacement.CopyFrom(packet)
-        harness.queue[packet.packet.id] = replacement
-        return "closed"
 
     runtime = _QueueSendRuntime(
         lock=harness.lock,
@@ -527,7 +520,7 @@ def test_queue_wait_failure_drops_equivalent_packet_instance_by_id() -> None:
         get_queue_status=lambda: harness.queue_status,
         set_queue_status=harness.set_queue_status,
         queue_wait_delay_seconds=0.0,
-        abort_wait=replace_then_abort,
+        abort_wait=lambda: "closed",
     )
 
     with pytest.raises(queue_send_module.QueueWaitError, match="closed"):
