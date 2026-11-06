@@ -99,6 +99,9 @@ class ThreadCoordinator:
         self._lock = RLock()
         self._threads: list[Thread] = []
         self._pending_start: set[Thread] = set()
+        # A separate handoff set distinguishes truly executing start() calls
+        # from legacy/test helpers that reserve a pending thread directly.
+        self._starting_now: set[Thread] = set()
         self._events: dict[str, Event] = {}
         self._cleaned_up: bool = False
 
@@ -225,6 +228,11 @@ class ThreadCoordinator:
         should_start = False
         must_join_after_start = False
         with self._lock:
+            if self._cleaned_up:
+                logger.debug(
+                    "Refusing thread start after coordinator cleanup: %s", thread.name
+                )
+                return
             if thread not in self._threads:
                 logger.warning(
                     "Cannot start untracked thread %r (ident=%s); coordinator may be cleaned up or a create_thread/cleanup race occurred",
@@ -241,16 +249,29 @@ class ThreadCoordinator:
                 and thread not in self._pending_start
             ):
                 self._pending_start.add(thread)
+                self._starting_now.add(thread)
                 should_start = True
         # Start outside the lock to prevent deadlocks if the new thread
         # immediately calls back into the coordinator
         if should_start:
+            start_failed = False
             try:
                 thread.start()
+            except BaseException:
+                start_failed = True
+                raise
             finally:
                 with self._lock:
                     if isinstance(thread, Thread):
                         self._pending_start.discard(thread)
+                        self._starting_now.discard(thread)
+                    if start_failed and thread.ident is None:
+                        # A rejected native start has no runnable owner and
+                        # must not remain a permanent 'pending' registration.
+                        # Guard remove(): a concurrent cleanup may already have
+                        # retired the failed registration.
+                        if thread in self._threads:
+                            self._threads.remove(thread)
                     # cleanup() may have run after we released the lock but before
                     # thread.start(); if so, join this now-started thread below so
                     # we don't leave it detached from coordinator shutdown.
@@ -261,6 +282,10 @@ class ThreadCoordinator:
                 and thread is not current_thread()
             ):
                 thread.join(timeout=EVENT_THREAD_JOIN_TIMEOUT)
+            if must_join_after_start:
+                with self._lock:
+                    if not thread.is_alive() and thread in self._threads:
+                        self._threads.remove(thread)
 
     def _join_thread(self, thread: ThreadLike, timeout: float | None = None) -> None:
         """Join a tracked thread if it is alive and not the current thread.
@@ -443,22 +468,20 @@ class ThreadCoordinator:
                 self._clear_event_no_lock(name)
 
     def _cleanup(self) -> None:
-        """Perform coordinated shutdown of the coordinator.
+        """Signal shutdown and join tracked threads with bounded retries.
 
-        Marks the coordinator as cleaned to prevent new runnable threads, sets all tracked events to wake any waiters,
-        joins all currently live tracked threads except the calling thread (joining each with
-        EVENT_THREAD_JOIN_TIMEOUT), and clears internal thread, event, and pending-start registries.
+        A timed-out thread remains owned by this coordinator until a later
+        cleanup observes its exit. Threads in the create/start handoff also
+        stay tracked, so a startup racing shutdown cannot become orphaned.
         """
         with self._lock:
-            if self._cleaned_up:
-                return
-            # Mark as cleaned up to prevent new thread creation
-            self._cleaned_up = True
-
-            # Signal all events
-            for event in self._events.values():
-                event.set()
-
+            if not self._cleaned_up:
+                self._cleaned_up = True
+                for event in self._events.values():
+                    event.set()
+                # Existing waiters hold their Event references. Do not allow
+                # new named-event registration after shutdown.
+                self._events.clear()
             current = current_thread()
             threads_to_join = [
                 thread
@@ -466,11 +489,17 @@ class ThreadCoordinator:
                 if thread.is_alive() and thread is not current
             ]
 
-            # Clear tracking
-            self._threads.clear()
-            self._events.clear()
-            self._pending_start.clear()
-
-        # Join threads outside the lock to avoid deadlocks if threads touch the coordinator during shutdown
+        # Joining under the lock would prevent worker shutdown callbacks.
         for thread in threads_to_join:
             thread.join(timeout=EVENT_THREAD_JOIN_TIMEOUT)
+
+        with self._lock:
+            # Retain live workers and threads whose start() is still in flight
+            # after the lock-free handoff in _start_thread(). A later cleanup
+            # can join the former; the starter retires the latter on completion.
+            self._threads = [
+                thread
+                for thread in self._threads
+                if thread.is_alive() or thread in self._starting_now
+            ]
+            self._pending_start.intersection_update(self._starting_now)

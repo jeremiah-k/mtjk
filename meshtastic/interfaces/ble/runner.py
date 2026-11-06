@@ -285,7 +285,16 @@ class BLECoroutineRunner:
             name="BLECoroutineRunner",
             daemon=True,
         )
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            # A failed thread start never published a functioning runner. Do
+            # not leave an unstarted thread installed as the active owner.
+            self._thread = None
+            self._loop = None
+            if not self._pending_futures:
+                self._unregister_atexit_handler_locked()
+            raise
         return ready_event
 
     def _run_loop(self, ready_event: threading.Event) -> None:
@@ -493,24 +502,20 @@ class BLECoroutineRunner:
             self._close_coroutine_safely(coro)
             raise
 
+        # Submission and future registration are one atomic ownership handoff.
+        # Otherwise stop() can cancel its snapshot between submission and
+        # tracking, leaving a future queued on a loop that is shutting down.
         with self._instance_lock:
-            if self._stop_requested:
-                logger.debug("Runner stop requested; rejecting coroutine submission.")
+            loop = self._loop
+            if self._stop_requested or loop is None or not loop.is_running():
+                logger.debug("Runner unavailable; rejecting coroutine submission.")
                 self._close_coroutine_safely(coro)
                 raise RuntimeError(BLECLIENT_ERROR_LOOP_NOT_AVAILABLE)
-            loop = self._loop
-
-        if loop is None or not loop.is_running():
-            self._close_coroutine_safely(coro)
-            raise RuntimeError(BLECLIENT_ERROR_LOOP_NOT_AVAILABLE)
-
-        try:
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
-        except Exception:  # noqa: BLE001 - ensure coroutine is closed before re-raise
-            self._close_coroutine_safely(coro)
-            raise
-        # Protect concurrent access to _pending_futures WeakSet
-        with self._instance_lock:
+            try:
+                future = asyncio.run_coroutine_threadsafe(coro, loop)
+            except Exception:  # noqa: BLE001 - close rejected coroutine
+                self._close_coroutine_safely(coro)
+                raise
             self._pending_futures.add(future)
         # Remove completed futures promptly instead of waiting for GC.
         future.add_done_callback(self._discard_tracked_future)
@@ -715,21 +720,31 @@ class BLECoroutineRunner:
             If the event loop fails to become ready within the configured timeout.
         """
         with self._instance_lock:
-            # _is_running acquires _instance_lock internally; this is safe because
-            # _instance_lock is intentionally an RLock (reentrant).
+            # _is_running uses the reentrant instance lock.
             if self._is_running:
                 return False
+            previous_thread = self._thread
 
-            # Force cleanup
-            # Intentional: when not running, drop stale thread reference without
-            # incrementing _zombie_runner_count (tracked in stop()) so restart()
-            # can safely win races with concurrent stop()/restart() and rebuild.
-            self._thread = None
-            self._loop = None
-            self._stop_requested = False
+        # A loop may have stopped running while its thread is still cancelling
+        # BLE tasks and closing native resources. Never replace that live owner
+        # with another thread: wait outside the lock so cleanup can finish.
+        if previous_thread is not None and previous_thread.is_alive():
+            if previous_thread is threading.current_thread():
+                raise RuntimeError(BLECLIENT_ERROR_LOOP_RESTART_FAILED)
+            previous_thread.join(timeout=BLEConfig.RUNNER_SHUTDOWN_TIMEOUT_SECONDS)
+            if previous_thread.is_alive():
+                raise RuntimeError(BLECLIENT_ERROR_LOOP_RESTART_FAILED)
 
-            # Start fresh - call _start_locked() while still holding the lock
-            # to avoid race with concurrent stop()/restart() calls
+        with self._instance_lock:
+            if self._is_running:
+                return False
+            # A different caller may already have installed a new owner. Let
+            # _start_locked() join its readiness instead of discarding it.
+            if self._thread is previous_thread and (
+                previous_thread is None or not previous_thread.is_alive()
+            ):
+                self._thread = None
+                self._loop = None
             ready_event = self._start_locked()
         if ready_event is not None and not ready_event.wait(
             timeout=BLEConfig.RUNNER_LOOP_READY_TIMEOUT_SECONDS
