@@ -272,8 +272,9 @@ cleanup; repeated auto-reconnect shutdown/start with a synthetic delayed
 close/socket replacement during `_start_config`, and reconnect while a caller
 waits; serial unplug/replug while constructor retry is active; ACK arriving
 before, during and after a real RF queue send; packet-ID wraparound; multiple
-concurrent senders after `QueueStatus` saturation; and setURL replace-all
-failure/reconnect with cache invalidation. These paths require hardware or
+concurrent senders after `QueueStatus` saturation; setURL replace-all
+failure/reconnect with cache invalidation; live BLE device validation,
+including peripheral D-Bus long reads. These paths require hardware or
 integration-level fault injection and are not covered by the unit tests above.
 
 ## Follow-up decisions (not closed by these fixes)
@@ -292,3 +293,59 @@ integration-level fault injection and are not covered by the unit tests above.
 - Error delivery across radio/ACK boundaries is at-least-once/unknown when
   native send returns an ambiguous transport failure. Exactly-once delivery
   is not implied by these lifecycle improvements.
+
+## Review follow-up (2026-11-06)
+
+A follow-up adversarial review of #756–#761 confirmed the transition rules
+below. They supplement, and do not replace, the 38-owner inventory above.
+
+- **Runner / coordinator (#756).** A runner that publishes an event loop
+  before `run_forever()` executes remains **Starting** until its readiness
+  callback runs. A native-start interruption can leave an owner whose
+  Python `ident` has not become observable; runner and coordinator retain
+  such owners for later cleanup instead of declaring them stopped, and only
+  an `OSError`/`RuntimeError` failure with no published `ident` rolls the
+  owner back. A close that times out waiting on workers retries coordinator
+  cleanup with its remaining budget. Regression tests verify out-of-lock
+  restart joins, startup reuse, and interrupted starts staying owned.
+- **BLE reconnect (#757).** The start-failure regression exercises the real
+  `_schedule_reconnect()` exception path: a failing start publishes a
+  replacement worker before the failure is reported, and stale cleanup must
+  not erase it. The change is test-only, with typed `Thread`-compatible
+  fakes replacing untyped stand-ins.
+- **TCP reconnect (#758).** Reconnect success and socket invalidation are
+  serialized under `_reconnect_lock`: invalidation precedes the blocking
+  native close, so a reconnect success check can no longer report a socket
+  being closed as the current owner. Config failure closes only the adopted
+  attempt socket, not a successor installed during configuration. The
+  installed-socket silent return is hoisted to the top of the locked
+  section of `_connect_socket_if_needed()` and applies even while a
+  reconnect is mid-config or shutdown was requested afterwards. Tests
+  coordinate config-startup and native-close races with `threading.Event`
+  waits.
+- **TX queue (#759).** Zero-ID packets admitted through the runtime always
+  receive distinct private negative queue keys; an externally pre-queued
+  key `0` remains supported as backlog. The deadline drop compares the
+  packet's own queue key rather than its firmware packet ID. A queue entry
+  left by a failed transport send may be replaced by a later same-ID caller
+  only when it is still the identical, unclaimed failed instance; live
+  owned IDs and unrelated queued IDs continue to reject duplicates. This
+  preserves retry admission and does not establish end-to-end idempotency
+  after an ambiguous transport error.
+- **Timing tests (#761).** The command API tests patch module-scoped
+  `LocalTime`/`LocalThreading` proxies and a `ClockedEvent` onto the
+  deadline-consuming modules instead of the process-global clock, so the
+  timeout case enters the response wait with a nonzero remaining budget and
+  the rejection test measures controlled clock deltas rather than elapsed
+  process-global scheduler time. The design rejects slow response-wait
+  regressions without assuming host scheduling latency.
+
+Draft PRs #690 (interface proxy) and #708 (transport selection) remain
+outside this series. The current #690 branch ships an offset-aware BlueZ
+D-Bus `ReadValue` handler and related tests, superseding the earlier BlueZ
+offset-read review finding; neither branch received modifications in this
+follow-up. Both still require backend and hardware integration validation
+before any merge decision.
+
+The follow-up regressions are subject to the same CI gates as the fixes
+above and to the integration gaps listed in **Not covered by unit tests**.
