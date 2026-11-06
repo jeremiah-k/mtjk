@@ -12,12 +12,17 @@ from unittest.mock import Mock
 
 import pytest
 
+from meshtastic import _command_scope as command_scope_module
+from meshtastic import _deadline as deadline_module
+from meshtastic import mesh_interface as mesh_interface_module
 from meshtastic import mt_config
+from meshtastic import node as node_module
 from meshtastic._command_scope import _CommandScope
 from meshtastic._core_constants import DECODE_ERROR_KEY
 from meshtastic.commands import CommandResult, executeCommand, getCommandCapabilities
 from meshtastic.errors import RequestRejectedError, RequestTimeoutError
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.mesh_interface_runtime import request_wait as request_wait_module
 from meshtastic.protobuf import (
     admin_pb2,
     channel_pb2,
@@ -78,6 +83,60 @@ def config_response(
         "from": packet.to,
         "decoded": {"requestId": packet.id, "admin": {"raw": raw}},
     }
+
+
+def control_clock(
+    monkeypatch: pytest.MonkeyPatch, *, waits: list[float | None] | None = None
+) -> list[float]:
+    """Control only the command's deadline consumers, not process-wide clocks.
+
+    Fake admin response waits advance this clock only when the response is not
+    already available. This makes a true wait-out regression observable without
+    relying on the host scheduler, and guarantees the timeout test actually
+    enters the response event's wait rather than failing before that wait.
+    """
+    clock = [time.monotonic()]
+
+    class LocalTime:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(time, name)
+
+        def monotonic(self) -> float:
+            return clock[0]
+
+        def sleep(self, seconds: float) -> None:
+            clock[0] += seconds
+
+    class ClockedEvent(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            if waits is not None:
+                waits.append(timeout)
+            if self.is_set():
+                return True
+            if timeout is not None:
+                clock[0] += timeout
+            return False
+
+    class LocalThreading:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(threading, name)
+
+        @staticmethod
+        def Event() -> threading.Event:
+            return ClockedEvent()
+
+    for module in (
+        deadline_module,
+        command_scope_module,
+        node_module,
+        mesh_interface_module,
+        request_wait_module,
+    ):
+        monkeypatch.setattr(module, "time", LocalTime())
+    # Only Node's bounded admin-response waiter uses this event factory.
+    # Other threads and pytest fixtures retain their real threading.Event.
+    monkeypatch.setattr(node_module, "threading", LocalThreading())
+    return clock
 
 
 def test_nodes_capture_preserves_streams_globals_and_transport(
@@ -221,10 +280,14 @@ def test_get_shows_explicitly_requested_secret_values(
 def test_get_returns_typed_failure_and_retains_other_response_state(
     client: MeshInterface, monkeypatch: pytest.MonkeyPatch, reject: bool
 ) -> None:
+    waits: list[float | None] = []
+    clock = control_clock(monkeypatch, waits=waits)
     sentinel = Mock()
     client.responseHandlers[1234] = sentinel
 
     def send(envelope: mesh_pb2.ToRadio) -> None:
+        # Preserve a nonzero response-wait budget in the timeout variant.
+        clock[0] += 0.01
         if reject:
             deliver(
                 client,
@@ -238,10 +301,10 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
             )
 
     monkeypatch.setattr(client, "_send_to_radio_impl", send)
-    # The rejection variant resolves synchronously during send, but the
-    # command budget also covers parser construction and dispatch; keep it
-    # generous so slow CI runners cannot race the deadline. The timeout
-    # variant must stay tight so the wait expires promptly.
+    # The controlled clock keeps parser construction and dispatch outside the
+    # deadline, so the budget only covers the faked transmission and the typed
+    # response wait. The rejection variant resolves synchronously during send;
+    # the timeout variant must stay tight so the wait expires promptly.
     result = executeCommand(
         client,
         ["--dest", "!00000002", "--get", "lora.hopLimit"],
@@ -253,6 +316,7 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
     )
     assert client.responseHandlers == {1234: sentinel}
     assert client._response_wait_errors == {}
+    assert waits and waits[0] is not None and waits[0] > 0.0
     cast(Mock, client.close).assert_not_called()
 
 
@@ -308,12 +372,14 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
     action: list[str],
     operation: str,
 ) -> None:
+    clock = control_clock(monkeypatch)
     packets: list[mesh_pb2.MeshPacket] = []
     sentinel = Mock()
     client.responseHandlers[1234] = sentinel
     client._acknowledgment.receivedNak = False
 
     def send(envelope: mesh_pb2.ToRadio) -> None:
+        clock[0] += 0.03
         request = envelope.packet
         packets.append(request)
         nak = mesh_pb2.MeshPacket(to=1)
@@ -326,7 +392,14 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
         client._handle_packet_from_radio(nak)
 
     monkeypatch.setattr(client, "_send_to_radio_impl", send)
-    started = time.monotonic()
+    # Fake event waits advance the controlled clock when no NAK has completed.
+    # Measure budget consumption on the controlled clock: remote actions
+    # resolve their destination node (channel-fetch rounds included) before
+    # the NAK under test arrives, and that work is CPU-bound, so a wall-clock
+    # bound would measure runner speed. On the controlled clock each
+    # transmission consumes 0.03 s and waiting out the budget would surface
+    # as elapsed time above the 0.5 s budget.
+    started = clock[0]
     result = executeCommand(client, ["--dest", "!00000002", *action], timeout=0.5)
     assert isinstance(result.error, RequestRejectedError), result
     assert result.exitCode == 1
@@ -335,7 +408,7 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
     assert result.error.requestId == packets[0].id
     assert result.error.operation == operation
     assert all(packet.pki_encrypted for packet in packets)
-    assert time.monotonic() - started < 0.25
+    assert clock[0] - started < 0.25
     assert client.responseHandlers == {1234: sentinel}
     assert client._response_wait_errors == {}
     assert client._acknowledgment.receivedNak is False
