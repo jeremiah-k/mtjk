@@ -866,7 +866,7 @@ def test_send_to_radio_waits_resends_and_tracks_requeue(
             send_patch.setattr(iface, "_send_to_radio_impl", lambda _msg: None)
             send_patch.setattr(
                 iface._queue_send_runtime,
-                "_pop_for_send",
+                "_pop_for_send_locked",
                 lambda: next(pops),
             )
             iface._send_to_radio(incoming)
@@ -901,7 +901,7 @@ def test_send_to_radio_successful_missing_entry_is_not_immediately_requeued(
             send_patch.setattr(iface, "_send_to_radio_impl", _send_impl)
             send_patch.setattr(
                 iface._queue_send_runtime,
-                "_pop_for_send",
+                "_pop_for_send_locked",
                 lambda: next(pops),
             )
             iface._send_to_radio(incoming)
@@ -936,7 +936,7 @@ def test_send_to_radio_requeues_packet_when_send_impl_raises(
             send_patch.setattr(iface, "_send_to_radio_impl", _failing_send)
             send_patch.setattr(
                 iface._queue_send_runtime,
-                "_pop_for_send",
+                "_pop_for_send_locked",
                 lambda: next(pops),
             )
             with pytest.raises(_SendImplFailure, match="send failed"):

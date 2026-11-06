@@ -408,7 +408,7 @@ def test_send_to_radio_uses_runtime_pop_method(
             harness.queue.clear()
         return popped
 
-    monkeypatch.setattr(runtime, "_pop_for_send", fake_pop_for_send)
+    monkeypatch.setattr(runtime, "_pop_for_send_locked", fake_pop_for_send)
 
     runtime._send_to_radio(
         incoming,

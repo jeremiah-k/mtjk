@@ -61,6 +61,12 @@ class _QueueSendRuntime:
         # leaves the queued OrderedDict. This prevents a concurrent explicit
         # packet-ID reuse from replacing an in-flight send's ACK bookkeeping.
         self._active_send_ids: set[int] = set()
+        # Distinguish a caller's queue reservation from another send loop's
+        # ownership of the packet after popping it for transport I/O.
+        self._active_send_id_claims: dict[int, int] = {}
+        # ID zero is assigned by firmware; retain distinct queued zero-ID
+        # packets with private negative queue keys instead of overwriting 0.
+        self._next_zero_queue_key = -1
         # Unexpected ACKs are kept briefly to correlate ACK-under-send races,
         # but must not accumulate forever when no further sends occur.
         self._unexpected_ack_tombstones: OrderedDict[int, float] = OrderedDict()
@@ -121,18 +127,49 @@ class _QueueSendRuntime:
         self._packet_uses_capacity_by_id.pop(packet_id, None)
         self._claimed_queue_status_by_id.pop(packet_id, None)
 
+    def _claim_active_send_id_locked(self, packet_id: int) -> None:
+        """Retain a nonzero packet-ID claim through transport reconciliation."""
+        if packet_id:
+            self._active_send_id_claims[packet_id] = (
+                self._active_send_id_claims.get(packet_id, 0) + 1
+            )
+            self._active_send_ids.add(packet_id)
+
+    def _release_active_send_id_locked(self, packet_id: int) -> None:
+        """Release only this sender's claim, not another sender's reservation.
+
+        Tolerates releasing an ID this path never claimed so a release inside
+        a ``finally`` block can never mask the exception being unwound with a
+        KeyError.
+        """
+        if not packet_id:
+            return
+        claims = self._active_send_id_claims.get(packet_id, 0) - 1
+        if claims > 0:
+            self._active_send_id_claims[packet_id] = claims
+        else:
+            self._active_send_id_claims.pop(packet_id, None)
+            self._active_send_ids.discard(packet_id)
+
     def _enqueue_packet_locked(
         self,
         packet: mesh_pb2.ToRadio,
         *,
         uses_capacity: bool,
-    ) -> None:
-        """Queue one incoming packet with its snapshotted capacity class."""
+    ) -> int:
+        """Queue an incoming packet and return its unique internal queue key."""
         packet_id = packet.packet.id
-        self._get_queue()[packet_id] = packet
+        queue = self._get_queue()
+        if packet_id == 0 and packet_id in queue:
+            while self._next_zero_queue_key in queue:
+                self._next_zero_queue_key -= 1
+            packet_id = self._next_zero_queue_key
+            self._next_zero_queue_key -= 1
+        queue[packet_id] = packet
         self._unexpected_ack_tombstones.pop(packet_id, None)
         self._packet_uses_capacity_by_id[packet_id] = uses_capacity
         self._claimed_queue_status_by_id.pop(packet_id, None)
+        return packet_id
 
     def _pop_capacity_exempt_locked(
         self,
@@ -148,40 +185,41 @@ class _QueueSendRuntime:
             return packet_id, packet
         return None
 
+    def _pop_for_send_locked(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
+        """Pop the next sendable entry while honoring firmware RF queue capacity.
+
+        Caller must hold ``_lock`` so a send loop can claim the popped
+        packet's ID atomically with the dequeue.
+        """
+        queue = self._get_queue()
+        if not queue:
+            return None
+
+        queue_status = self._get_queue_status()
+        if queue_status is not None and queue_status.free <= 0:
+            first_packet_id, first_packet = next(iter(queue.items()))
+            if not isinstance(first_packet, mesh_pb2.ToRadio):
+                queue.pop(first_packet_id, None)
+                self._unexpected_ack_tombstones.pop(first_packet_id, None)
+                return first_packet_id, first_packet
+            return self._pop_capacity_exempt_locked()
+
+        packet_id, packet = queue.popitem(last=False)
+        self._unexpected_ack_tombstones.pop(packet_id, None)
+        if queue_status is not None and isinstance(packet, mesh_pb2.ToRadio):
+            if self._queued_packet_uses_capacity_locked(packet_id, packet):
+                queue_status.free -= 1
+                self._claimed_queue_status_by_id[packet_id] = queue_status
+        return packet_id, packet
+
     def _pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
         """Pop the next sendable entry while honoring firmware RF queue capacity."""
         with self._lock:
-            queue = self._get_queue()
-            if not queue:
-                return None
-
-            queue_status = self._get_queue_status()
-            if queue_status is not None and queue_status.free <= 0:
-                first_packet_id, first_packet = next(iter(queue.items()))
-                if not isinstance(first_packet, mesh_pb2.ToRadio):
-                    queue.pop(first_packet_id, None)
-                    self._unexpected_ack_tombstones.pop(first_packet_id, None)
-                    return first_packet_id, first_packet
-                return self._pop_capacity_exempt_locked()
-
-            packet_id, packet = queue.popitem(last=False)
-            self._unexpected_ack_tombstones.pop(packet_id, None)
-            if queue_status is not None and isinstance(packet, mesh_pb2.ToRadio):
-                if self._queued_packet_uses_capacity_locked(packet_id, packet):
-                    queue_status.free -= 1
-                    self._claimed_queue_status_by_id[packet_id] = queue_status
-            return packet_id, packet
+            return self._pop_for_send_locked()
 
     def pop_for_send(self) -> tuple[int, mesh_pb2.ToRadio | bool] | None:
         """Pop the next sendable queue entry while honoring queue free-space state."""
         return self._pop_for_send()
-
-    def _pop_capacity_exempt_for_send(
-        self,
-    ) -> tuple[int, mesh_pb2.ToRadio] | None:
-        """Pop the next entry that can progress without firmware RF capacity."""
-        with self._lock:
-            return self._pop_capacity_exempt_locked()
 
     def _send_capacity_exempt_packets(
         self,
@@ -191,20 +229,35 @@ class _QueueSendRuntime:
         """Send RF-capacity-exempt backlog without waiting on firmware RF capacity."""
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool] = OrderedDict()
         sent_packet_ids: set[int] = set()
+        popped_send_ids: list[int] = []
         try:
             while True:
-                to_resend = self._pop_capacity_exempt_for_send()
+                # One lock acquisition keeps the dequeue and the popped
+                # packet's ID claim atomic; the lock contract forbids nested
+                # MeshInterface lock acquisition, so the loop uses the
+                # _locked pop variant while already holding _lock.
+                with self._lock:
+                    to_resend = self._pop_capacity_exempt_locked()
+                    if to_resend is not None:
+                        self._claim_active_send_id_locked(to_resend[1].packet.id)
                 if to_resend is None:
                     break
                 packet_id, packet = to_resend
+                if packet.packet.id:
+                    popped_send_ids.append(packet.packet.id)
                 resent_queue[packet_id] = packet
                 send_impl(packet)
                 sent_packet_ids.add(packet_id)
         finally:
-            self._reconcile_resent_queue(
-                resent_queue=resent_queue,
-                sent_packet_ids=sent_packet_ids,
-            )
+            try:
+                self._reconcile_resent_queue(
+                    resent_queue=resent_queue,
+                    sent_packet_ids=sent_packet_ids,
+                )
+            finally:
+                with self._lock:
+                    for packet_id in popped_send_ids:
+                        self._release_active_send_id_locked(packet_id)
 
     def _send_to_radio(
         self,
@@ -237,37 +290,52 @@ class _QueueSendRuntime:
                 raise ValueError(
                     f"Packet ID {incoming_id:08x} is already queued or in flight"
                 )
-            self._enqueue_packet_locked(
+            queued_key = self._enqueue_packet_locked(
                 to_radio,
                 uses_capacity=uses_capacity,
             )
             if owns_packet_id:
-                self._active_send_ids.add(incoming_id)
+                self._claim_active_send_id_locked(incoming_id)
         if not uses_capacity:
             try:
                 self._send_capacity_exempt_packets(send_impl=send_impl)
             finally:
                 with self._lock:
-                    self._active_send_ids.discard(incoming_id)
+                    self._release_active_send_id_locked(incoming_id)
             return
 
         resent_queue: OrderedDict[int, mesh_pb2.ToRadio | bool] = OrderedDict()
         sent_packet_ids: set[int] = set()
+        popped_send_ids: list[int] = []
         wait_deadline: float | None = None
 
         def _drop_unsent_incoming() -> None:
             with self._lock:
-                packet_id = to_radio.packet.id
                 # An external caller may have replaced a compatibility queue
                 # entry. Never discard another owner's packet on timeout.
-                if self._get_queue().get(packet_id) is to_radio:
-                    self._get_queue().pop(packet_id, None)
-                    self._forget_capacity_state_locked(packet_id)
+                queued = self._get_queue().get(queued_key)
+                if queued is to_radio:
+                    self._get_queue().pop(queued_key, None)
+                    self._forget_capacity_state_locked(queued_key)
+                elif isinstance(queued, mesh_pb2.ToRadio):
+                    self._packet_uses_capacity_by_id[queued_key] = (
+                        self._packet_uses_tx_queue_capacity(queued)
+                    )
+                    self._claimed_queue_status_by_id.pop(queued_key, None)
 
         try:
             while True:
                 _remaining_timeout(self._queue_wait_timeout_seconds)
-                to_resend = self._pop_for_send()
+                with self._lock:
+                    # One lock acquisition keeps the dequeue and the popped
+                    # packet's ID claim atomic; the lock contract forbids
+                    # nested MeshInterface lock acquisition, so the loop uses
+                    # the _locked pop variant while already holding _lock.
+                    to_resend = self._pop_for_send_locked()
+                    if to_resend is not None and isinstance(
+                        to_resend[1], mesh_pb2.ToRadio
+                    ):
+                        self._claim_active_send_id_locked(to_resend[1].packet.id)
                 if to_resend is None:
                     with self._lock:
                         queue_has_items = bool(self._get_queue())
@@ -298,6 +366,8 @@ class _QueueSendRuntime:
                 wait_deadline = None
 
                 packet_id, packet = to_resend
+                if isinstance(packet, mesh_pb2.ToRadio) and packet.packet.id:
+                    popped_send_ids.append(packet.packet.id)
                 if packet is False and packet_id in sent_packet_ids:
                     logger.debug("packet %08x got acked during send", packet_id)
                     resent_queue.pop(packet_id, None)
@@ -324,7 +394,9 @@ class _QueueSendRuntime:
                 )
             finally:
                 with self._lock:
-                    self._active_send_ids.discard(incoming_id)
+                    for packet_id in popped_send_ids:
+                        self._release_active_send_id_locked(packet_id)
+                    self._release_active_send_id_locked(incoming_id)
 
     def send_to_radio(
         self,
@@ -393,6 +465,10 @@ class _QueueSendRuntime:
 
             if queued_value is missing and packet_id in sent_packet_ids:
                 with self._lock:
+                    # Zero IDs have no ACK key until firmware assigns one.
+                    if isinstance(packet, mesh_pb2.ToRadio) and packet.packet.id == 0:
+                        self._forget_capacity_state_locked(packet_id)
+                        continue
                     self._prune_awaiting_queue_status_ids_locked(time.monotonic())
                     self._claimed_queue_status_by_id.pop(packet_id, None)
                     should_track_reply = (
@@ -428,6 +504,14 @@ class _QueueSendRuntime:
                 continue
 
             with self._lock:
+                if (
+                    isinstance(queued_value, mesh_pb2.ToRadio)
+                    and queued_value is not packet
+                ):
+                    # The replacement (often local loopback) now owns this
+                    # queue key, so the old RF classification is invalid.
+                    uses_capacity = self._packet_uses_tx_queue_capacity(queued_value)
+                    self._packet_uses_capacity_by_id[packet_id] = uses_capacity
                 claimed_status = self._claimed_queue_status_by_id.pop(
                     packet_id,
                     None,
@@ -489,6 +573,9 @@ class _QueueSendRuntime:
     def _correlate_queue_status_reply(self, queue_status: mesh_pb2.QueueStatus) -> None:
         """Correlate ACKs atomically; bound unmatched packet-ID tombstones."""
         packet_id = queue_status.mesh_packet_id
+        if packet_id == 0:
+            # Firmware-assigned IDs cannot be correlated by their placeholder.
+            return
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         with self._lock:
             now = time.monotonic()
@@ -532,14 +619,25 @@ class _QueueSendRuntime:
         tombstones = self._unexpected_ack_tombstones
         queue = self._get_queue()
         cutoff = now - UNEXPECTED_ACK_TTL_SECONDS
-        while tombstones:
-            packet_id, created_at = next(iter(tombstones.items()))
+        if not tombstones:
+            return
+        first_created_at = next(iter(tombstones.values()))
+        if (
+            first_created_at >= cutoff
+            and len(tombstones) <= MAX_UNEXPECTED_ACK_TOMBSTONES
+        ):
+            return
+        for packet_id, created_at in tuple(tombstones.items()):
             if (
                 created_at >= cutoff
                 and len(tombstones) <= MAX_UNEXPECTED_ACK_TOMBSTONES
             ):
                 break
-            tombstones.popitem(last=False)
+            if packet_id in self._active_send_ids:
+                # An early ACK is reconciliation evidence while send_impl()
+                # is outstanding; never evict it to satisfy the count bound.
+                continue
+            tombstones.pop(packet_id, None)
             if queue.get(packet_id) is False:
                 queue.pop(packet_id, None)
 

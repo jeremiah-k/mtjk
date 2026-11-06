@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import collections
 import threading
-import time
 from collections.abc import Callable
+from types import SimpleNamespace
 
 import pytest
 
@@ -196,6 +196,7 @@ def test_early_ack_is_reconciled_without_leak() -> None:
 
     def ack_immediately(_to_radio: mesh_pb2.ToRadio) -> None:
         runtime._correlate_queue_status_reply(_status(packet_id=31))
+        assert harness.queue[31] is False
 
     runtime._send_to_radio(
         packet,
@@ -249,12 +250,13 @@ def test_expired_tombstone_is_retired_without_touching_real_packet(
     harness = _QueueHarness()
     runtime = _make_runtime(harness)
     created_at = 100.0
-    # queue_send reads time.monotonic through the stdlib time module; the
-    # constant lambda keeps the test deterministic even for extra callers.
+    # Replace only this runtime module's clock reference, not the process-wide
+    # stdlib time.monotonic used by pytest and other threads.
+    clock = [created_at]
     monkeypatch.setattr(
-        time,
-        "monotonic",
-        lambda: created_at,
+        queue_send_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
     )
 
     runtime._correlate_queue_status_reply(_status(packet_id=101))
@@ -263,12 +265,7 @@ def test_expired_tombstone_is_retired_without_touching_real_packet(
 
     live = _packet(101)
     harness.queue[101] = live
-    expired_at = created_at + queue_send_module.UNEXPECTED_ACK_TTL_SECONDS + 1.0
-    monkeypatch.setattr(
-        time,
-        "monotonic",
-        lambda: expired_at,
-    )
+    clock[0] = created_at + queue_send_module.UNEXPECTED_ACK_TTL_SECONDS + 1.0
 
     runtime._correlate_queue_status_reply(_status(packet_id=102))
 
@@ -323,9 +320,11 @@ def test_zero_packet_id_send_is_allowed_while_zero_id_entry_is_queued() -> None:
     harness = _QueueHarness()
     runtime = _make_runtime(harness)
     queued = _packet(0)
+    queued.packet.decoded.payload = b"first"
     harness.queue[0] = queued
 
     followup = _packet(0)
+    followup.packet.decoded.payload = b"second"
     sent: list[mesh_pb2.ToRadio] = []
     runtime._send_to_radio(
         followup,
@@ -333,7 +332,181 @@ def test_zero_packet_id_send_is_allowed_while_zero_id_entry_is_queued() -> None:
         sleep_fn=lambda _seconds: None,
     )
 
-    assert sent == [followup]
+    assert sent == [queued, followup]
+    assert [packet.packet.decoded.payload for packet in sent] == [b"first", b"second"]
     assert queued not in harness.queue.values()
     assert 0 not in harness.queue
     assert 0 not in runtime._active_send_ids
+
+
+@pytest.mark.unit
+def test_backlog_packet_id_stays_owned_while_another_sender_drains_it() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    queued = _packet(0xDEED)
+    harness.queue[0xDEED] = queued
+    entered = threading.Event()
+    release = threading.Event()
+    failure: list[BaseException] = []
+
+    def blocking_send(packet: mesh_pb2.ToRadio) -> None:
+        if packet is queued:
+            entered.set()
+            assert release.wait(10.0)
+
+    def drain() -> None:
+        try:
+            runtime._send_to_radio(
+                _packet(0xFEED),
+                send_impl=blocking_send,
+                sleep_fn=lambda _seconds: None,
+            )
+        except BaseException as exc:  # noqa: BLE001 - preserve assertion from thread
+            failure.append(exc)
+
+    sender = threading.Thread(target=drain)
+    sender.start()
+    try:
+        assert entered.wait(10.0)
+        assert 0xDEED in runtime._active_send_ids
+        with pytest.raises(ValueError, match="already queued or in flight"):
+            runtime._send_to_radio(
+                _packet(0xDEED),
+                send_impl=lambda _packet: None,
+                sleep_fn=lambda _seconds: None,
+            )
+    finally:
+        release.set()
+        sender.join(10.0)
+
+    assert not sender.is_alive()
+    assert failure == []
+    assert runtime._active_send_ids == set()
+    assert runtime._active_send_id_claims == {}
+
+
+@pytest.mark.unit
+def test_release_without_matching_claim_is_a_tolerated_noop() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    with runtime._lock:
+        # A release inside a finally block must never mask the exception it
+        # unwinds with a KeyError, even when this path never claimed the ID.
+        runtime._release_active_send_id_locked(0x51)
+        assert runtime._active_send_id_claims == {}
+        assert 0x51 not in runtime._active_send_ids
+
+        runtime._claim_active_send_id_locked(0x51)
+        runtime._release_active_send_id_locked(0x51)
+        runtime._release_active_send_id_locked(0x51)
+
+    assert runtime._active_send_id_claims == {}
+    assert 0x51 not in runtime._active_send_ids
+
+
+@pytest.mark.unit
+def test_preserved_local_replacement_refreshes_capacity_class() -> None:
+    harness = _QueueHarness()
+    harness.queue_status = _status(free=0)
+    original = _packet(900)
+    replacement = _packet(900)
+    followup = _packet(901)
+    local_ids = {id(replacement), id(followup)}
+
+    def replace_then_abort() -> str:
+        harness.queue[900] = replacement
+        return "closing"
+
+    runtime = _make_runtime(
+        harness,
+        abort_wait=replace_then_abort,
+        uses_tx_queue_capacity=lambda packet: id(packet) not in local_ids,
+    )
+    with pytest.raises(queue_send_module.QueueWaitError, match="closing"):
+        runtime._send_to_radio(
+            original,
+            send_impl=lambda _packet: None,
+            sleep_fn=lambda _seconds: None,
+        )
+    assert harness.queue[900] is replacement
+    assert runtime._packet_uses_capacity_by_id[900] is False
+
+    sent: list[mesh_pb2.ToRadio] = []
+    runtime._send_to_radio(followup, send_impl=sent.append, sleep_fn=lambda _: None)
+    assert sent == [replacement, followup]
+    assert harness.queue_status.free == 0
+    assert not harness.queue
+
+
+@pytest.mark.unit
+def test_transport_failure_reconciles_local_replacement_at_zero_capacity() -> None:
+    harness = _QueueHarness()
+    harness.queue_status = _status(free=1)
+    original = _packet(920)
+    replacement = _packet(920)
+    local_packet = _packet(921)
+    local_ids = {id(replacement), id(local_packet)}
+    runtime = _make_runtime(
+        harness,
+        uses_tx_queue_capacity=lambda packet: id(packet) not in local_ids,
+    )
+
+    def replace_then_fail(_packet: mesh_pb2.ToRadio) -> None:
+        harness.queue[920] = replacement
+        harness.queue_status = _status(free=0)
+        raise OSError("transport closed")
+
+    with pytest.raises(OSError, match="transport closed"):
+        runtime._send_to_radio(
+            original, send_impl=replace_then_fail, sleep_fn=lambda _: None
+        )
+
+    assert harness.queue[920] is replacement
+    assert runtime._packet_uses_capacity_by_id[920] is False
+    sent: list[mesh_pb2.ToRadio] = []
+    runtime._send_to_radio(local_packet, send_impl=sent.append, sleep_fn=lambda _: None)
+    assert sent == [replacement, local_packet]
+    assert not harness.queue
+
+
+@pytest.mark.unit
+def test_early_ack_evidence_outlives_tombstone_eviction_until_reconciled() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    original = _packet(600)
+
+    def ack_then_fail(_packet: mesh_pb2.ToRadio) -> None:
+        runtime._correlate_queue_status_reply(_status(packet_id=600))
+        assert harness.queue[600] is False
+        for packet_id in range(
+            1000, 1000 + queue_send_module.MAX_UNEXPECTED_ACK_TOMBSTONES + 40
+        ):
+            runtime._correlate_queue_status_reply(_status(packet_id=packet_id))
+        assert harness.queue[600] is False
+        assert 600 in runtime._unexpected_ack_tombstones
+        raise OSError("already reached radio")
+
+    with pytest.raises(OSError, match="already reached radio"):
+        runtime._send_to_radio(
+            original,
+            send_impl=ack_then_fail,
+            sleep_fn=lambda _seconds: None,
+        )
+    assert 600 not in harness.queue
+    assert 600 not in runtime._unexpected_ack_tombstones
+    assert runtime._active_send_ids == set()
+    assert (
+        len(runtime._unexpected_ack_tombstones)
+        <= queue_send_module.MAX_UNEXPECTED_ACK_TOMBSTONES
+    )
+
+
+@pytest.mark.unit
+def test_unmatched_zero_ack_does_not_discard_firmware_assigned_packet() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    queued = _packet(0)
+    harness.queue[0] = queued
+    runtime._correlate_queue_status_reply(_status(packet_id=0))
+    assert harness.queue[0] is queued
+    assert 0 not in runtime._unexpected_ack_tombstones
