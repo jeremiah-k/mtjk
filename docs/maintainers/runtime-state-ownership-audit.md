@@ -5,13 +5,13 @@ This is a dated audit record (2026-11-06) of the long-lived runtime owners in
 concurrency owners across the BLE runner, thread coordinator, BLE reconnect
 worker, TCP reconnect, and mesh TX queue.
 
-Status: **recorded (2026-11-06)** — sections A–E describe the fixes as landed
-in [#756](https://github.com/jeremiah-k/mtjk/pull/756) (BLE runner and thread
+Status: **recorded (2026-11-06)** — sections A–E describe the changes in
+[#756](https://github.com/jeremiah-k/mtjk/pull/756) (BLE runner and thread
 coordinator), [#757](https://github.com/jeremiah-k/mtjk/pull/757) (BLE
 reconnect worker), [#758](https://github.com/jeremiah-k/mtjk/pull/758) (TCP
 reconnect), and [#759](https://github.com/jeremiah-k/mtjk/pull/759) (TX
-queue). Public names, wire contracts, and compatibility shims are unchanged by
-those fixes.
+queue), including their review follow-ups. Public names, wire contracts, and
+compatibility shims are unchanged by those fixes.
 
 ## Scope and decision rule
 
@@ -55,12 +55,15 @@ to be posted _after_ stop's cancellation snapshot but _before_ being added to
 `_pending_futures`. This could leave work on a closing loop. Thread startup
 failure also left an inert owner installed.
 
-**Fix:** `restart()` joins the old thread outside the reentrant lock with a
-bounded timeout; if still alive it raises the existing restart error rather
-than overlapping owners. A second locked check handles competing restarters.
-Future submission, tracking, and stop admission now share one atomic handoff
-under the instance lock. A native start failure rolls back the empty owner.
-The legacy deprecated `timeout=` argument and its warning policy remain intact.
+**Fix:** `restart()` joins an old _stopping_ thread outside the reentrant lock
+with a bounded timeout; if still alive it raises the existing restart error
+rather than overlapping owners. A thread that is still starting (no published
+loop, no stop request) instead reuses that startup's own readiness event. A
+restart from the owner thread itself is rejected to prevent self-join or
+self-wait. A second locked check handles competing restarters. Future
+submission, tracking, and stop admission now share one atomic handoff under
+the instance lock. A native start failure rolls back the empty owner. The
+legacy deprecated `timeout=` argument and its warning policy remain intact.
 
 ## B. Corrected machine: BLE worker and event coordinator
 
@@ -130,26 +133,38 @@ rather than introducing new locks around potentially blocking config I/O.
 
 **Queued → Claimed/dequeued → Sending → Awaiting ACK / ACK received / Requeued
 on error → Retired.** For nonzero IDs, packet ID is an ownership key, not
-merely a dictionary key. `_active_send_ids` keeps the ID reserved across
-dequeue and the `send_impl()` call so concurrent senders cannot overwrite the
-in-flight packet. Packet ID 0 is exempt from both the duplicate refusal and
-`_active_send_ids` tracking: the firmware assigns the real ID, and ACK
-correlation already ignores ID 0. Callers attempting duplicate live nonzero
-IDs are rejected with `ValueError` instead of silently destroying the first
-owner's ACK/capacity bookkeeping. The new registry is released on success or
-all exceptions, including capacity-exempt sends and final reconciliation. When
-dropping an aborted queued packet, only remove the **identical** queue entry,
-never a different packet installed by an external compatibility caller.
+merely a dictionary key. `_active_send_ids` with reference-counted claims
+(`_active_send_id_claims`) keep each nonzero ID reserved from caller enqueue
+through dequeue, native `send_impl()` and reconciliation, **including backlog
+packets popped by another sender's drain loop**. Both send loops pop and
+claim under a single `_lock` acquisition (`_pop_for_send_locked()` for the
+waiting loop, `_pop_capacity_exempt_locked()` for the capacity-exempt loop;
+`_pop_for_send()` remains a locked wrapper), so dequeue and ID claim are
+atomic without nested lock entry. Callers attempting duplicate live nonzero
+IDs are rejected with `ValueError` instead of silently destroying
+ACK/capacity bookkeeping. Releasing an ID without a matching claim is a
+tolerated no-op, so a release inside a `finally` block cannot mask the
+exception being unwound. Packet ID 0 is firmware-assigned and is not a unique
+ACK/ownership key: multiple queued zero-ID packets remain separate using
+private negative queue keys and are sent in order, and a `QueueStatus` reply
+whose `mesh_packet_id` is 0 is never correlated, so no reply can remove a
+queued zero-ID packet. When dropping an aborted queued packet, remove only
+the **identical** entry; if another caller replaced it, refresh the
+replacement's capacity classification so a local packet can progress with
+zero RF slots.
 
 **Unexpected ACK submachine:**
 `Unknown ACK → Provisional False marker → Correlated by sending thread` OR
 `Expired/evicted`. Unexpected markers are necessary to detect an ACK arriving
 under a send, but prior code inserted them in a second lock acquisition and
 never bounded the cache if unsolicited ACKs continued. An ACK and marker
-insertion are now one atomic lock-protected operation. Tombstones track up to
-**1,024** packet IDs with **300-second** TTL; pruning never deletes a live
+insertion are now one atomic lock-protected operation. Unowned tombstones
+are limited to **1,024** packet IDs with **300-second** TTL; a marker for an
+actively sending ID is pinned until reconciliation, even if it crosses the
+ordinary count/age limit, to prevent duplicate retransmission after an early
+ACK and an ambiguous transport exception. Pruning never deletes a live
 `ToRadio` packet replaced under the same ID. These are _housekeeping_ bounds,
-not claims that an arbitrary packet is delivered or acknowledged exactly once.
+not claims that a packet is delivered or acknowledged exactly once.
 
 **Important semantic boundary:** these fixes only prevent _concurrent live_
 packet-ID reuse. A previously completed but still potentially radio-in-flight
@@ -220,7 +235,9 @@ not that every hardware-dependent race has passed integration testing.
    compatibility state. These fixes handle _missing ownership boundaries_.
 4. Avoid joining workers or performing network I/O under an outer lifecycle
    RLock. Existing per-address BLE gate, socket ownership lock and queue lock
-   contracts stay in force.
+   contracts stay in force. The TX queue send loops pop and claim under a
+   single `_lock` acquisition, and the queue runtime does not nest
+   acquisitions of that lock.
 5. mtjk's BLE auto-reconnect is opt-in. Its availability must not cause a
    second reconnect orchestrator to compete with MMRelay's own reconnect
    supervisor.
@@ -236,9 +253,13 @@ Regression tests added with the fixes:
 - `meshtastic/tests/test_ble_reconnection_coverage.py` (extended with the
   reconnect-worker ownership-fence tests)
 - `meshtastic/tests/test_tcp_interface_reconnect_ownership.py`
-- `meshtastic/tests/test_mesh_interface_queue_send_ownership.py`
+- `meshtastic/tests/test_mesh_interface_queue_send_ownership.py` (extended
+  with the queue review follow-up cases, patching the queue runtime module's
+  clock instead of the process-wide `time.monotonic`)
 - `meshtastic/tests/test_mesh_interface_queue_send_runtime.py` (updated for
   the queue-send ownership semantics)
+- `meshtastic/tests/test_mesh_interface_wait_receive.py` (updated: send-loop
+  patch targets moved to `_pop_for_send_locked`)
 
 CI gates for these paths: `make ci` — pytest, pylint, ruff on tests, and
 `mypy meshtastic/ examples/ tests/ --strict`.
