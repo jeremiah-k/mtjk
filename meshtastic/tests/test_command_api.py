@@ -80,6 +80,27 @@ def config_response(
     }
 
 
+def control_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Pin the command deadline clock and advance it from faked waits only.
+
+    Parser construction and node-DB work can exceed tight budgets on loaded CI
+    runners before the request under test is transmitted, so wall-clock elapsed
+    assertions end up measuring runner speed instead of request lifecycle.
+    Freezing ``time.monotonic`` keeps setup outside deadline math; ``time.sleep``
+    and each faked transmission advance the controlled clock, so budgeted waits
+    still consume it and wait-out regressions fail deterministically instead of
+    hanging or racing.
+    """
+    clock = [time.monotonic()]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def advance(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", advance)
+    return clock
+
+
 def test_nodes_capture_preserves_streams_globals_and_transport(
     client: MeshInterface, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -221,10 +242,12 @@ def test_get_shows_explicitly_requested_secret_values(
 def test_get_returns_typed_failure_and_retains_other_response_state(
     client: MeshInterface, monkeypatch: pytest.MonkeyPatch, reject: bool
 ) -> None:
+    clock = control_clock(monkeypatch)
     sentinel = Mock()
     client.responseHandlers[1234] = sentinel
 
     def send(envelope: mesh_pb2.ToRadio) -> None:
+        clock[0] += 0.03
         if reject:
             deliver(
                 client,
@@ -238,10 +261,10 @@ def test_get_returns_typed_failure_and_retains_other_response_state(
             )
 
     monkeypatch.setattr(client, "_send_to_radio_impl", send)
-    # The rejection variant resolves synchronously during send, but the
-    # command budget also covers parser construction and dispatch; keep it
-    # generous so slow CI runners cannot race the deadline. The timeout
-    # variant must stay tight so the wait expires promptly.
+    # The controlled clock keeps parser construction and dispatch outside the
+    # deadline, so the budget only covers the faked transmission and the typed
+    # response wait. The rejection variant resolves synchronously during send;
+    # the timeout variant must stay tight so the wait expires promptly.
     result = executeCommand(
         client,
         ["--dest", "!00000002", "--get", "lora.hopLimit"],
@@ -308,12 +331,14 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
     action: list[str],
     operation: str,
 ) -> None:
+    clock = control_clock(monkeypatch)
     packets: list[mesh_pb2.MeshPacket] = []
     sentinel = Mock()
     client.responseHandlers[1234] = sentinel
     client._acknowledgment.receivedNak = False
 
     def send(envelope: mesh_pb2.ToRadio) -> None:
+        clock[0] += 0.03
         request = envelope.packet
         packets.append(request)
         nak = mesh_pb2.MeshPacket(to=1)
@@ -326,6 +351,12 @@ def test_remote_admin_rejects_origin_router_nak_without_waiting_out_budget(
         client._handle_packet_from_radio(nak)
 
     monkeypatch.setattr(client, "_send_to_radio_impl", send)
+    # Measure budget consumption on the controlled clock: remote actions
+    # resolve their destination node (channel-fetch rounds included) before
+    # the NAK under test arrives, and that work is CPU-bound, so a wall-clock
+    # bound would measure runner speed. On the controlled clock each
+    # transmission consumes 0.03 s and waiting out the budget would surface
+    # as elapsed time above the 0.5 s budget.
     started = time.monotonic()
     result = executeCommand(client, ["--dest", "!00000002", *action], timeout=0.5)
     assert isinstance(result.error, RequestRejectedError), result
