@@ -243,6 +243,13 @@ class TCPInterface(StreamInterface):
                 should_connect = False
                 with self._reconnect_lock:
                     if self._reconnect_attempt_in_progress:
+                        # A public connect() waiting for another reconnect must
+                        # still respect shutdown/fatal intent immediately instead
+                        # of polling until the in-flight attempt finishes. An
+                        # already-active socket keeps the historical silent-return
+                        # path below; StreamInterface.connect() coordinates with
+                        # close() for that case.
+                        self._raise_if_connect_blocked_locked()
                         reconnect_in_progress = True
                     elif self.socket is None:
                         self._raise_if_connect_blocked_locked()
@@ -617,6 +624,7 @@ class TCPInterface(StreamInterface):
                     reconnect_sock = self.socket
                     self._close_socket_if_current(reconnect_sock)
                 else:
+                    reconnect_socket = self.socket
                     # _start_config() can call _send_to_radio(), which drains self.queue and may
                     # block on queue space. During reader-thread reconnect this can deadlock
                     # because queue updates are also processed by the reader thread.
@@ -660,9 +668,17 @@ class TCPInterface(StreamInterface):
                         self._close_socket_if_current(reconnect_sock)
                     else:
                         with self._reconnect_lock:
-                            self._reconnect_attempts = 0
-                            self._fatal_disconnect = False
-                        reconnect_ok = True
+                            # close() or a newer socket owner may have won
+                            # while config startup was in progress. Never
+                            # report the old socket as reconnected or clear
+                            # a fatal/shutdown transition on that path.
+                            if (
+                                not self._wantExit
+                                and not self._fatal_disconnect
+                                and self.socket is reconnect_socket
+                            ):
+                                self._reconnect_attempts = 0
+                                reconnect_ok = True
 
             return reconnect_ok
         finally:
