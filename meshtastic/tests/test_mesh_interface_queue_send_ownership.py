@@ -510,3 +510,113 @@ def test_unmatched_zero_ack_does_not_discard_firmware_assigned_packet() -> None:
     runtime._correlate_queue_status_reply(_status(packet_id=0))
     assert harness.queue[0] is queued
     assert 0 not in runtime._unexpected_ack_tombstones
+
+
+@pytest.mark.unit
+def test_concurrent_zero_id_senders_keep_distinct_queue_reservations() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    entered = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+    sent: list[bytes] = []
+    first = _packet(0)
+    first.packet.decoded.payload = b"first"
+    second = _packet(0)
+    second.packet.decoded.payload = b"second"
+
+    def blocked_send(packet: mesh_pb2.ToRadio) -> None:
+        if packet is first:
+            entered.set()
+            assert release.wait(10.0)
+        sent.append(bytes(packet.packet.decoded.payload))
+
+    def sender() -> None:
+        try:
+            runtime._send_to_radio(
+                first, send_impl=blocked_send, sleep_fn=lambda _: None
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=sender)
+    thread.start()
+    try:
+        assert entered.wait(10.0)
+        runtime._send_to_radio(second, send_impl=blocked_send, sleep_fn=lambda _: None)
+        with harness.lock:
+            assert 0 not in harness.queue
+            assert all(key < 0 for key in harness.queue)
+    finally:
+        release.set()
+        thread.join(10.0)
+    assert not thread.is_alive()
+    assert errors == []
+    assert sorted(sent) == [b"first", b"second"]
+    assert not harness.queue
+
+
+@pytest.mark.unit
+def test_zero_id_deadline_drops_private_key_even_after_key_zero_backlog_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from meshtastic._deadline import _DeadlineExpired
+
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    harness.queue[0] = _packet(0)
+    incoming = _packet(0)
+    calls = [0]
+    sent: list[mesh_pb2.ToRadio] = []
+
+    def bounded_timeout(seconds: float) -> float:
+        calls[0] += 1
+        if calls[0] == 3:
+            raise _DeadlineExpired("cancel after backlog send")
+        return seconds
+
+    monkeypatch.setattr(queue_send_module, "_remaining_timeout", bounded_timeout)
+    with pytest.raises(_DeadlineExpired, match="cancel after backlog"):
+        runtime._send_to_radio(incoming, send_impl=sent.append, sleep_fn=lambda _: None)
+    assert len(sent) == 1
+    assert not harness.queue
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("uses_capacity", [True, False])
+def test_retry_of_failed_transport_packet_id_is_allowed_when_unclaimed(
+    uses_capacity: bool,
+) -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness, uses_tx_queue_capacity=lambda _: uses_capacity)
+    first = _packet(0xF1)
+
+    def fail(_packet: mesh_pb2.ToRadio) -> None:
+        raise OSError("transport lost")
+
+    with pytest.raises(OSError, match="transport lost"):
+        runtime._send_to_radio(first, send_impl=fail, sleep_fn=lambda _: None)
+    assert harness.queue[0xF1] is first
+    assert not runtime._active_send_ids
+
+    replacement = _packet(0xF1)
+    sent: list[mesh_pb2.ToRadio] = []
+    runtime._send_to_radio(replacement, send_impl=sent.append, sleep_fn=lambda _: None)
+    assert len(sent) == 1
+    assert sent[0] is replacement
+    assert not harness.queue
+    assert not runtime._retryable_failed_packets
+
+
+@pytest.mark.unit
+def test_retry_does_not_replace_unrelated_queued_packet_with_same_id() -> None:
+    harness = _QueueHarness()
+    runtime = _make_runtime(harness)
+    harness.queue[0xFB] = _packet(0xFB)
+    with pytest.raises(ValueError, match="already queued or in flight"):
+        runtime._send_to_radio(
+            _packet(0xFB), send_impl=lambda _: None, sleep_fn=lambda _: None
+        )
+    survivor = harness.queue[0xFB]
+    assert isinstance(survivor, mesh_pb2.ToRadio)
+    assert survivor.packet.id == 0xFB

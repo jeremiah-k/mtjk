@@ -64,6 +64,10 @@ class _QueueSendRuntime:
         # Distinguish a caller's queue reservation from another send loop's
         # ownership of the packet after popping it for transport I/O.
         self._active_send_id_claims: dict[int, int] = {}
+        # Permit an explicit caller retry only after an actual transport send
+        # failed and left this very packet queued, never while another sender
+        # owns its ID or for unrelated queued work.
+        self._retryable_failed_packets: dict[int, mesh_pb2.ToRadio] = {}
         # ID zero is assigned by firmware; retain distinct queued zero-ID
         # packets with private negative queue keys instead of overwriting 0.
         self._next_zero_queue_key = -1
@@ -126,6 +130,7 @@ class _QueueSendRuntime:
         """Forget completed packet capacity state. Caller must hold ``_lock``."""
         self._packet_uses_capacity_by_id.pop(packet_id, None)
         self._claimed_queue_status_by_id.pop(packet_id, None)
+        self._retryable_failed_packets.pop(packet_id, None)
 
     def _claim_active_send_id_locked(self, packet_id: int) -> None:
         """Retain a nonzero packet-ID claim through transport reconciliation."""
@@ -160,12 +165,13 @@ class _QueueSendRuntime:
         """Queue an incoming packet and return its unique internal queue key."""
         packet_id = packet.packet.id
         queue = self._get_queue()
-        if packet_id == 0 and packet_id in queue:
+        if packet_id == 0:
             while self._next_zero_queue_key in queue:
                 self._next_zero_queue_key -= 1
             packet_id = self._next_zero_queue_key
             self._next_zero_queue_key -= 1
         queue[packet_id] = packet
+        self._retryable_failed_packets.pop(packet_id, None)
         self._unexpected_ack_tombstones.pop(packet_id, None)
         self._packet_uses_capacity_by_id[packet_id] = uses_capacity
         self._claimed_queue_status_by_id.pop(packet_id, None)
@@ -182,6 +188,7 @@ class _QueueSendRuntime:
             if self._queued_packet_uses_capacity_locked(packet_id, packet):
                 continue
             queue.pop(packet_id, None)
+            self._retryable_failed_packets.pop(packet_id, None)
             return packet_id, packet
         return None
 
@@ -205,6 +212,7 @@ class _QueueSendRuntime:
             return self._pop_capacity_exempt_locked()
 
         packet_id, packet = queue.popitem(last=False)
+        self._retryable_failed_packets.pop(packet_id, None)
         self._unexpected_ack_tombstones.pop(packet_id, None)
         if queue_status is not None and isinstance(packet, mesh_pb2.ToRadio):
             if self._queued_packet_uses_capacity_locked(packet_id, packet):
@@ -246,7 +254,13 @@ class _QueueSendRuntime:
                 if packet.packet.id:
                     popped_send_ids.append(packet.packet.id)
                 resent_queue[packet_id] = packet
-                send_impl(packet)
+                try:
+                    send_impl(packet)
+                except Exception:
+                    if packet.packet.id:
+                        with self._lock:
+                            self._retryable_failed_packets[packet.packet.id] = packet
+                    raise
                 sent_packet_ids.add(packet_id)
         finally:
             try:
@@ -283,13 +297,15 @@ class _QueueSendRuntime:
         # it as an in-flight send ID. ACK correlation likewise ignores ID 0.
         owns_packet_id = incoming_id != 0
         with self._lock:
-            if owns_packet_id and (
-                incoming_id in self._active_send_ids
-                or isinstance(self._get_queue().get(incoming_id), mesh_pb2.ToRadio)
-            ):
-                raise ValueError(
-                    f"Packet ID {incoming_id:08x} is already queued or in flight"
-                )
+            if owns_packet_id:
+                queued = self._get_queue().get(incoming_id)
+                retryable = self._retryable_failed_packets.get(incoming_id)
+                if incoming_id in self._active_send_ids or (
+                    isinstance(queued, mesh_pb2.ToRadio) and queued is not retryable
+                ):
+                    raise ValueError(
+                        f"Packet ID {incoming_id:08x} is already queued or in flight"
+                    )
             queued_key = self._enqueue_packet_locked(
                 to_radio,
                 uses_capacity=uses_capacity,
@@ -380,10 +396,16 @@ class _QueueSendRuntime:
                     continue
                 if packet is not to_radio:
                     logger.debug("Resending packet ID %08x %s", packet_id, packet)
-                send_impl(packet)
+                try:
+                    send_impl(packet)
+                except Exception:
+                    if packet.packet.id:
+                        with self._lock:
+                            self._retryable_failed_packets[packet.packet.id] = packet
+                    raise
                 sent_packet_ids.add(packet_id)
         except _DeadlineExpired:
-            if to_radio.packet.id not in sent_packet_ids:
+            if queued_key not in sent_packet_ids:
                 _drop_unsent_incoming()
             raise
         finally:
