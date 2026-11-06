@@ -23,5 +23,6 @@ These guides describe the interfaces and maintenance practices of `mtjk`, a main
 - [Release procedure](maintainers/releases.md) — repository-specific release steps.
 - [Admin response contracts](internals/admin-response-contracts.md) — request correlation and callback lifecycle.
 - [PPK2 backend evaluation](maintainers/ppk2lab-evaluation.md) — a parked, dated hardware-evaluation plan, not current implementation guidance.
+- [Runtime state-ownership audit](maintainers/runtime-state-ownership-audit.md) — dated audit of lifecycle/concurrency owners (BLE runner, thread coordinator, reconnect worker, TCP reconnect, TX queue), the fixes applied, and remaining integration gaps.
 
 Project-specific test instructions remain close to their tests (for example, [`meshtastic/tests/SIMRADIO.md`](../meshtastic/tests/SIMRADIO.md)). `LICENSE.md`, `README.md`, and `AGENTS.md` remain at the repository root for repository and tooling conventions.
