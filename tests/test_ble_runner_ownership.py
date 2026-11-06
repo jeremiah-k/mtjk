@@ -161,6 +161,57 @@ def test_restart_does_not_abandon_live_stopping_owner(
     assert stopping_owner.join_calls == [0.01]
 
 
+def test_restart_reuses_in_progress_start_without_joining(
+    fresh_runner: BLECoroutineRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live pre-publication startup is not a stopped runner to join."""
+    runner = fresh_runner
+    starting_owner = _StubbedOwnerThread(retires_on_join=False)
+    ready = threading.Event()
+    ready.set()
+    starts: list[bool] = []
+
+    def _reuse_start_locked() -> threading.Event:
+        starts.append(True)
+        return ready
+
+    monkeypatch.setattr(runner, "_start_locked", _reuse_start_locked)
+    with runner._instance_lock:
+        runner._thread = cast(Any, starting_owner)
+        runner._loop = None
+        runner._stop_requested = False
+        runner._loop_ready = ready
+
+    assert runner._restart() is True
+    assert starts == [True]
+    assert starting_owner.join_calls == []
+    assert runner._thread is cast(Any, starting_owner)
+
+
+def test_restart_never_waits_on_its_own_starting_thread(
+    fresh_runner: BLECoroutineRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even the pre-publication startup path must reject a self-wait."""
+    runner = fresh_runner
+    called: list[bool] = []
+
+    def _record_start() -> threading.Event:
+        called.append(True)
+        return threading.Event()
+
+    monkeypatch.setattr(runner, "_start_locked", _record_start)
+    with runner._instance_lock:
+        runner._thread = threading.current_thread()
+        runner._loop = None
+        runner._stop_requested = False
+
+    with pytest.raises(RuntimeError, match=BLECLIENT_ERROR_LOOP_RESTART_FAILED):
+        runner._restart()
+    assert called == []
+
+
 def test_restart_joins_retiring_owner_before_starting_new_one(
     fresh_runner: BLECoroutineRunner,
     monkeypatch: pytest.MonkeyPatch,
@@ -271,16 +322,16 @@ def test_submit_and_tracking_are_atomic_against_stop(
         except Exception as exc:  # noqa: BLE001 - recorded by the assertion below
             errors.append(exc)
 
+    def _stop() -> None:
+        runner._stop()
+        stopper_finished_early.set()
+
+    stopper = threading.Thread(target=_stop, name="ownership-stopper")
     submitter = threading.Thread(target=_submit, name="ownership-submitter")
     submitter.start()
     try:
         assert submitted.wait(timeout=2.0)
 
-        def _stop() -> None:
-            runner._stop()
-            stopper_finished_early.set()
-
-        stopper = threading.Thread(target=_stop, name="ownership-stopper")
         stopper.start()
         # While submission is in flight and holds the instance lock, stop()
         # must still be blocked inside its snapshot section.
@@ -293,7 +344,8 @@ def test_submit_and_tracking_are_atomic_against_stop(
     finally:
         submit_release.set()
         submitter.join(timeout=2.0)
-        stopper.join(timeout=2.0)
+        if stopper.ident is not None:
+            stopper.join(timeout=2.0)
         with runner._instance_lock:
             runner._loop = None
             runner._thread = None

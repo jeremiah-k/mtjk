@@ -717,23 +717,33 @@ class BLECoroutineRunner:
         Raises
         ------
         RuntimeError
-            If the event loop fails to become ready within the configured timeout.
+            If the event loop fails to become ready, a previous owner cannot
+            exit within the shutdown timeout, or restart is called from that
+            owner thread while teardown is in progress.
         """
         with self._instance_lock:
             # _is_running uses the reentrant instance lock.
             if self._is_running:
                 return False
             previous_thread = self._thread
+            previous_loop = self._loop
+            stop_requested = self._stop_requested
 
+        # A live owner without a published loop and without a shutdown request
+        # is still starting. Reuse its readiness event rather than joining a
+        # thread that is about to enter run_forever().
+        startup_in_progress = previous_loop is None and not stop_requested
         # A loop may have stopped running while its thread is still cancelling
         # BLE tasks and closing native resources. Never replace that live owner
         # with another thread: wait outside the lock so cleanup can finish.
         if previous_thread is not None and previous_thread.is_alive():
             if previous_thread is threading.current_thread():
+                # Never wait for readiness or join the owner on that owner.
                 raise RuntimeError(BLECLIENT_ERROR_LOOP_RESTART_FAILED)
-            previous_thread.join(timeout=BLEConfig.RUNNER_SHUTDOWN_TIMEOUT_SECONDS)
-            if previous_thread.is_alive():
-                raise RuntimeError(BLECLIENT_ERROR_LOOP_RESTART_FAILED)
+            if not startup_in_progress:
+                previous_thread.join(timeout=BLEConfig.RUNNER_SHUTDOWN_TIMEOUT_SECONDS)
+                if previous_thread.is_alive():
+                    raise RuntimeError(BLECLIENT_ERROR_LOOP_RESTART_FAILED)
 
         with self._instance_lock:
             if self._is_running:
