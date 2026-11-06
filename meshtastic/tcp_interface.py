@@ -242,6 +242,11 @@ class TCPInterface(StreamInterface):
             with self._reconnect_attempt_lock:
                 should_connect = False
                 with self._reconnect_lock:
+                    if self.socket is not None:
+                        # The historical connect() contract is a silent return
+                        # for an installed socket, even if a reconnect is still
+                        # starting config or shutdown was subsequently requested.
+                        return
                     if self._reconnect_attempt_in_progress:
                         # A public connect() waiting for another reconnect must
                         # still respect shutdown/fatal intent immediately instead
@@ -251,11 +256,9 @@ class TCPInterface(StreamInterface):
                         # close() for that case.
                         self._raise_if_connect_blocked_locked()
                         reconnect_in_progress = True
-                    elif self.socket is None:
+                    else:
                         self._raise_if_connect_blocked_locked()
                         should_connect = True
-                    else:
-                        return
                 if should_connect:
                     self.myConnect()
                     return
@@ -277,12 +280,17 @@ class TCPInterface(StreamInterface):
         """
         if sock is None:
             return False
-        self._close_socket_handle(sock)
+        # Invalidate the socket under the same lock as reconnect success before
+        # performing native close. Closing first left a window where reconnect
+        # could report a closed handle as its current successful owner.
         with self._reconnect_lock:
-            if self.socket is sock:
+            is_current = self.socket is sock
+            if is_current:
                 self.socket = None
-                return True
-        return False
+        # A replaced attempt must retire only its own old handle, never the
+        # socket that another thread has since installed.
+        self._close_socket_handle(sock)
+        return is_current
 
     def myConnect(self) -> None:
         """Establish a TCP connection to the instance hostname and port.
@@ -664,8 +672,9 @@ class TCPInterface(StreamInterface):
                             self.hostname,
                             config_ex,
                         )
-                        reconnect_sock = self.socket
-                        self._close_socket_if_current(reconnect_sock)
+                        # Startup belongs to the socket adopted *before* the
+                        # blocking config step. Do not close a replacement owner.
+                        self._close_socket_if_current(reconnect_socket)
                     else:
                         with self._reconnect_lock:
                             # close() or a newer socket owner may have won

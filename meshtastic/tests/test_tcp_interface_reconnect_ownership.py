@@ -7,6 +7,7 @@ immediately, and an already-active socket keeps the historical silent-return
 path in ``_connect_socket_if_needed()``.
 """
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -211,5 +212,102 @@ def test_successful_reconnect_resets_retry_counter() -> None:
         assert iface._reconnect_attempts == 0
         assert iface.socket is reconnect_socket
         assert iface._reconnect_attempt_in_progress is False
+    finally:
+        iface.close()
+
+
+def test_failed_config_does_not_close_newer_socket_owner() -> None:
+    iface = _make_reconnect_test_interface()
+    adopted = MagicMock()
+    successor = MagicMock()
+    try:
+
+        def adopt() -> None:
+            iface.socket = adopted
+
+        def fail_after_handoff() -> None:
+            iface.socket = successor
+            raise OSError("config failed")
+
+        with (
+            patch.object(iface, "myConnect", side_effect=adopt),
+            patch.object(iface, "_start_config", side_effect=fail_after_handoff),
+        ):
+            assert iface._attempt_reconnect() is False
+        adopted.close.assert_called()
+        successor.close.assert_not_called()
+        assert iface.socket is successor
+    finally:
+        iface.close()
+
+
+def test_native_close_in_progress_cannot_report_success() -> None:
+    iface = _make_reconnect_test_interface()
+    adopted = MagicMock()
+    config_entered = threading.Event()
+    close_started = threading.Event()
+    release_config = threading.Event()
+    release_close = threading.Event()
+    outcome: list[bool] = []
+    try:
+
+        def adopt() -> None:
+            iface.socket = adopted
+
+        def config() -> None:
+            config_entered.set()
+            assert release_config.wait(10.0)
+
+        def slow_close(sock: object) -> None:
+            assert sock is adopted
+            close_started.set()
+            assert release_close.wait(10.0)
+            adopted.close()
+
+        with (
+            patch.object(iface, "myConnect", side_effect=adopt),
+            patch.object(iface, "_start_config", side_effect=config),
+            patch.object(iface, "_close_socket_handle", side_effect=slow_close),
+        ):
+            attempt = threading.Thread(
+                target=lambda: outcome.append(iface._attempt_reconnect())
+            )
+            attempt.start()
+            assert config_entered.wait(10.0)
+            closer = threading.Thread(
+                target=lambda: iface._close_socket_if_current(adopted)
+            )
+            closer.start()
+            try:
+                assert close_started.wait(10.0)
+                # Native close has started, but still not completed: the socket
+                # must already be invalidated for reconnect's success check.
+                assert iface.socket is None
+                release_config.set()
+                attempt.join(10.0)
+                assert not attempt.is_alive()
+                assert outcome == [False]
+            finally:
+                release_config.set()
+                release_close.set()
+                closer.join(10.0)
+        assert not closer.is_alive()
+    finally:
+        release_config.set()
+        release_close.set()
+        iface.close()
+
+
+def test_connect_with_installed_socket_is_noop_even_during_shutdown_intent() -> None:
+    iface = _make_reconnect_test_interface()
+    try:
+        current = MagicMock()
+        iface.socket = current
+        iface._wantExit = True
+        iface._reconnect_attempt_in_progress = True
+        with patch.object(iface, "myConnect") as connect:
+            iface._connect_socket_if_needed()
+            connect.assert_not_called()
+        assert iface.socket is current
     finally:
         iface.close()
