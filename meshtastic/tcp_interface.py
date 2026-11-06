@@ -242,13 +242,23 @@ class TCPInterface(StreamInterface):
             with self._reconnect_attempt_lock:
                 should_connect = False
                 with self._reconnect_lock:
+                    if self.socket is not None:
+                        # The historical connect() contract is a silent return
+                        # for an installed socket, even if a reconnect is still
+                        # starting config or shutdown was subsequently requested.
+                        return
                     if self._reconnect_attempt_in_progress:
+                        # A public connect() waiting for another reconnect must
+                        # still respect shutdown/fatal intent immediately instead
+                        # of polling until the in-flight attempt finishes. An
+                        # already-active socket keeps the historical silent-return
+                        # path below; StreamInterface.connect() coordinates with
+                        # close() for that case.
+                        self._raise_if_connect_blocked_locked()
                         reconnect_in_progress = True
-                    elif self.socket is None:
+                    else:
                         self._raise_if_connect_blocked_locked()
                         should_connect = True
-                    else:
-                        return
                 if should_connect:
                     self.myConnect()
                     return
@@ -270,12 +280,17 @@ class TCPInterface(StreamInterface):
         """
         if sock is None:
             return False
-        self._close_socket_handle(sock)
+        # Invalidate the socket under the same lock as reconnect success before
+        # performing native close. Closing first left a window where reconnect
+        # could report a closed handle as its current successful owner.
         with self._reconnect_lock:
-            if self.socket is sock:
+            is_current = self.socket is sock
+            if is_current:
                 self.socket = None
-                return True
-        return False
+        # A replaced attempt must retire only its own old handle, never the
+        # socket that another thread has since installed.
+        self._close_socket_handle(sock)
+        return is_current
 
     def myConnect(self) -> None:
         """Establish a TCP connection to the instance hostname and port.
@@ -617,6 +632,7 @@ class TCPInterface(StreamInterface):
                     reconnect_sock = self.socket
                     self._close_socket_if_current(reconnect_sock)
                 else:
+                    reconnect_socket = self.socket
                     # _start_config() can call _send_to_radio(), which drains self.queue and may
                     # block on queue space. During reader-thread reconnect this can deadlock
                     # because queue updates are also processed by the reader thread.
@@ -656,13 +672,22 @@ class TCPInterface(StreamInterface):
                             self.hostname,
                             config_ex,
                         )
-                        reconnect_sock = self.socket
-                        self._close_socket_if_current(reconnect_sock)
+                        # Startup belongs to the socket adopted *before* the
+                        # blocking config step. Do not close a replacement owner.
+                        self._close_socket_if_current(reconnect_socket)
                     else:
                         with self._reconnect_lock:
-                            self._reconnect_attempts = 0
-                            self._fatal_disconnect = False
-                        reconnect_ok = True
+                            # close() or a newer socket owner may have won
+                            # while config startup was in progress. Never
+                            # report the old socket as reconnected or clear
+                            # a fatal/shutdown transition on that path.
+                            if (
+                                not self._wantExit
+                                and not self._fatal_disconnect
+                                and self.socket is reconnect_socket
+                            ):
+                                self._reconnect_attempts = 0
+                                reconnect_ok = True
 
             return reconnect_ok
         finally:
