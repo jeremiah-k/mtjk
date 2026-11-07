@@ -2,6 +2,9 @@
 
 Run `mtjk --list-interfaces` to list local NIC names, assigned addresses, and
 Linux BlueZ controllers. Inventory does not scan for or connect to radios.
+Malformed or unassigned interface IPs are omitted; a controller with incomplete
+BlueZ properties is shown with a fallback name and unknown address/power state
+rather than aborting the entire listing.
 
 Select a Bluetooth controller for ordinary BLE commands or scans:
 
@@ -45,6 +48,8 @@ one address from the selected NIC. It prefers the URI's IPv4/IPv6 family and
 otherwise uses an available address. This creates one listener address;
 it does not bind all addresses on the interface. Non-loopback binds still
 require `--interface-proxy-allow-public`, checked against the selected address.
+A selected listener that matches the upstream TCP endpoint and port is refused
+rather than recursively connecting to itself.
 
 For BLE-to-BLE relays, give the central and peripheral separate controllers
 when the hardware cannot support both roles concurrently. A selected controller
