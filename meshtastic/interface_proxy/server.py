@@ -34,6 +34,7 @@ def _safe_listener_host(host: str, allow_public: bool) -> str:
         return "127.0.0.1"
     return host
 
+
 def _validate_tcp_listener(host: str, allow_public: bool) -> None:
     """Check the resolved bind address, including when NIC addresses change."""
     if allow_public:

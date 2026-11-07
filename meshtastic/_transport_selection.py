@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import ipaddress
 import re
+import selectors
 import socket
 import sys
+import time
 
 import ifaddr
 
@@ -135,7 +138,11 @@ def _connect_tcp(
     aborted TCPInterface build never waits out the full connect timeout.
     """
     # pylint: disable=import-outside-toplevel
-    from meshtastic.cancellation import _check_cancelled
+    from meshtastic.cancellation import (
+        _IN_PROGRESS_CONNECT_ERRORS,
+        _POLL_SECONDS,
+        _check_cancelled,
+    )
 
     sources = _network_addresses(interface)
     error: OSError | None = None
@@ -151,13 +158,49 @@ def _connect_tcp(
             sock = None
             try:
                 sock = socket.socket(family, kind, protocol)
-                if timeout is not None:
-                    sock.settimeout(timeout)
                 local = socket.getaddrinfo(
                     source, 0, family, socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST
                 )[0][4]
                 sock.bind(local)
-                sock.connect(destination)
+                # Match cancellation._connect_socket: a blocking connect() can
+                # stall shutdown until the full per-address timeout expires.
+                sock.setblocking(False)
+                code = sock.connect_ex(destination)
+                if code not in (0, errno.EISCONN):
+                    if code not in _IN_PROGRESS_CONNECT_ERRORS:
+                        raise OSError(code, "TCP connection failed")
+                    effective_timeout = (
+                        socket.getdefaulttimeout() if timeout is None else timeout
+                    )
+                    deadline = (
+                        None
+                        if effective_timeout is None
+                        else time.monotonic() + effective_timeout
+                    )
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(sock, selectors.EVENT_WRITE)
+                        while True:
+                            _check_cancelled()
+                            remaining = (
+                                None
+                                if deadline is None
+                                else deadline - time.monotonic()
+                            )
+                            if remaining is not None and remaining <= 0:
+                                raise TimeoutError("TCP connection timed out")
+                            if selector.select(
+                                _POLL_SECONDS
+                                if remaining is None
+                                else min(_POLL_SECONDS, remaining)
+                            ):
+                                code = sock.getsockopt(
+                                    socket.SOL_SOCKET, socket.SO_ERROR
+                                )
+                                if code:
+                                    raise OSError(code, "TCP connection failed")
+                                break
+                _check_cancelled()
+                sock.setblocking(True)
                 return sock
             except OSError as exc:
                 error = exc

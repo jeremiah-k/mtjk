@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import errno
+import selectors
 import socket
 import threading
 from typing import Any
@@ -141,14 +142,97 @@ def test_sync_tcp_falls_back_when_socket_family_is_unavailable(
         ),
     )
     connected = MagicMock()
+    connected.connect_ex.return_value = 0
     factory = MagicMock(
         side_effect=[OSError(errno.EAFNOSUPPORT, "IPv6 unavailable"), connected]
     )
     monkeypatch.setattr(socket, "socket", factory)
     assert selection._connect_tcp("radio", 4403, "loop", 2) is connected
     connected.bind.assert_called_once_with(("127.0.0.1", 0))
-    connected.connect.assert_called_once_with(("127.0.0.1", 4403))
+    connected.connect_ex.assert_called_once_with(("127.0.0.1", 4403))
     connected.close.assert_not_called()
+
+
+def test_sync_tcp_cancellation_during_connect_closes_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful OS connect must not outlive constructor cancellation."""
+    import meshtastic.cancellation as cancellation
+
+    connected = False
+    sock = MagicMock()
+
+    def connect(_destination: object) -> int:
+        nonlocal connected
+        connected = True
+        return 0
+
+    def check_cancelled() -> None:
+        if connected:
+            raise cancellation.ConnectionCancelledError()
+
+    sock.connect_ex.side_effect = connect
+    monkeypatch.setattr(selection, "_network_addresses", lambda _name: ["127.0.0.1"])
+    monkeypatch.setattr(cancellation, "_check_cancelled", check_cancelled)
+    monkeypatch.setattr(socket, "socket", lambda *_args: sock)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, port))
+        ],
+    )
+    with pytest.raises(cancellation.ConnectionCancelledError):
+        selection._connect_tcp("127.0.0.1", 4403, "loop", 2)
+    sock.connect_ex.assert_called_once()
+    sock.close.assert_called_once()
+
+
+def test_selected_tcp_cancels_during_pending_nonblocking_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation during a selected-source SYN cannot wait for connectTimeout."""
+    import meshtastic.cancellation as cancellation
+
+    waiting = False
+    sock = MagicMock()
+    sock.connect_ex.return_value = errno.EINPROGRESS
+
+    def check_cancelled() -> None:
+        if waiting:
+            raise cancellation.ConnectionCancelledError()
+
+    class Selector:
+        def __enter__(self) -> Selector:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def register(self, *_args: object) -> None:
+            pass
+
+        def select(self, _timeout: float) -> list[object]:
+            nonlocal waiting
+            waiting = True
+            return []
+
+    monkeypatch.setattr(selection, "_network_addresses", lambda _name: ["127.0.0.1"])
+    monkeypatch.setattr(cancellation, "_check_cancelled", check_cancelled)
+    monkeypatch.setattr(selectors, "DefaultSelector", Selector)
+    monkeypatch.setattr(socket, "socket", lambda *_args: sock)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, port))
+        ],
+    )
+    with pytest.raises(cancellation.ConnectionCancelledError):
+        selection._connect_tcp("127.0.0.1", 4403, "loop", 300)
+    assert waiting
+    sock.close.assert_called_once()
+    sock.connect_ex.assert_called_once()
 
 
 @pytest.mark.parametrize(
