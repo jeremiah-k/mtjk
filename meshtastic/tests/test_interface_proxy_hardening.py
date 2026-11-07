@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import errno
 import socket
-import socket
 import sys
 import types
 from typing import Any
@@ -39,6 +38,23 @@ def test_tcp_proxy_refuses_connecting_to_its_own_listener(
     """A same-port self-loop must fail before binding any listener."""
     with pytest.raises(ValueError, match="same endpoint"):
         asyncio.run(server.run_tcp_proxy(ProxyOptions(upstream, listener)))
+
+
+@pytest.mark.parametrize(
+    ("upstream", "listener"),
+    [
+        ("tcp:127.0.0.1:4403", "tcp:0.0.0.0:4403"),
+        ("tcp:localhost:4403", "tcp:0.0.0.0:4403"),
+        ("tcp:[::1]:4403", "tcp:[::]:4403"),
+    ],
+)
+def test_public_wildcard_listener_cannot_proxy_to_own_loopback(
+    upstream: str, listener: str
+) -> None:
+    with pytest.raises(ValueError, match="same endpoint"):
+        asyncio.run(
+            server.run_tcp_proxy(ProxyOptions(upstream, listener, allow_public=True))
+        )
 
 
 def test_tcp_proxy_permits_distinct_upstream_port(

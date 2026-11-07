@@ -83,6 +83,25 @@ def _reject_self_proxy(upstream: str, listen_host: str, listen_port: int) -> Non
     if _hosts(source_host) & _hosts(listen_host):
         raise ValueError("Proxy TCP input and output cannot be the same endpoint")
 
+    # Wildcard listeners also own their local loopback address. Reject a
+    # same-port loopback upstream before it can connect to this proxy itself.
+    try:
+        listener_ip = ipaddress.ip_address(listen_host)
+    except ValueError:
+        return
+    if not listener_ip.is_unspecified:
+        return
+    try:
+        source_ip = ipaddress.ip_address(source_host)
+    except ValueError:
+        if source_host.casefold() == "localhost":
+            raise ValueError(
+                "Proxy TCP input and output cannot be the same endpoint"
+            ) from None
+    else:
+        if source_ip.is_loopback and listener_ip.version in (6, source_ip.version):
+            raise ValueError("Proxy TCP input and output cannot be the same endpoint")
+
 
 @dataclass(frozen=True)
 class ProxyOptions:
