@@ -689,15 +689,28 @@ def test_ble_upstream_idle_timeout_keeps_connection_alive() -> None:
         from unittest.mock import AsyncMock
 
         client = MagicMock()
-        client.read_gatt_char = AsyncMock(return_value=b"")
+        second_read = asyncio.Event()
+        reads = 0
+
+        async def empty_read(_uuid: str) -> bytes:
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                second_read.set()
+            return b""
+
+        client.read_gatt_char = AsyncMock(side_effect=empty_read)
         client.disconnect = AsyncMock()
         channel = BLECentralChannel(client)
+        channel._wake.set()
         channel._receive_task = asyncio.create_task(channel._poll_radio())
         try:
-            await asyncio.sleep(0.46)
+            # Prove a second idle polling cycle, not merely that a timer
+            # happened to fire within a narrow scheduling margin.
+            await asyncio.wait_for(second_read.wait(), 2)
             assert not channel._disconnected.is_set()
             assert channel._receive_error is None
-            assert client.read_gatt_char.await_count >= 1
+            assert client.read_gatt_char.await_count >= 2
         finally:
             await channel.close()
 
@@ -866,7 +879,7 @@ def test_pty_waits_for_initial_client_but_reports_session_close() -> None:
     async def scenario() -> None:
         channel = PTYChannel.create()
         try:
-            with pytest.raises(TimeoutError):
+            with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(channel.recv(), 0.02)
             slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
             try:
@@ -887,6 +900,8 @@ def test_pty_waits_for_initial_client_but_reports_session_close() -> None:
         OSError("port busy"),
         RuntimeError("missing bless"),
         OverflowError("BLE peripheral queue overflow"),
+        ValueError("listener address changed during startup"),
+        asyncio.TimeoutError("BLE upstream connect timed out"),
     ],
 )
 def test_proxy_cli_reports_transport_failure(
@@ -994,7 +1009,7 @@ def test_pty_silent_client_close_does_not_end_session() -> None:
         try:
             slave = os.open(channel.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
             os.close(slave)
-            with pytest.raises(TimeoutError):
+            with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(channel.recv(), 0.05)
         finally:
             await channel.close()

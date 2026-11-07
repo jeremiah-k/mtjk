@@ -32,8 +32,13 @@ mtjk --interface-proxy-in tcp:192.168.1.20:4403 \
 # The proxy prints a temporary path such as /dev/pts/4; use that path:
 mtjk --port /dev/pts/4 --info
 
-# Expose a real BLE radio locally through TCP.
+# Expose a real BLE radio locally through TCP (Linux/Windows device address).
 mtjk --interface-proxy-in ble:AA:BB:CC:DD:EE:FF \
+     --interface-proxy-out tcp:127.0.0.1:4403
+
+# macOS: use the CoreBluetooth device UUID, not the radio's MAC address.
+# Obtain that UUID with `mtjk --ble-scan` on the same Mac.
+mtjk --interface-proxy-in ble:12345678-1234-1234-1234-123456789ABC \
      --interface-proxy-out tcp:127.0.0.1:4403
 
 # Advertise a USB radio as an experimental Meshtastic BLE peripheral.
@@ -48,10 +53,17 @@ mtjk --interface-proxy-in serial:/dev/ttyUSB0 \
 TCP endpoint syntax is `tcp:HOST:PORT`; use brackets for IPv6, for example
 `tcp:[::1]:4403`. Only one downstream TCP client can own the source radio; an
 additional connection is immediately closed. A new TCP session creates a new
-upstream connection. TCP binds to loopback unless explicitly allowed with
+upstream connection. Accepted sockets enable best-effort TCP keepalive (short
+probes where supported), so vanished clients do not permanently occupy the
+single-radio session; detection still depends on the host TCP stack. TCP binds to loopback unless explicitly allowed with
 `--interface-proxy-allow-public`. Without that flag, a `localhost`
 listener binds numeric IPv4 loopback (`127.0.0.1`) rather than trusting the
 system hostname resolver; use `tcp:[::1]:PORT` for explicit IPv6 loopback.
+
+Open the advertised PTY slave promptly: while no client consumes its input,
+Linux can fill the kernel's PTY buffer. A write blocked for more than five
+seconds terminates the proxy session; restart the proxy and reconnect the
+client if this happens. Only one client should open the PTY slave at a time.
 
 ## On-wire handling
 
@@ -67,8 +79,10 @@ read backpressure when downstream delivery is slow. The experimental BLE
 peripheral applies the same backpressure on its 128-packet `FROMRADIO` queue
 when the connected central reads slowly. Backpressure bounds host
 memory, but cannot guarantee that a radio's own smaller queue will never fill;
-slow downstream clients should be avoided. Already-buffered messages drain
-before disconnect is reported. A failed or over-limit GATT read is surfaced as
+slow downstream clients should be avoided. The BLE-_central_ upstream drains
+its received buffer before reporting disconnect; a disconnect terminates the
+proxy bridge without draining the BLE _peripheral_ mailbox, so unread outgoing
+messages can be lost. A failed or over-limit GATT read is surfaced as
 a session error rather than mistaken for a clean device disconnect.
 
 The BLE service (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`) and its three
