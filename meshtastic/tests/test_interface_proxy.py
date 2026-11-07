@@ -180,6 +180,53 @@ def test_tcp_proxy_forwards_and_rejects_second_client(
     asyncio.run(scenario())
 
 
+def test_localhost_tcp_proxy_binds_literal_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An overridden localhost resolver must never expose raw radio access."""
+    from unittest.mock import AsyncMock
+
+    async def scenario() -> None:
+        listening = asyncio.Event()
+        observed: list[tuple[str, int]] = []
+
+        async def start_server(_handler: Any, host: str, port: int) -> Any:
+            observed.append((host, port))
+            listening.set()
+            return types.SimpleNamespace(close=lambda: None, wait_closed=AsyncMock())
+
+        monkeypatch.setattr(asyncio, "start_server", start_server)
+        task = asyncio.create_task(
+            run_tcp_proxy(ProxyOptions("serial:/ignored", "tcp:localhost:4403"))
+        )
+        try:
+            await asyncio.wait_for(listening.wait(), 1)
+            assert observed == [("127.0.0.1", 4403)]
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+
+def test_direct_tcp_proxy_entrypoint_checks_public_bind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct run_tcp_proxy callers cannot bypass serve() exposure checks."""
+    called = False
+
+    async def start_server(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        raise AssertionError("must not bind")
+
+    monkeypatch.setattr(asyncio, "start_server", start_server)
+    with pytest.raises(ValueError, match="allow-public"):
+        asyncio.run(run_tcp_proxy(ProxyOptions("serial:/ignored", "tcp:0.0.0.0:4403")))
+    assert not called
+
+
 @pytest.mark.skipif(os.name != "posix", reason="PTY is available on POSIX")
 def test_pty_virtual_serial_roundtrip() -> None:
     """A real PTY slave exposes the same framed Meshtastic wire protocol."""
@@ -239,6 +286,8 @@ def test_ble_peripheral_gatt_shape_and_mailbox(
         readable = 16
         writeable = 32
 
+    servers: list[Any] = []
+
     async def scenario() -> None:
         class Char:
             def __init__(self, uuid: str) -> None:
@@ -288,6 +337,7 @@ def test_ble_peripheral_gatt_shape_and_mailbox(
         proxy = await BLEPeripheralChannel.start("Meshtastic_0123")
         try:
             server = proxy.server
+            servers.append(server)
             assert server.service == SERVICE_UUID
             assert set(server.characteristics) == {
                 TORADIO_UUID,
@@ -322,6 +372,12 @@ def test_ble_peripheral_gatt_shape_and_mailbox(
             assert server.stopped
 
     asyncio.run(scenario())
+    # Native BLE backends can invoke callbacks after asyncio.run closed its loop.
+    # Late valid and invalid writes must be ignored rather than crashing D-Bus.
+    server = servers[0]
+    characteristic = server.get_characteristic(TORADIO_UUID)
+    server.write_request_func(characteristic, b"\x08\x02")
+    server.write_request_func(characteristic, b"")
 
 
 def test_proxy_cli_routes_without_normal_connection(

@@ -238,10 +238,14 @@ class BLEPeripheralChannel:
             try:
                 payload = validate_payload(bytes(value))
             except ValueError as exc:
-                channel._loop.call_soon_threadsafe(setattr, channel, "_fatal", exc)
+                # Bless can deliver late callbacks after the owned event loop
+                # has closed; those must not crash its D-Bus dispatcher.
+                with contextlib.suppress(RuntimeError):
+                    channel._loop.call_soon_threadsafe(setattr, channel, "_fatal", exc)
                 return
             _LOG.debug("BLE TORADIO write received: %d bytes", len(payload))
-            channel._loop.call_soon_threadsafe(_enqueue, payload)
+            with contextlib.suppress(RuntimeError):
+                channel._loop.call_soon_threadsafe(_enqueue, payload)
 
         server.read_request_func = _on_read
         server.write_request_func = _on_write

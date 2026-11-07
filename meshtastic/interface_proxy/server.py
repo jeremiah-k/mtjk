@@ -18,6 +18,18 @@ from meshtastic.interface_proxy.endpoints import BLEPeripheralChannel, PTYChanne
 _LOG = logging.getLogger(__name__)
 
 
+def _safe_listener_host(host: str, allow_public: bool) -> str:
+    """Bind literal loopback for an opt-in-free ``localhost`` listener.
+
+    System resolver overrides can map ``localhost`` to a routable address.
+    Avoid passing the name to start_server when radio control is unauthenticated.
+    Explicit IPv6 loopback (``[::1]``) remains available in the URI.
+    """
+    if not allow_public and host.lower() == "localhost":
+        return "127.0.0.1"
+    return host
+
+
 @dataclass(frozen=True)
 class ProxyOptions:
     """One upstream and one exposed downstream transport endpoint."""
@@ -99,7 +111,11 @@ async def bridge(upstream: PacketChannel, downstream: PacketChannel) -> None:
 
 async def run_tcp_proxy(options: ProxyOptions) -> None:
     """Expose one radio to one TCP client at a time; reject other clients."""
+    # This entrypoint is also callable without serve(); enforce the exposure
+    # gate and never let the system resolver widen a localhost-only listener.
+    options.validate()
     host, port = parse_tcp_endpoint(options.downstream[4:])
+    host = _safe_listener_host(host, options.allow_public)
     active_client = False
     sessions: set[asyncio.Task[None]] = set()
 

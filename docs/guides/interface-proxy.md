@@ -49,7 +49,9 @@ TCP endpoint syntax is `tcp:HOST:PORT`; use brackets for IPv6, for example
 `tcp:[::1]:4403`. Only one downstream TCP client can own the source radio; an
 additional connection is immediately closed. A new TCP session creates a new
 upstream connection. TCP binds to loopback unless explicitly allowed with
-`--interface-proxy-allow-public`.
+`--interface-proxy-allow-public`. Without that flag, a `localhost`
+listener binds numeric IPv4 loopback (`127.0.0.1`) rather than trusting the
+system hostname resolver; use `tcp:[::1]:PORT` for explicit IPv6 loopback.
 
 ## On-wire handling
 
