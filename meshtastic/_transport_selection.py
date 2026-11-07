@@ -50,12 +50,19 @@ async def _list_ble_adapters() -> list[tuple[str, str, str, bool]]:
         for path, interfaces in reply.body[0].items():
             properties = interfaces.get("org.bluez.Adapter1")
             if properties is not None:
+                # BlueZ adapters can appear in an ObjectManager snapshot
+                # before every property has been populated. Keep inventory
+                # readable instead of failing on a transient missing field.
+                name = str(path.rsplit("/", 1)[-1])
+                alias = properties.get("Alias")
+                address = properties.get("Address")
+                powered = properties.get("Powered")
                 result.append(
                     (
-                        str(path.rsplit("/", 1)[-1]),
-                        str(properties["Alias"].value),
-                        str(properties["Address"].value),
-                        bool(properties["Powered"].value),
+                        name,
+                        str(alias.value) if alias is not None else name,
+                        str(address.value) if address is not None else "",
+                        bool(powered.value) if powered is not None else False,
                     )
                 )
         return sorted(result)
@@ -77,7 +84,13 @@ def _list_network_interfaces() -> list[tuple[str, str, list[str]]]:
                 value, _flow, scope = address.ip
                 if scope:
                     value = f"{value}%{scope}"
-            if not ipaddress.ip_address(value).is_unspecified:
+            try:
+                assigned = ipaddress.ip_address(value)
+            except ValueError:
+                # Some platform adapters expose non-IP values (or malformed
+                # scope strings). One bad address must not break --list-interfaces.
+                continue
+            if not assigned.is_unspecified:
                 addresses.append(value)
         result.append((adapter.name, adapter.nice_name, addresses))
     return sorted(result)
