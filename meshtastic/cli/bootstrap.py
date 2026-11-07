@@ -622,7 +622,14 @@ def run_common(
             asyncio.run(serve(options))
         except KeyboardInterrupt:
             logger.info("Exiting interface proxy due to keyboard interrupt")
-        except (OSError, RuntimeError, OverflowError, BleakError) as exc:
+        except (
+            OSError,
+            asyncio.TimeoutError,
+            RuntimeError,
+            OverflowError,
+            BleakError,
+            ValueError,
+        ) as exc:
             _terminate_cli(hooks, f"Interface proxy failed: {exc}", 1)
         return
     if (

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import socket
 from dataclasses import dataclass
 
 from meshtastic.interface_proxy.channels import (
@@ -28,6 +29,59 @@ def _safe_listener_host(host: str, allow_public: bool) -> str:
     if not allow_public and host.lower() == "localhost":
         return "127.0.0.1"
     return host
+
+
+def _enable_tcp_keepalive(writer: asyncio.StreamWriter) -> None:
+    """Detect abandoned single-owner sessions without changing the wire protocol.
+
+    Socket keepalive is best-effort: optional probe controls are not available
+    on every OS, and some transports expose no socket through the writer.
+    """
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        _LOG.debug("Could not enable TCP keepalive for proxy client", exc_info=True)
+        return
+    idle = getattr(socket, "TCP_KEEPIDLE", None)
+    if idle is None:
+        idle = getattr(socket, "TCP_KEEPALIVE", None)
+    for option, value in (
+        (idle, 30),
+        (getattr(socket, "TCP_KEEPINTVL", None), 10),
+        (getattr(socket, "TCP_KEEPCNT", None), 3),
+    ):
+        if option is not None:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+            except OSError:
+                _LOG.debug("TCP keepalive probe option %s unavailable", option)
+
+
+def _reject_self_proxy(upstream: str, listen_host: str, listen_port: int) -> None:
+    """Reject a listener that would connect upstream to its own TCP port.
+
+    Loopback hostname aliases require special treatment because a caller may
+    request ``localhost`` while the safe listener binds numeric loopback.
+    """
+    if not upstream.startswith("tcp:"):
+        return
+    source_host, source_port = parse_tcp_endpoint(upstream[4:])
+    if source_port != listen_port:
+        return
+
+    def _hosts(host: str) -> set[str]:
+        if host.lower() == "localhost":
+            return {"127.0.0.1", "::1"}
+        try:
+            return {str(ipaddress.ip_address(host))}
+        except ValueError:
+            return {host.casefold()}
+
+    if _hosts(source_host) & _hosts(listen_host):
+        raise ValueError("Proxy TCP input and output cannot be the same endpoint")
 
 
 @dataclass(frozen=True)
@@ -56,7 +110,10 @@ class ProxyOptions:
         if self.upstream.startswith("ble:") and not self.upstream[4:]:
             raise ValueError("BLE upstream address cannot be empty")
         if self.downstream.startswith("tcp:"):
-            host, _port = parse_tcp_endpoint(self.downstream[4:])
+            host, port = parse_tcp_endpoint(self.downstream[4:])
+            _reject_self_proxy(
+                self.upstream, _safe_listener_host(host, self.allow_public), port
+            )
             if not self.allow_public:
                 try:
                     loopback = ipaddress.ip_address(host).is_loopback
@@ -116,6 +173,7 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
     options.validate()
     host, port = parse_tcp_endpoint(options.downstream[4:])
     host = _safe_listener_host(host, options.allow_public)
+    _reject_self_proxy(options.upstream, host, port)
     active_client = False
     sessions: set[asyncio.Task[None]] = set()
 
@@ -124,6 +182,9 @@ async def run_tcp_proxy(options: ProxyOptions) -> None:
     ) -> None:
         nonlocal active_client
         downstream = StreamChannel(reader, writer)
+        # An absent FIN/RST after Wi-Fi loss must not monopolize the only
+        # upstream radio indefinitely. Keepalive setup performs no awaits.
+        _enable_tcp_keepalive(writer)
         # Check and claim synchronously on the event loop; no await in between.
         if active_client:
             _LOG.warning("Rejecting additional TCP proxy client")
