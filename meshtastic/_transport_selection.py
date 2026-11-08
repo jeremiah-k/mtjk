@@ -26,7 +26,8 @@ def _validate_ble_adapter(adapter: str | None) -> None:
 async def _list_ble_adapters() -> list[tuple[str, str, str, bool]]:
     if sys.platform != "linux":
         return []
-    # Linux Bleak already depends on dbus-fast; other platforms do not need it.
+    # dbus-fast is a declared Linux runtime dependency; other platforms do not
+    # need it.
     # pylint: disable=import-outside-toplevel
     from dbus_fast import Message, MessageType
     from dbus_fast.aio import MessageBus
