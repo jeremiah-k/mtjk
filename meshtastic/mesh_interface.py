@@ -84,6 +84,15 @@ from meshtastic.util import (
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = 300
+CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS = 15.0
+"""Upper bound on how long close() waits for an in-flight heartbeat send.
+
+A heartbeat frame is written by the transport in a single bounded call: serial
+writes use SERIAL_WRITE_TIMEOUT (3.0s) and TCP writes use a select-guarded
+WRITE_PROGRESS_TIMEOUT_SECONDS (10.0s) window per send. Fifteen seconds sits
+comfortably above the largest transport write bound, so a healthy transport
+always drains in flight and the wait only trips when the transport is wedged.
+"""
 CONNECT_WAIT_POLL_SECONDS = 0.2
 
 PACKET_ID_MASK = 0xFFFFFFFF
@@ -554,12 +563,18 @@ class MeshInterface:  # pylint: disable=R0902
         """Shut down the interface and send a disconnect to the radio.
 
         Marks the interface as closing, cancels any scheduled heartbeat timer,
-        waits for any in-flight heartbeat send to finish, then emits a
-        disconnect message to the radio transport.
+        then waits up to CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS for any
+        in-flight heartbeat send to finish. On timeout the transport write is
+        presumed wedged: a warning is logged, the disconnect message is skipped
+        (a second unsynchronized write could interleave bytes with the stuck
+        heartbeat write), and the remaining teardown still runs so resources
+        are released. A healthy transport drains well within the bound and the
+        disconnect message is emitted as usual.
         """
         # Handle case where __init__ returned early before parent initialization
         heartbeat_lock = getattr(self, "_heartbeat_lock", None)
         heartbeat_idle_condition = getattr(self, "_heartbeat_idle_condition", None)
+        heartbeat_drained = True
         if heartbeat_lock is not None:
             with heartbeat_lock:
                 if self._closing:
@@ -572,12 +587,24 @@ class MeshInterface:  # pylint: disable=R0902
             # Extra complexity is intentional: a callback can pass the _closing
             # check and begin sendHeartbeat() just before close() starts. Wait
             # until any such in-flight send completes so close() provides a
-            # strong "no heartbeat after close returns" guarantee.
+            # strong "no heartbeat after close returns" guarantee. The wait is
+            # bounded because the guarantee cannot hold for a transport whose
+            # writes never return, and close() must stay able to release
+            # resources (including the CLI's signal teardown path).
             if isinstance(heartbeat_idle_condition, threading.Condition):
                 with heartbeat_lock:
-                    while self._heartbeat_inflight > 0:
-                        heartbeat_idle_condition.wait()
-            if not self.noProto:
+                    heartbeat_drained = heartbeat_idle_condition.wait_for(
+                        lambda: self._heartbeat_inflight == 0,
+                        timeout=CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS,
+                    )
+            if not heartbeat_drained:
+                logger.warning(
+                    "close() timed out after %.1fs waiting for an in-flight "
+                    "heartbeat send to finish; skipping the disconnect frame "
+                    "because the transport write appears wedged.",
+                    CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS,
+                )
+            elif not self.noProto:
                 try:
                     self._send_disconnect()
                 except (OSError, MeshInterface.MeshInterfaceError):

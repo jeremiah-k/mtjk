@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, create_autospec, patch
@@ -493,6 +494,167 @@ def test_close_waits_for_inflight_heartbeat_send(
         assert close_done.is_set()
         assert not close_thread.is_alive()
         assert not start_thread.is_alive()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_close_times_out_waiting_for_inflight_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """close() must return within its drain bound when a heartbeat send never finishes.
+
+    The bound wait logs a warning, skips the disconnect frame (the transport
+    write is wedged), and still releases resources.
+    """
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.2
+        )
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+
+        with caplog.at_level(logging.WARNING):
+            close_start = time.monotonic()
+            iface.close()
+            elapsed = time.monotonic() - close_start
+
+        # close() returned while the heartbeat send is still in flight, so the
+        # wait is bounded instead of unbounded.
+        assert elapsed < 2.0
+        assert not release_send.is_set()
+        assert iface._closing is True
+        assert disconnect_calls == []
+        # The remaining teardown still released resources.
+        assert iface.debugOut is None
+        assert "timed out after" in caplog.text
+        assert "skipping the disconnect frame" in caplog.text
+
+        release_send.set()
+        start_thread.join(timeout=1.0)
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_close_sends_disconnect_after_heartbeat_drains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A heartbeat send that finishes in time still gets the disconnect frame."""
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+
+        release_send.set()
+        iface.close()
+        start_thread.join(timeout=1.0)
+
+        assert disconnect_calls == [1]
+        assert not start_thread.is_alive()
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_late_heartbeat_after_close_timeout_does_not_rearm_or_send(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    fake_timer_cls: type["FakeTimer"],
+) -> None:
+    """A heartbeat completing after close() gave up cannot re-arm or send again."""
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+        send_count: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_count.append(1)
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.1
+        )
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+        assert len(fake_timer_cls.created) == 1
+        late_timer = fake_timer_cls.created[0]
+
+        with caplog.at_level(logging.WARNING):
+            iface.close()
+
+        # close() timed out, skipped the disconnect, and cancelled the
+        # re-armed timer.
+        assert disconnect_calls == []
+        assert late_timer.cancelled is True
+
+        # Simulate the re-armed timer firing late despite cancellation: the
+        # callback must observe _closing and neither schedule a new timer nor
+        # send another heartbeat.
+        late_timer.function()
+        assert len(fake_timer_cls.created) == 1
+        assert send_count == [1]
+
+        # Let the in-flight send finish after close() returned: it only
+        # drains the inflight counter, with no further timer or sends.
+        release_send.set()
+        start_thread.join(timeout=1.0)
+        assert not start_thread.is_alive()
+        assert iface._heartbeat_inflight == 0
+        assert len(fake_timer_cls.created) == 1
+        assert send_count == [1]
+        assert disconnect_calls == []
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
 
 
 @pytest.mark.unit
