@@ -186,3 +186,43 @@ def test_open_transport_ble_selection_returns_ble_client() -> None:
     ble_args, ble_kwargs = ble_transport.calls[0]
     assert ble_args[0] == "AA:BB:CC:DD:EE:FF"
     assert ble_kwargs["auto_reconnect"] is False
+
+
+@pytest.mark.unit
+def test_connected_session_keyboard_interrupt_logs_then_reraises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Ctrl+C in the long-running loop logs, unwinds the session, then re-raises."""
+    args = _make_args(
+        listen=True,
+        reply=False,
+        tunnel=False,
+        seriallog="none",
+        ble_scan=False,
+        power_riden=False,
+        power_ppk2_meter=False,
+        power_ppk2_supply=False,
+        power_sim=False,
+        power_voltage=None,
+    )
+    client = MagicMock(devPath="/dev/ttyUSB0")
+    unsubscribe_receive = MagicMock()
+    listen_poll = MagicMock(side_effect=KeyboardInterrupt)
+    hooks = replace(
+        main_module._build_bootstrap_hooks(),
+        subscribe=MagicMock(),
+        unsubscribe_receive=unsubscribe_receive,
+        on_connected=MagicMock(),
+        serial_interface=_recording_factory(client, []),
+        listen_loop_poll_once=listen_poll,
+    )
+
+    with caplog.at_level("INFO", logger=bootstrap.logger.name):
+        with pytest.raises(KeyboardInterrupt):
+            bootstrap._run_connected_session(args, hooks)
+
+    assert "Exiting due to keyboard interrupt" in caplog.text
+    # Session teardown (unsubscribe) ran while the interrupt unwound the
+    # session ExitStack, before the entrypoint maps it to the 130 exit.
+    unsubscribe_receive.assert_called_once()
+    listen_poll.assert_called_once_with(client)

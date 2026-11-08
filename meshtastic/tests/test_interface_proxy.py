@@ -733,10 +733,10 @@ def test_stream_close_suppresses_asyncio_timeout() -> None:
     asyncio.run(scenario())
 
 
-def test_proxy_ctrl_c_exits_without_traceback(
+def test_proxy_ctrl_c_logs_and_reraises(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Ctrl+C behaves like the ordinary CLI listen-loop shutdown path."""
+    """Ctrl+C logs the proxy shutdown, then unwinds for the entrypoint's 130 exit."""
     import argparse
 
     parser = argparse.ArgumentParser(add_help=False)
@@ -758,9 +758,10 @@ def test_proxy_ctrl_c_exits_without_traceback(
 
     monkeypatch.setattr(asyncio, "run", interrupt_proxy)
     with caplog.at_level("INFO", logger=bootstrap.logger.name):
-        bootstrap.run_common(
-            args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
-        )
+        with pytest.raises(KeyboardInterrupt):
+            bootstrap.run_common(
+                args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
+            )
     assert "Exiting interface proxy due to keyboard interrupt" in caplog.text
 
 

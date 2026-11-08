@@ -632,6 +632,9 @@ def _run_connected_session(
                 hooks.listen_loop_poll_once(client)
         except KeyboardInterrupt:
             logger.info("Exiting due to keyboard interrupt")
+            # Re-raise so the session ExitStack unwinds and the entrypoint
+            # reports "Interrupted." with exit status 130.
+            raise
 
 
 def run_common(
@@ -701,6 +704,9 @@ def run_common(
             asyncio.run(serve(options))
         except KeyboardInterrupt:
             logger.info("Exiting interface proxy due to keyboard interrupt")
+            # Re-raise so the entrypoint reports "Interrupted." with exit
+            # status 130, matching the long-running CLI modes.
+            raise
         except (
             OSError,
             asyncio.TimeoutError,
