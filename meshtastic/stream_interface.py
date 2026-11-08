@@ -55,13 +55,16 @@ STREAM_IO_EXCEPTIONS = (
     serial.SerialTimeoutException,
 )
 EXIT_CLOSE_JOIN_BUDGET_SECONDS = 3.0
-"""Total seconds the exit hook waits for its close worker to finish.
+"""Total seconds the exit hook waits for the per-interface close threads.
 
 A normal stream close takes roughly 0.2-0.5 seconds (disconnect write plus a
 bounded reader join), so the budget absorbs several interfaces still open at
-interpreter exit while keeping the process shutdown prompt. When the budget
-expires the worker is abandoned (it is a daemon thread) and a warning is
-logged.
+interpreter exit while keeping the process shutdown prompt. The budget is one
+shared deadline measured from the hook start: each interface is closed on its
+own daemon thread and every join gets the remaining time, so one wedged
+transport cannot spend the budget on behalf of another interface. When the
+deadline expires the unfinished threads are abandoned (they are daemons) and
+a warning is logged.
 """
 _TRANSPORT_FD_STATE_TYPEERROR_MARKERS: tuple[str, ...] = (
     "fd is none",
@@ -162,17 +165,16 @@ def _untrack_open_stream_interface(interface: "StreamInterface") -> None:
         _open_stream_interfaces.discard(interface)
 
 
-def _exit_close_worker(interfaces: list["StreamInterface"]) -> None:
-    """Close each snapshot interface, swallowing per-interface errors."""
-    for interface in interfaces:
-        try:
-            interface.close()
-        except Exception:
-            logger.debug(
-                "Exit-time close of %r failed; continuing shutdown.",
-                interface,
-                exc_info=True,
-            )
+def _exit_close_interface(interface: "StreamInterface") -> None:
+    """Close one snapshot interface, swallowing per-interface errors."""
+    try:
+        interface.close()
+    except Exception:
+        logger.debug(
+            "Exit-time close of %r failed; continuing shutdown.",
+            interface,
+            exc_info=True,
+        )
 
 
 def _close_open_stream_interfaces_at_exit() -> None:
@@ -180,39 +182,68 @@ def _close_open_stream_interfaces_at_exit() -> None:
 
     Snapshots the registry under the leaf lock and releases it before any
     close() runs, so a concurrent add/discard can neither raise out of this
-    atexit hook nor be observed mid-iteration. Runs the closes on a daemon
-    thread joined within EXIT_CLOSE_JOIN_BUDGET_SECONDS so a wedged transport
-    cannot stall process shutdown. A thread-start failure or a budget expiry
-    produces a warning; per-interface exceptions are swallowed with a debug
-    log.
+    atexit hook nor be observed mid-iteration. Each interface is closed on
+    its own daemon thread, so one wedged transport cannot consume the whole
+    join budget on behalf of the others; the threads are joined against a
+    single deadline of EXIT_CLOSE_JOIN_BUDGET_SECONDS measured from the hook
+    start, so two blocked closes still cost about one budget. Thread starts
+    are guarded individually: one failed start never prevents the remaining
+    starts, every start failing produces one warning, and a budget expiry
+    warns with the number of unfinished interfaces. Per-interface exceptions
+    are swallowed with a debug log.
     """
     with _open_stream_interfaces_lock:
         interfaces = list(_open_stream_interfaces)
     if not interfaces:
         return
-    worker = threading.Thread(
-        target=_exit_close_worker,
-        args=(interfaces,),
-        daemon=True,
-        name="meshtastic-exit-close",
-    )
-    try:
-        worker.start()
-    except Exception:
+    deadline = time.monotonic() + EXIT_CLOSE_JOIN_BUDGET_SECONDS
+    threads: list[threading.Thread] = []
+    start_failures: list[tuple["StreamInterface", Exception]] = []
+    for index, interface in enumerate(interfaces):
+        thread = threading.Thread(
+            target=_exit_close_interface,
+            args=(interface,),
+            daemon=True,
+            name=f"meshtastic-exit-close-{index}",
+        )
+        try:
+            thread.start()
+        except Exception as exc:
+            # CPython 3.12.0-3.12.2 refuses to start threads during
+            # interpreter shutdown (gh-113964, fixed in 3.12.3); the guarded
+            # start turns that into a warning and a skipped close instead of
+            # an error out of the atexit hook.
+            start_failures.append((interface, exc))
+        else:
+            threads.append(thread)
+    if len(start_failures) == len(interfaces):
         logger.warning(
-            "Failed to start the exit-close worker thread; skipping "
+            "Failed to start any exit-close thread; skipping "
             "interpreter-exit close of %d open stream interface(s).",
             len(interfaces),
-            exc_info=True,
+            exc_info=start_failures[0][1],
         )
         return
-    worker.join(timeout=EXIT_CLOSE_JOIN_BUDGET_SECONDS)
-    if worker.is_alive():
+    for failed_interface, failed_exc in start_failures:
+        logger.warning(
+            "Failed to start the exit-close thread for %r; skipping "
+            "interpreter-exit close of that interface, %d of %d open stream "
+            "interface(s) will still be closed.",
+            failed_interface,
+            len(threads),
+            len(interfaces),
+            exc_info=failed_exc,
+        )
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    unfinished = sum(1 for thread in threads if thread.is_alive())
+    if unfinished:
         logger.warning(
             "Timed out after %.1fs closing %d open stream interface(s) at "
-            "interpreter exit; continuing shutdown.",
+            "interpreter exit; continuing shutdown (%d unfinished).",
             EXIT_CLOSE_JOIN_BUDGET_SECONDS,
             len(interfaces),
+            unfinished,
         )
 
 

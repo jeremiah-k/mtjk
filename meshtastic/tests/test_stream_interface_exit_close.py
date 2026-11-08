@@ -7,8 +7,9 @@ import subprocess
 import sys
 import textwrap
 import threading
+import time
 import weakref
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -136,6 +137,161 @@ def test_exit_hook_is_bounded_when_close_blocks(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
+def test_stalled_exit_close_does_not_starve_other_interface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stuck transport cannot consume the whole exit budget for a healthy one.
+
+    Deterministic interleaving: the stuck close parks on an Event and the
+    healthy interface keeps its real close, wrapped only to publish
+    completion. The hook runs on a helper thread; once the stuck close has
+    entered, the healthy interface must finish its close while the release is
+    still unset. A sequential implementation can never satisfy that: its
+    second close cannot start until the stuck close returns.
+    """
+    stuck = _connected_test_interface()
+    healthy = _connected_test_interface()
+    stuck_entered = threading.Event()
+    healthy_finished = threading.Event()
+    release = threading.Event()
+
+    def stuck_close() -> None:
+        stuck_entered.set()
+        release.wait(timeout=10.0)
+
+    real_healthy_close = healthy.close
+
+    def healthy_close() -> None:
+        real_healthy_close()
+        healthy_finished.set()
+
+    monkeypatch.setattr(stuck, "close", stuck_close)
+    monkeypatch.setattr(healthy, "close", healthy_close)
+    hook_thread = threading.Thread(
+        target=_close_open_stream_interfaces_at_exit, daemon=True
+    )
+    hook_thread.start()
+    try:
+        assert stuck_entered.wait(timeout=5.0)
+        assert healthy_finished.wait(timeout=5.0)
+        assert not release.is_set()
+    finally:
+        release.set()
+        hook_thread.join(timeout=10.0)
+        StreamInterface.close(stuck)
+        StreamInterface.close(healthy)
+
+    assert not hook_thread.is_alive()
+    assert list(_open_stream_interfaces) == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_exit_hook_joins_all_closes_against_one_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two blocked closes cost about one join budget, not one per interface.
+
+    Every join is issued against the remaining time of a single deadline
+    measured from the hook start, so the hook returns after roughly one
+    budget even with several blocked closes. The upper bound is generous
+    enough to absorb scheduling slack while staying well below the two full
+    budgets a per-interface deadline would cost.
+    """
+    interfaces = [_connected_test_interface(), _connected_test_interface()]
+    entered = [threading.Event(), threading.Event()]
+    finished = [threading.Event(), threading.Event()]
+    release = threading.Event()
+
+    def blocking_close_factory(
+        entered_event: threading.Event,
+        finished_event: threading.Event,
+    ) -> Callable[[], None]:
+        def blocking_close() -> None:
+            entered_event.set()
+            release.wait(timeout=10.0)
+            finished_event.set()
+
+        return blocking_close
+
+    budget = 2.0
+    for index, iface in enumerate(interfaces):
+        monkeypatch.setattr(
+            iface, "close", blocking_close_factory(entered[index], finished[index])
+        )
+    monkeypatch.setattr(
+        stream_interface_module, "EXIT_CLOSE_JOIN_BUDGET_SECONDS", budget
+    )
+    start = time.monotonic()
+    try:
+        with caplog.at_level(logging.WARNING, logger="meshtastic.stream_interface"):
+            _close_open_stream_interfaces_at_exit()
+        elapsed = time.monotonic() - start
+
+        assert entered[0].is_set()
+        assert entered[1].is_set()
+        assert elapsed >= budget
+        assert elapsed < budget + 1.0
+        assert "Timed out after" in caplog.text
+        assert "continuing shutdown" in caplog.text
+        assert "(2 unfinished)" in caplog.text
+    finally:
+        release.set()
+        try:
+            for index in range(len(interfaces)):
+                assert finished[index].wait(timeout=5.0)
+        finally:
+            for iface in interfaces:
+                StreamInterface.close(iface)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_start_failure_for_one_interface_still_closes_other(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One failed thread start cannot prevent the other interface's close.
+
+    Deterministic targeting: the patched start fails only for the thread
+    whose target argument is the failing interface, so registry snapshot
+    order cannot influence which start fails.
+    """
+    failing = _connected_test_interface()
+    healthy = _connected_test_interface()
+    healthy_stream = healthy.stream
+    real_start = threading.Thread.start
+
+    def selective_start(self: threading.Thread) -> None:
+        if failing in getattr(self, "_args", ()):
+            raise RuntimeError("cannot start thread")
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", selective_start)
+    try:
+        with caplog.at_level(logging.WARNING, logger="meshtastic.stream_interface"):
+            _close_open_stream_interfaces_at_exit()
+
+        assert isinstance(healthy_stream, MagicMock)
+        healthy_stream.close.assert_called()
+        assert failing in _open_stream_interfaces
+        assert healthy not in _open_stream_interfaces
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and r.name == "meshtastic.stream_interface"
+        ]
+        assert len(warnings) == 1
+        assert "Failed to start" in caplog.text
+        assert "cannot start thread" in caplog.text
+    finally:
+        StreamInterface.close(failing)
+        StreamInterface.close(healthy)
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
 def test_exit_hook_swallows_close_exceptions(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -177,7 +333,11 @@ def test_weakset_drops_garbage_collected_interface() -> None:
 def test_exit_hook_registered_once_and_lazily(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The atexit hook is registered exactly once, on the first tracked interface."""
+    """The atexit hook is registered exactly once, on the first tracked interface.
+
+    Both interfaces exercise a real connect() so the registration path is the
+    production one, not a direct registry helper call.
+    """
     register_calls: list[object] = []
     monkeypatch.setattr(
         stream_interface_module._exit_close_hook_state, "registered", False
@@ -191,14 +351,17 @@ def test_exit_hook_registered_once_and_lazily(
     iface_one = StreamInterface(noProto=True, connectNow=False)
     iface_two = StreamInterface(noProto=True, connectNow=False)
     try:
-        _track_open_stream_interface(iface_one)
+        for iface in (iface_one, iface_two):
+            iface.stream = MagicMock()
+            iface.stream.read.return_value = b""
+        iface_one.connect()
         assert len(register_calls) == 1
 
-        _track_open_stream_interface(iface_two)
+        iface_two.connect()
         assert len(register_calls) == 1
     finally:
         for iface in (iface_one, iface_two):
-            _untrack_open_stream_interface(iface)
+            iface.close()
 
 
 @pytest.mark.unit
@@ -300,7 +463,11 @@ def test_exit_hook_survives_worker_start_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A thread-start failure is warned about and never raises out of the hook."""
+    """A thread-start failure is warned about and never raises out of the hook.
+
+    When every start fails, exactly one warning is produced for the whole
+    hook instead of one per interface.
+    """
     iface = _connected_test_interface()
     try:
 
@@ -314,6 +481,12 @@ def test_exit_hook_survives_worker_start_failure(
         assert "Failed to start" in caplog.text
         assert "cannot start thread" in caplog.text
         assert iface in _open_stream_interfaces
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and r.name == "meshtastic.stream_interface"
+        ]
+        assert len(warnings) == 1
     finally:
         StreamInterface.close(iface)
 
