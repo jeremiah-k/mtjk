@@ -539,15 +539,23 @@ class TestBLECoroutineRunnerRunCoroutineThreadsafe:
         self,
         fresh_runner: BLECoroutineRunner,  # noqa: F811
     ) -> None:
-        """Test _run_coroutine_threadsafe tracks pending futures."""
+        """Test _run_coroutine_threadsafe tracks a future while it is pending."""
+        release = threading.Event()
 
-        async def simple_coro() -> str:
+        async def blocking_coro() -> str:
+            # Hold the future pending so the tracked-set assertion cannot race
+            # completion (and its done-callback discard) on the runner loop thread.
+            while not release.is_set():
+                await asyncio.sleep(0.005)
             return "done"
 
-        future = fresh_runner._run_coroutine_threadsafe(simple_coro())
-
-        # Future should be in pending set
-        assert future in fresh_runner._pending_futures
+        future = fresh_runner._run_coroutine_threadsafe(blocking_coro())
+        try:
+            # Future should be in pending set while the coroutine is blocked.
+            assert future in fresh_runner._pending_futures
+        finally:
+            release.set()
+        assert future.result(timeout=2.0) == "done"
 
     def test_run_coroutine_stop_requested_raises(
         self,
