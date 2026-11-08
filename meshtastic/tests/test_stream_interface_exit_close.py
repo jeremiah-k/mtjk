@@ -614,6 +614,57 @@ def test_exit_hook_snapshot_survives_concurrent_mutation(
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_untrack_reenters_registry_lock_from_critical_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The registry lock tolerates same-thread re-entry from a critical section.
+
+    An application's signal handler runs on the main thread between
+    bytecodes, so it can interrupt a registry critical section (WeakSet.add
+    and WeakSet.discard are Python code) and call interface.close(), whose
+    _untrack_open_stream_interface() re-acquires the same lock on the same
+    thread. The instrumented registry triggers exactly that re-entry from
+    inside discard() on a helper thread. A plain Lock would park the helper
+    forever, so the outer call is joined with a timeout and the test fails
+    instead of hanging the run.
+    """
+    iface_one = StreamInterface(noProto=True, connectNow=False)
+    iface_two = StreamInterface(noProto=True, connectNow=False)
+    reentered = threading.Event()
+
+    class ReenteringWeakSet(weakref.WeakSet["StreamInterface"]):
+        """WeakSet whose discard() re-enters the registry's discard path."""
+
+        def discard(self, item: "StreamInterface") -> None:
+            if not reentered.is_set():
+                reentered.set()
+                _untrack_open_stream_interface(iface_two)
+            super().discard(item)
+
+    monkeypatch.setattr(
+        stream_interface_module, "_open_stream_interfaces", ReenteringWeakSet()
+    )
+    outer_finished = threading.Event()
+
+    def outer_untrack() -> None:
+        _untrack_open_stream_interface(iface_one)
+        outer_finished.set()
+
+    helper = threading.Thread(target=outer_untrack, daemon=True)
+    helper.start()
+    try:
+        assert outer_finished.wait(timeout=10.0)
+        assert reentered.is_set()
+        assert iface_one not in stream_interface_module._open_stream_interfaces
+        assert iface_two not in stream_interface_module._open_stream_interfaces
+    finally:
+        helper.join(timeout=1.0)
+
+    assert not helper.is_alive()
+
+
+@pytest.mark.unit
 def test_normal_interpreter_exit_sends_disconnect_and_closes_stream() -> None:
     """Exercise the registered hook during real interpreter shutdown."""
     code = textwrap.dedent("""

@@ -104,7 +104,7 @@ def _is_bootstrap_stream_closed_retryable(
 
 
 _open_stream_interfaces: "weakref.WeakSet[StreamInterface]" = weakref.WeakSet()
-# Leaf lock for the interpreter-exit close registry: guards every add,
+# Reentrant lock for the interpreter-exit close registry: guards every add,
 # discard and the exit hook's snapshot, plus the one-shot hook-registration
 # flag and the atexit.register call that publishes it. Lock order: a
 # per-interface _connect_lock may be held while acquiring this lock
@@ -114,7 +114,18 @@ _open_stream_interfaces: "weakref.WeakSet[StreamInterface]" = weakref.WeakSet()
 # stores the callback, acquires no lock in this package and runs no
 # interface code. The exit hook releases this lock before any close() work
 # starts.
-_open_stream_interfaces_lock = threading.Lock()
+# The lock must be reentrant because close() can re-enter a registry
+# critical section on the same thread. An application's signal handler runs
+# on the main thread between bytecodes, possibly while the main thread is
+# inside one of these critical sections (WeakSet.add and WeakSet.discard
+# are Python code); if the handler calls interface.close(), the close path
+# runs _untrack_open_stream_interface(), which acquires this same lock
+# again on the same thread, so a plain Lock would self-deadlock there.
+# This does not make close() fully signal-reentrant: _connect_lock is
+# still a plain Lock, so a handler interrupting close() itself or
+# connect()'s _connect_lock critical section remains pre-existing
+# behavior outside this registry's scope.
+_open_stream_interfaces_lock = threading.RLock()
 
 
 class _ExitCloseHookState:
