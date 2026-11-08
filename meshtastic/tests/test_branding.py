@@ -66,7 +66,9 @@ def test_packaging_metadata_tracks_branding_contract() -> None:
         *branding.COMPATIBILITY_CLI_NAMES,
     }
     actual_cli_names = {
-        name for name, target in scripts.items() if target == "meshtastic.__main__:main"
+        name
+        for name, target in scripts.items()
+        if target == "meshtastic.__main__:_console_main"
     }
     assert actual_cli_names == expected_cli_names
 

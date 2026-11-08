@@ -48,9 +48,9 @@ EXPECTATIONS = RepoExpectations(
     version="9.9.9",
     scripts=("mtjk", "meshtastic", "mesh-tunnel", "mesh-analysis"),
     script_targets={
-        "mtjk": "meshtastic.__main__:main",
-        "meshtastic": "meshtastic.__main__:main",
-        "mesh-tunnel": "meshtastic.__main__:tunnelMain",
+        "mtjk": "meshtastic.__main__:_console_main",
+        "meshtastic": "meshtastic.__main__:_console_main",
+        "mesh-tunnel": "meshtastic.__main__:_console_tunnel_main",
         "mesh-analysis": "meshtastic.analysis.__main__:main [analysis]",
     },
     cli=CliExpectations(
@@ -80,9 +80,9 @@ Requires-Dist: pyarrow (>=25.0.0) ; extra == "analysis"
 
 VALID_ENTRY_POINTS = """\
 [console_scripts]
-mtjk = meshtastic.__main__:main
-meshtastic = meshtastic.__main__:main
-mesh-tunnel = meshtastic.__main__:tunnelMain
+mtjk = meshtastic.__main__:_console_main
+meshtastic = meshtastic.__main__:_console_main
+mesh-tunnel = meshtastic.__main__:_console_tunnel_main
 mesh-analysis = meshtastic.analysis.__main__:main [analysis]
 """
 
@@ -193,9 +193,9 @@ def _write_synthetic_repo(
         f"{extras}\n"
         "\n"
         "[project.scripts]\n"
-        'mtjk = "meshtastic.__main__:main"\n'
-        'meshtastic = "meshtastic.__main__:main"\n'
-        'mesh-tunnel = "meshtastic.__main__:tunnelMain"\n'
+        'mtjk = "meshtastic.__main__:_console_main"\n'
+        'meshtastic = "meshtastic.__main__:_console_main"\n'
+        'mesh-tunnel = "meshtastic.__main__:_console_tunnel_main"\n'
         'mesh-analysis = "meshtastic.analysis.__main__:main [analysis]"\n',
         encoding="utf-8",
     )
@@ -292,7 +292,8 @@ def test_console_script_value_mismatch_fails(
     """A console script pointing at the wrong callable must fail the gate."""
     wheel = write_valid_wheel(
         entry_points=VALID_ENTRY_POINTS.replace(
-            "mtjk = meshtastic.__main__:main", "mtjk = meshtastic.__main__:mai"
+            "mtjk = meshtastic.__main__:_console_main",
+            "mtjk = meshtastic.__main__:_console_mai",
         )
     )
     with pytest.raises(SmokeGateError, match=r"unexpected target"):

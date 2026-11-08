@@ -208,12 +208,21 @@ def test_connected_session_keyboard_interrupt_logs_then_reraises(
     client = MagicMock(devPath="/dev/ttyUSB0")
     unsubscribe_receive = MagicMock()
     listen_poll = MagicMock(side_effect=KeyboardInterrupt)
+    transport_exits: list[bool] = []
+
+    @contextlib.contextmanager
+    def transport(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        try:
+            yield client
+        finally:
+            transport_exits.append(True)
+
     hooks = replace(
         main_module._build_bootstrap_hooks(),
         subscribe=MagicMock(),
         unsubscribe_receive=unsubscribe_receive,
         on_connected=MagicMock(),
-        serial_interface=_recording_factory(client, []),
+        serial_interface=transport,
         listen_loop_poll_once=listen_poll,
     )
 
@@ -226,3 +235,4 @@ def test_connected_session_keyboard_interrupt_logs_then_reraises(
     # session ExitStack, before the entrypoint maps it to the 130 exit.
     unsubscribe_receive.assert_called_once()
     listen_poll.assert_called_once_with(client)
+    assert transport_exits == [True]

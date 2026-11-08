@@ -11,11 +11,8 @@ mutates nothing at import time.
 
 from __future__ import annotations
 
-import logging
 import os
 import signal
-
-logger = logging.getLogger(__name__)
 
 
 def _signal_self(signum: int, *, reset_to_default: bool) -> None:
@@ -25,8 +22,10 @@ def _signal_self(signum: int, *, reset_to_default: bool) -> None:
     reset to ``SIG_DFL`` first so the kernel terminates the process instead
     of a Python-level handler raising again. Returns when the platform is
     not POSIX or the delivery failed; callers keep their exit-status
-    fallbacks for that case. When delivery succeeds the process dies inside
-    this call and the caller never resumes.
+    fallbacks for that case. A default fatal disposition terminates the
+    process; a restored host handler can run and return. Failure is silent:
+    this helper also runs inside the forced-exit signal handler, where logging
+    could deadlock on a lock held by the interrupted code.
     """
     if os.name != "posix":
         return
@@ -35,4 +34,4 @@ def _signal_self(signum: int, *, reset_to_default: bool) -> None:
             signal.signal(signum, signal.SIG_DFL)
         os.kill(os.getpid(), signum)
     except (OSError, ValueError):
-        logger.debug("Could not deliver signal %s to self", signum, exc_info=True)
+        pass

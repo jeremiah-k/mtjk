@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import signal
 import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NoReturn
 
 import pytest
@@ -75,10 +77,14 @@ def _reset_shutdown_flag() -> Iterator[None]:
     cli_main._cli_signal_shutdown_started = False
     cli_main._cli_signal_received = None
     cli_main._cli_signal_shutdown_lock = threading.Lock()
+    cli_main._cli_signal_defer_exit = False
+    cli_main._cli_signal_invocation_active = False
     yield
     cli_main._cli_signal_shutdown_started = False
     cli_main._cli_signal_received = None
     cli_main._cli_signal_shutdown_lock = threading.Lock()
+    cli_main._cli_signal_defer_exit = False
+    cli_main._cli_signal_invocation_active = False
 
 
 @pytest.fixture(autouse=True)
@@ -458,6 +464,27 @@ def test_sigint_re_delivery_skips_non_posix(
     assert cli_main._sigint_re_delivery_eligible() is False
 
 
+@pytest.mark.parametrize(
+    "interactive_marker",
+    [
+        pytest.param("flags-interactive", id="sys-flags-interactive"),
+        pytest.param("ps1-attribute", id="sys-ps1-attribute"),
+    ],
+)
+def test_sigint_re_delivery_skips_interactive_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+    interactive_marker: str,
+) -> None:
+    """An interactive interpreter owns its session: Ctrl+C returns to the prompt."""
+    monkeypatch.setattr(os, "name", "posix")
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    if interactive_marker == "flags-interactive":
+        monkeypatch.setattr(sys, "flags", SimpleNamespace(interactive=True))
+    else:
+        monkeypatch.setattr(sys, "ps1", ">>> ", raising=False)
+    assert cli_main._sigint_re_delivery_eligible() is False
+
+
 def test_sigint_re_delivery_skips_off_main_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -487,6 +514,7 @@ class _RecordingStream:
         self._events.append("flush")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="fatal SIGINT delivery requires POSIX")
 def test_entrypoint_redelivers_sigint_when_default_handler_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -519,7 +547,7 @@ def test_entrypoint_redelivers_sigint_when_default_handler_installed(
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert excinfo.value.code == 130
     assert seam_requests == [(signal.SIGINT, True)]
     # TERM/HUP restoration precedes the output flush, which precedes the kill.
@@ -528,6 +556,7 @@ def test_entrypoint_redelivers_sigint_when_default_handler_installed(
     assert any(event.startswith("restore:") for event in events[:-3])
 
 
+@pytest.mark.skipif(os.name != "posix", reason="fatal SIGINT delivery requires POSIX")
 def test_entrypoint_sigint_falls_back_to_130_when_delivery_returns(
     monkeypatch: pytest.MonkeyPatch,
     _no_real_self_signals: list[tuple[int, bool]],
@@ -540,7 +569,7 @@ def test_entrypoint_sigint_falls_back_to_130_when_delivery_returns(
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert excinfo.value.code == 130
     assert _no_real_self_signals == [(signal.SIGINT, True)]
     assert _ORIGINAL_GETSIGNAL(signal.SIGTERM) is actual_handler
@@ -578,7 +607,7 @@ def test_entrypoint_sigint_skips_when_sigint_not_default(
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert excinfo.value.code == 130
     assert _no_real_self_signals == []
 
@@ -594,7 +623,7 @@ def test_entrypoint_sigint_skips_non_posix(
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert excinfo.value.code == 130
     assert _no_real_self_signals == []
 
@@ -621,7 +650,7 @@ def test_entrypoint_sigint_skips_off_main_thread(
             raise KeyboardInterrupt()
 
         try:
-            cli_main._run_cli_entrypoint(_body)
+            cli_main._run_cli_entrypoint(_body, owns_process=True)
         except BaseException as exc:  # noqa: BLE001 - recorded for the assertion
             outcomes.append(("raised", exc))
         else:
@@ -653,7 +682,7 @@ def test_entrypoint_sigint_skips_when_cli_exit_raises_other_error(
         raise KeyboardInterrupt()
 
     with pytest.raises(RuntimeError, match="exit handler exploded"):
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert _no_real_self_signals == []
 
 
@@ -672,7 +701,7 @@ def test_entrypoint_sigint_skips_when_cli_exit_maps_other_code(
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
     assert excinfo.value.code == 1
     assert _no_real_self_signals == []
 
@@ -682,47 +711,29 @@ def test_recorded_sigterm_takes_precedence_over_sigint_redelivery(
     _no_real_self_signals: list[tuple[int, bool]],
 ) -> None:
     """A TERM recorded during the body kills first; the SIGINT path never runs."""
-    registered: dict[int, Any] = {}
-
-    def _fake_signal(sig: int, handler: Any) -> None:
-        registered[sig] = handler
-
-    def _fake_getsignal(sig: int) -> Any:
-        return registered.get(sig, signal.SIG_DFL)
-
-    monkeypatch.setattr(signal, "signal", _fake_signal)
-    monkeypatch.setattr(signal, "getsignal", _fake_getsignal)
-
-    real_install = cli_main._install_cli_signal_handlers
-
-    def _install_then_record_term() -> dict[int, Any]:
-        previous = real_install()
-        # Simulate a TERM arriving during the body: the handler recorded it.
-        cli_main._cli_signal_received = signal.SIGTERM
-        return previous
-
-    monkeypatch.setattr(
-        cli_main, "_install_cli_signal_handlers", _install_then_record_term
-    )
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    monkeypatch.setattr(cli_main, "_sigint_re_delivery_eligible", lambda: True)
+    body_calls: list[bool] = []
 
     def _body() -> None:
+        body_calls.append(True)
+        cli_main._cli_signal_received = signal.SIGTERM
         raise KeyboardInterrupt()
 
     with pytest.raises(SystemExit) as excinfo:
-        cli_main._run_cli_entrypoint(_body)
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
+    assert body_calls == [True]
     assert excinfo.value.code == 143
     assert _no_real_self_signals == [(signal.SIGTERM, False)]
 
 
 @pytest.mark.usefixtures("reset_mt_config")
-def test_main_keyboard_interrupt_safety_fixture_records_sigint_request(
+def test_embedded_main_keyboard_interrupt_keeps_catchable_exit_130(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     _no_real_self_signals: list[tuple[int, bool]],
 ) -> None:
-    """The safety fixture turns Ctrl+C through main() into exit 130, no signal."""
-    # Make the re-delivery eligible even though the pytest runner owns SIGINT:
-    # without the fixture this exact path would signal this process.
+    """Ctrl+C through an embedded main() call stays a catchable SystemExit(130)."""
     actual_handler = _ORIGINAL_GETSIGNAL(signal.SIGTERM)
     _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
     monkeypatch.setattr(cli_main, "initParser", lambda: None)
@@ -735,8 +746,57 @@ def test_main_keyboard_interrupt_safety_fixture_records_sigint_request(
         cli_main.main()
     assert excinfo.value.code == 130
     assert "Interrupted." in capsys.readouterr().err
+    # An embedder keeps its process: no fatal SIGINT is forged against it.
+    assert _no_real_self_signals == []
+    assert _ORIGINAL_GETSIGNAL(signal.SIGTERM) is actual_handler
+
+
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.skipif(os.name != "posix", reason="fatal SIGINT delivery requires POSIX")
+def test_console_main_keyboard_interrupt_records_sigint_request(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    """The process-owning console entrypoint still requests the fatal SIGINT."""
+    actual_handler = _ORIGINAL_GETSIGNAL(signal.SIGTERM)
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    monkeypatch.setattr(cli_main, "initParser", lambda: None)
+
+    def _interrupt() -> None:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cli_main, "common", _interrupt)
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main._console_main()
+    assert excinfo.value.code == 130
+    assert "Interrupted." in capsys.readouterr().err
     assert _no_real_self_signals == [(signal.SIGINT, True)]
     assert _ORIGINAL_GETSIGNAL(signal.SIGTERM) is actual_handler
+
+
+@pytest.mark.usefixtures("reset_mt_config")
+def test_embedded_main_recorded_sigterm_is_still_re_delivered(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    """TERM re-delivery is universal, embedded callers included.
+
+    A recorded TERM is re-delivered after teardown so it rides the host's
+    restored disposition: a host handler runs, and a host with SIG_DFL dies.
+    Only the SIGINT re-delivery is reserved for process-owning entrypoints.
+    """
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    monkeypatch.setattr(cli_main, "initParser", lambda: None)
+    monkeypatch.setattr(
+        cli_main,
+        "common",
+        lambda: cli_main._cli_signal_handler(signal.SIGTERM, None),
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main.main()
+    assert excinfo.value.code == 143
+    assert _no_real_self_signals == [(signal.SIGTERM, False)]
 
 
 def test_install_and_restore_reset_recorded_signal(
@@ -754,17 +814,17 @@ def test_install_and_restore_reset_recorded_signal(
     assert cli_main._cli_signal_received is None
 
 
-def test_cli_signal_handler_logs_signal_name(
-    caplog: pytest.LogCaptureFixture,
+def test_cli_signal_handler_performs_no_logging(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The handler logs which signal was received at info level."""
-    with caplog.at_level("INFO", logger=cli_main.__name__):
-        with pytest.raises(SystemExit):
-            cli_main._cli_signal_handler(signal.SIGTERM, None)
-    assert any(
-        "Received SIGTERM" in record.getMessage() and record.levelname == "INFO"
-        for record in caplog.records
-    )
+    """A signal must unwind even when the interrupted logger is unavailable."""
+
+    def forbidden_log(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("signal handler attempted logging")
+
+    monkeypatch.setattr(cli_main.logger, "info", forbidden_log)
+    with pytest.raises(SystemExit):
+        cli_main._cli_signal_handler(signal.SIGTERM, None)
 
 
 def test_install_registers_handlers_on_main_thread(
@@ -792,10 +852,10 @@ def test_install_registers_real_handlers_and_restores() -> None:
     )
     try:
         cli_main._install_cli_signal_handlers()
-        if previous_term is not signal.SIG_IGN:
+        if previous_term is not signal.SIG_IGN and previous_term is not None:
             assert signal.getsignal(signal.SIGTERM) is cli_main._cli_signal_handler
         else:
-            assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
+            assert signal.getsignal(signal.SIGTERM) is previous_term
         if previous_hup is not None:
             expected_hup = (
                 signal.SIG_IGN
@@ -804,7 +864,8 @@ def test_install_registers_real_handlers_and_restores() -> None:
             )
             assert signal.getsignal(signal.SIGHUP) is expected_hup
     finally:
-        signal.signal(signal.SIGTERM, previous_term)
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
         if previous_hup is not None:
             signal.signal(signal.SIGHUP, previous_hup)
 
@@ -885,7 +946,7 @@ def test_cli_main_installs_handlers_at_entry(
     """Handlers are installed by the CLI entry, not on library import."""
     installed = False
 
-    def _record_install() -> None:
+    def _record_install(previous: dict[int, Any]) -> None:
         nonlocal installed
         installed = True
 
@@ -954,6 +1015,7 @@ def test_tunnel_entry_installs_and_restores_handlers(
 def test_tunnel_main_keyboard_interrupt_maps_to_130(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    _no_real_self_signals: list[tuple[int, bool]],
 ) -> None:
     """Ctrl+C in the tunnel entrypoint reports Interrupted. with status 130."""
     import argparse
@@ -973,7 +1035,37 @@ def test_tunnel_main_keyboard_interrupt_maps_to_130(
         cli_main.tunnelMain()
     assert excinfo.value.code == 130
     assert "Interrupted." in capsys.readouterr().err
+    # An embedded tunnelMain() keeps the host alive: no fatal SIGINT request.
+    assert _no_real_self_signals == []
     assert all(signal.getsignal(sig) is handler for sig, handler in before.items())
+
+
+@pytest.mark.usefixtures("reset_mt_config")
+@pytest.mark.skipif(os.name != "posix", reason="fatal SIGINT delivery requires POSIX")
+def test_console_tunnel_main_keyboard_interrupt_records_sigint_request(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    """The mesh-tunnel console entrypoint still requests the fatal SIGINT."""
+    import argparse
+
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+
+    def _set_args() -> None:
+        mt_config.args = argparse.Namespace()
+
+    monkeypatch.setattr(cli_main, "initParser", _set_args)
+
+    def _interrupt() -> None:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cli_main, "common", _interrupt)
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main._console_tunnel_main()
+    assert excinfo.value.code == 130
+    assert "Interrupted." in capsys.readouterr().err
+    assert _no_real_self_signals == [(signal.SIGINT, True)]
 
 
 def test_tunnel_main_mesh_interface_error_maps_to_1(
@@ -1018,3 +1110,205 @@ def test_signal_registration_is_cli_entry_only() -> None:
         if "signal.signal(" in text:
             offenders.add(str(relative))
     assert offenders == {"__main__.py", "_self_signal.py"}
+
+
+def test_main_block_invokes_console_wrapper() -> None:
+    """``python -m meshtastic`` dispatches to the process-owning wrapper.
+
+    Pinned with an AST check rather than runpy: runpy executes the module in
+    a fresh namespace where monkeypatches on the already-imported module are
+    invisible, so intercepting the dispatch would require running the real
+    CLI with its device probing. Parsing the module proves the wiring —
+    the ``__main__`` block calls ``_console_main()`` and nothing else —
+    without executing any of it.
+    """
+    source_path = Path(cli_main.__file__).resolve()
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    dispatches: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if not (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and len(test.comparators) == 1
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == "__main__"
+        ):
+            continue
+        for statement in node.body:
+            if (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Name)
+            ):
+                dispatches.append(statement.value.func.id)
+    assert dispatches == ["_console_main"]
+
+
+@pytest.mark.parametrize("phase", ["install", "restore"])
+def test_first_signal_during_handler_transition_is_restored_and_redelivered(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+    phase: str,
+) -> None:
+    installed: dict[int, Any] = {}
+    fired = False
+    body_calls: list[bool] = []
+
+    def install(sig: int, handler: Any) -> None:
+        nonlocal fired
+        installed[sig] = handler
+        changing_to_cli = handler is cli_main._cli_signal_handler
+        if not fired and changing_to_cli == (phase == "install"):
+            fired = True
+            cli_main._cli_signal_handler(signal.SIGTERM, None)
+
+    monkeypatch.setattr(signal, "signal", install)
+    monkeypatch.setattr(
+        signal, "getsignal", lambda sig: installed.get(sig, signal.SIG_DFL)
+    )
+    with pytest.raises(SystemExit) as error:
+        cli_main._run_cli_entrypoint(lambda: body_calls.append(True))
+    assert error.value.code == 143
+    assert fired
+    assert body_calls == ([] if phase == "install" else [True])
+    assert all(handler is signal.SIG_DFL for handler in installed.values())
+    assert _no_real_self_signals == [(signal.SIGTERM, False)]
+    assert cli_main._cli_signal_received is None
+    assert not cli_main._cli_signal_invocation_active
+
+
+def test_worker_entrypoint_does_not_redeliver_main_thread_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    completed = threading.Event()
+
+    def body() -> None:
+        try:
+            cli_main._cli_signal_handler(signal.SIGTERM, None)
+        finally:
+
+            def worker_body() -> None:
+                cli_main._run_cli_entrypoint(lambda: None)
+                completed.set()
+
+            worker = threading.Thread(target=worker_body)
+            worker.start()
+            worker.join(timeout=2)
+            assert completed.is_set()
+            assert _no_real_self_signals == []
+
+    with pytest.raises(SystemExit):
+        cli_main._run_cli_entrypoint(body)
+    assert _no_real_self_signals == [(signal.SIGTERM, False)]
+
+
+def test_blocked_output_flush_cannot_prevent_signal_redelivery(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockedStream:
+        def flush(self) -> None:
+            try:
+                release.wait(timeout=5)
+            finally:
+                finished.set()
+
+    monkeypatch.setattr(sys, "stdout", BlockedStream())
+    monkeypatch.setattr(
+        cli_main, "_CLI_OUTPUT_FLUSH_TIMEOUT_SECONDS", 0.01, raising=False
+    )
+    try:
+        with pytest.raises(SystemExit):
+            cli_main._re_deliver_recorded_signal(signal.SIGTERM)
+        assert _no_real_self_signals == [(signal.SIGTERM, False)]
+        assert not finished.is_set()
+    finally:
+        release.set()
+        assert finished.wait(timeout=2)
+
+
+@pytest.mark.parametrize("failure", ["reset", "kill"])
+def test_self_signal_failure_returns_without_logging(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    def reset(sig: int, handler: Any) -> None:
+        if failure == "reset":
+            raise ValueError("cannot reset handler")
+
+    def kill(pid: int, sig: int) -> None:
+        raise OSError("cannot signal process")
+
+    def forbidden_log(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("fatal signal fallback attempted logging")
+
+    monkeypatch.setattr(signal, "signal", reset)
+    monkeypatch.setattr(
+        _self_signal,
+        "os",
+        SimpleNamespace(name="posix", getpid=lambda: _SENTINEL_PID, kill=kill),
+    )
+    monkeypatch.setattr(
+        _self_signal, "logger", SimpleNamespace(debug=forbidden_log), raising=False
+    )
+    _REAL_SIGNAL_SELF(signal.SIGTERM, reset_to_default=True)
+
+
+def test_pending_signal_at_body_handoff_prevents_body_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    """A signal between the installation check and body admission is not lost."""
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    tree = ast.parse(Path(cli_main.__file__).read_text(encoding="utf-8"))
+    entry = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_run_cli_entrypoint"
+    )
+    handoff_line = min(
+        node.lineno
+        for node in ast.walk(entry)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_cli_signal_defer_exit"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Constant)
+        and node.value.value is False
+    )
+    body_calls: list[bool] = []
+    delivered = False
+
+    def trace(frame: Any, event: str, arg: Any) -> Any:
+        nonlocal delivered
+        if (
+            not delivered
+            and event == "line"
+            and frame.f_code is cli_main._run_cli_entrypoint.__code__
+            and frame.f_lineno == handoff_line
+        ):
+            delivered = True
+            cli_main._cli_signal_handler(signal.SIGTERM, None)
+        return trace
+
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(trace)
+        with pytest.raises(SystemExit):
+            cli_main._run_cli_entrypoint(lambda: body_calls.append(True))
+    finally:
+        sys.settrace(previous_trace)
+    assert delivered
+    assert body_calls == []
+    assert _no_real_self_signals == [(signal.SIGTERM, False)]

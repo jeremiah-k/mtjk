@@ -461,6 +461,7 @@ class BLEClient:
         operation: Callable[[BleakRootClient], Coroutine[Any, Any, T]],
         timeout: float | None = None,
         sync_address: bool = False,
+        retire_on_interrupt: bool = False,
     ) -> T:
         """Run a Bleak transport operation with common initialization checks.
 
@@ -490,7 +491,21 @@ class BLEClient:
             by ``_async_await``.
         """
         bleak_client = self._require_bleak_client(error_message)
-        result: T = self._async_await(operation(bleak_client), timeout=timeout)
+        operation_coro = operation(bleak_client)
+        retirement = (
+            _CoroutineRetirement(operation_coro) if retire_on_interrupt else None
+        )
+        try:
+            result: T = self._async_await(
+                retirement.run() if retirement else operation_coro, timeout=timeout
+            )
+        finally:
+            if retirement is not None and not retirement.retire(
+                DISCONNECT_TIMEOUT_SECONDS
+            ):
+                logger.warning(
+                    "BLE connect cleanup exceeded %.1fs", DISCONNECT_TIMEOUT_SECONDS
+                )
         if sync_address:
             self._sync_address_from_bleak()
         return result
@@ -752,6 +767,7 @@ class BLEClient:
             operation=lambda bleak_client: bleak_client.connect(**kwargs),
             timeout=await_timeout,
             sync_address=True,
+            retire_on_interrupt=True,
         )
 
     def isConnected(self) -> bool:
@@ -1206,99 +1222,109 @@ class BLEClient:
         RuntimeError
             If the event loop is closed or cannot be accessed.
         """
-        # Hold close lock so close() cannot interleave between closed-check,
-        # scheduling, and pending-future registration.
-        with self._close_lock:
-            if self._closed:
-                self._close_coroutine_safely(coro)
-                raise self.BLEError(BLECLIENT_ERROR_CANNOT_SCHEDULE_CLOSED)
-            runner_thread = getattr(self._runner, "_thread", None)
-            if runner_thread is current_thread():
-                self._close_coroutine_safely(coro)
-                raise self.BLEError(BLECLIENT_ERROR_RUNNER_THREAD_WAIT)
-
-            # Exception mapping contract:
-            #   - FutureTimeoutError -> self.BLEError(BLECLIENT_ERROR_ASYNC_TIMEOUT)
-            #   - FutureCancelledError / asyncio.CancelledError ->
-            #       self.BLEError(BLECLIENT_ERROR_CANCELLED)
-            #   - Bleak* exceptions propagate so interface wrappers can convert them consistently.
-            try:
-                _check_cancelled()
-            except ConnectionCancelledError:
-                self._close_coroutine_safely(coro)
-                raise
-            retirement = (
-                _CoroutineRetirement(coro) if _current_event() is not None else None
-            )
-            try:
-                future = self._async_run(retirement.run() if retirement else coro)
-            except BaseException:
-                if retirement is not None:
-                    retirement.retire(0)
-                raise
-            self._with_pending_futures(
-                lambda pending_futures: pending_futures.add(future)
-            )
+        future: Future[Any] | None = None
+        retirement: _CoroutineRetirement | None = None
         try:
-            # On macOS, CoreBluetooth requires occasional I/O operations for
-            # callbacks to be properly delivered. Without debug logging, no I/O
-            # was happening, causing callbacks to never be processed.
-            # TODO: Track and remove once the upstream Bleak CoreBluetooth callback
-            # starvation issue is fixed and released:
-            # https://github.com/hbldh/bleak/issues?q=is%3Aissue+CoreBluetooth+callback
-            # Limitation: this only helps when stdout exists and supports flush();
-            # redirected/non-flushable outputs (e.g., /dev/null wrappers) may not
-            # provide the I/O nudge needed for callback progress.
-            if sys.platform == "darwin":
-                stdout = getattr(sys, "stdout", None)
-                if stdout is None:
-                    _log_macos_stdout_workaround_unavailable_once(
-                        "stdout is unavailable"
-                    )
-                elif not hasattr(stdout, "flush"):
-                    _log_macos_stdout_workaround_unavailable_once(
-                        "stdout is not flushable"
-                    )
-                elif getattr(stdout, "closed", False):
-                    _log_macos_stdout_workaround_unavailable_once("stdout is closed")
-                else:
-                    with contextlib.suppress(ValueError, OSError, AttributeError):
-                        stdout.flush()
-            return _wait_future(future, timeout)
-        except SystemExit:  # pylint: disable=W0706
-            raise
-        except KeyboardInterrupt:  # pylint: disable=W0706
-            raise
-        except FutureTimeoutError as e:
-            self._cleanup_future_best_effort(future, "timeout")
-            raise self.BLEError(BLECLIENT_ERROR_ASYNC_TIMEOUT) from e
-        except FutureCancelledError as e:
-            self._cleanup_future_best_effort(future, "cancellation")
-            raise self.BLEError(BLECLIENT_ERROR_CANCELLED) from e
-        except RuntimeError as e:
-            # RuntimeError here typically indicates loop shutdown/closure, not a timeout.
-            self._cleanup_future_best_effort(future, "runtime error")
-            raise self.BLEError(BLECLIENT_ERROR_ASYNC_OPERATION_FAILED.format(e)) from e
-        except asyncio.CancelledError as e:
-            # Defensive coverage: Future.result() typically raises
-            # concurrent.futures.CancelledError (handled above), but this keeps
-            # direct coroutine cancellation mapping consistent.
-            raise self.BLEError(BLECLIENT_ERROR_CANCELLED) from e
-        finally:
-            # Future.cancel() acknowledges only the request. Bleak may still be
-            # awaiting BlueZ Disconnect after cancellation or a startup timeout.
-            if (
-                retirement is not None
-                and future.cancelled()
-                and not retirement.retire(DISCONNECT_TIMEOUT_SECONDS)
-            ):
-                logger.warning(
-                    "BLE construction cancellation cleanup exceeded %.1fs",
-                    DISCONNECT_TIMEOUT_SECONDS,
+            # Hold close lock so close() cannot interleave between closed-check,
+            # scheduling, and pending-future registration.
+            with self._close_lock:
+                if self._closed:
+                    self._close_coroutine_safely(coro)
+                    raise self.BLEError(BLECLIENT_ERROR_CANNOT_SCHEDULE_CLOSED)
+                runner_thread = getattr(self._runner, "_thread", None)
+                if runner_thread is current_thread():
+                    self._close_coroutine_safely(coro)
+                    raise self.BLEError(BLECLIENT_ERROR_RUNNER_THREAD_WAIT)
+
+                # Exception mapping contract:
+                #   - FutureTimeoutError -> self.BLEError(BLECLIENT_ERROR_ASYNC_TIMEOUT)
+                #   - FutureCancelledError / asyncio.CancelledError ->
+                #       self.BLEError(BLECLIENT_ERROR_CANCELLED)
+                #   - Bleak* exceptions propagate so interface wrappers can convert them consistently.
+                try:
+                    _check_cancelled()
+                except ConnectionCancelledError:
+                    self._close_coroutine_safely(coro)
+                    raise
+                retirement = (
+                    _CoroutineRetirement(coro) if _current_event() is not None else None
                 )
-            self._with_pending_futures(
-                lambda pending_futures: pending_futures.discard(future)
-            )
+                try:
+                    future = self._async_run(retirement.run() if retirement else coro)
+                except BaseException:
+                    if retirement is not None:
+                        retirement.retire(0)
+                    raise
+                self._with_pending_futures(
+                    lambda pending_futures: pending_futures.add(future)
+                )
+            try:
+                # On macOS, CoreBluetooth requires occasional I/O operations for
+                # callbacks to be properly delivered. Without debug logging, no I/O
+                # was happening, causing callbacks to never be processed.
+                # TODO: Track and remove once the upstream Bleak CoreBluetooth callback
+                # starvation issue is fixed and released:
+                # https://github.com/hbldh/bleak/issues?q=is%3Aissue+CoreBluetooth+callback
+                # Limitation: this only helps when stdout exists and supports flush();
+                # redirected/non-flushable outputs (e.g., /dev/null wrappers) may not
+                # provide the I/O nudge needed for callback progress.
+                if sys.platform == "darwin":
+                    stdout = getattr(sys, "stdout", None)
+                    if stdout is None:
+                        _log_macos_stdout_workaround_unavailable_once(
+                            "stdout is unavailable"
+                        )
+                    elif not hasattr(stdout, "flush"):
+                        _log_macos_stdout_workaround_unavailable_once(
+                            "stdout is not flushable"
+                        )
+                    elif getattr(stdout, "closed", False):
+                        _log_macos_stdout_workaround_unavailable_once(
+                            "stdout is closed"
+                        )
+                    else:
+                        with contextlib.suppress(ValueError, OSError, AttributeError):
+                            stdout.flush()
+                return _wait_future(future, timeout)
+            except FutureTimeoutError as e:
+                self._cleanup_future_best_effort(future, "timeout")
+                raise self.BLEError(BLECLIENT_ERROR_ASYNC_TIMEOUT) from e
+            except FutureCancelledError as e:
+                self._cleanup_future_best_effort(future, "cancellation")
+                raise self.BLEError(BLECLIENT_ERROR_CANCELLED) from e
+            except RuntimeError as e:
+                # RuntimeError here typically indicates loop shutdown/closure, not a timeout.
+                self._cleanup_future_best_effort(future, "runtime error")
+                raise self.BLEError(
+                    BLECLIENT_ERROR_ASYNC_OPERATION_FAILED.format(e)
+                ) from e
+            except asyncio.CancelledError as e:
+                # Defensive coverage: Future.result() typically raises
+                # concurrent.futures.CancelledError (handled above), but this keeps
+                # direct coroutine cancellation mapping consistent.
+                raise self.BLEError(BLECLIENT_ERROR_CANCELLED) from e
+        except (SystemExit, KeyboardInterrupt):
+            # Cover submission and pending-future registration as well as
+            # the wait: a signal can arrive before close() can see the job.
+            if future is not None:
+                self._cleanup_future_best_effort(future, "interruption")
+            raise
+        finally:
+            if future is not None:
+                # Future.cancel() acknowledges only the request. Bleak may still be
+                # awaiting BlueZ Disconnect after cancellation or a startup timeout.
+                if (
+                    retirement is not None
+                    and future.cancelled()
+                    and not retirement.retire(DISCONNECT_TIMEOUT_SECONDS)
+                ):
+                    logger.warning(
+                        "BLE construction cancellation cleanup exceeded %.1fs",
+                        DISCONNECT_TIMEOUT_SECONDS,
+                    )
+                self._with_pending_futures(
+                    lambda pending_futures: pending_futures.discard(future)
+                )
 
     # COMPAT_STABLE_SHIM (2.7.7): historical public BLEClient API.
     # Keep callable without deprecation warning.
