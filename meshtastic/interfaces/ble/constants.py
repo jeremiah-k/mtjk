@@ -28,6 +28,9 @@ class BLEConfig:
     """Configuration constants for BLE operations."""
 
     BLE_SCAN_TIMEOUT = 10.0
+    # Bound for the best-effort OS-level connected-device lookup that runs
+    # before a scan so a wedged D-Bus cannot stall `--ble-scan` indefinitely.
+    BLE_CONNECTED_DEVICES_TIMEOUT = 3.0
     RECEIVE_WAIT_TIMEOUT = 0.5
     EMPTY_READ_RETRY_DELAY = 0.1
     EMPTY_READ_MAX_DELAY = 1.0
@@ -73,6 +76,7 @@ class BLEConfig:
 # These are import-time snapshots of BLEConfig class attributes and will not
 # reflect dynamic BLEConfig changes made after this module is imported.
 BLE_SCAN_TIMEOUT = BLEConfig.BLE_SCAN_TIMEOUT
+BLE_CONNECTED_DEVICES_TIMEOUT = BLEConfig.BLE_CONNECTED_DEVICES_TIMEOUT
 RECEIVE_WAIT_TIMEOUT = BLEConfig.RECEIVE_WAIT_TIMEOUT
 EMPTY_READ_RETRY_DELAY = BLEConfig.EMPTY_READ_RETRY_DELAY
 EMPTY_READ_MAX_DELAY = BLEConfig.EMPTY_READ_MAX_DELAY

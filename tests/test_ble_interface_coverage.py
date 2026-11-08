@@ -42,6 +42,25 @@ from meshtastic.interfaces.ble.state import BLEStateManager, ConnectionState
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _stub_connected_device_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep scan tests hermetic: stub the OS-level connected-device lookup.
+
+    `BLEInterface.scan` queries the OS for already-connected radios before
+    scanning; unit tests here must not touch real Bluetooth backends, so the
+    lookup always yields no devices.
+    """
+
+    async def _no_connected_devices(*, adapter: str | None = None) -> list[BLEDevice]:
+        del adapter
+        return []
+
+    monkeypatch.setattr(
+        "meshtastic.interfaces.ble.interface._connected_meshtastic_devices",
+        _no_connected_devices,
+    )
+
+
 def _create_ble_device(address: str, name: str) -> BLEDevice:
     """Construct a BLEDevice for testing."""
     return BLEDevice(address=address, name=name, details={})

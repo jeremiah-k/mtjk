@@ -127,7 +127,22 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 
 ## Bleak 3 compatibility notes
 
-- The project now targets `bleak` `^3.0.1`.
+- The project now targets `bleak` `^3.1.0`.
+- `--ble-scan` also reports radios that are already connected at the OS level
+  but not currently advertising (best-effort via
+  `BleakAdapter.get_connected_devices()`; if that lookup fails, scanning
+  proceeds normally). The whole lookup runs against the 3-second
+  `BLEConfig.BLE_CONNECTED_DEVICES_TIMEOUT` budget. Without `--ble-adapter`,
+  the controllers reported by adapter enumeration are queried concurrently,
+  and each controller's query gets the share of that budget left after
+  enumeration (at most 80% of it, measured from the start of the lookup), so
+  a stalled controller cannot discard the results already found on others; a
+  controller whose query fails or times out is skipped at debug level.
+  Controller enumeration itself is bounded by the same budget, and if it is
+  unavailable or too slow the lookup falls back to Bleak's default adapter.
+  Passing `--ble-adapter hci0` restricts the lookup to that one controller.
+  If the whole lookup hits its outer limit, advertisement scanning still
+  runs and only the OS-connected results are omitted.
 - Bleak 3 deprecates `adapter=...` in favor of
   `bluez={"adapter": ...}` for Linux/BlueZ arguments.
 - `BLEClient` keeps compatibility for older callers by translating legacy
