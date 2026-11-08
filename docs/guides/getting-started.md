@@ -31,6 +31,8 @@ with meshtastic.serial_interface.SerialInterface() as interface:
     interface.sendText("hello mesh")
 ```
 
+At interpreter exit, the library attempts to close connected serial and TCP interfaces and waits up to three seconds for the close worker. Cleanup may not complete, so callers should close interfaces explicitly for a deterministic disconnect. A serial port opened with `connectNow=False` is not tracked until `connect()` succeeds and must be closed by the caller.
+
 A tool installation with `pipx` or `uv tool` does not provide the package to a separate Python application's environment. An application with an existing Meshtastic installation should deliberately replace it rather than attempting to load both distributions.
 
 ## Choosing an API
