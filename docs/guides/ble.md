@@ -127,7 +127,9 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   that radio. Auto-reconnect never clears, but BlueZ may reuse a link held by
   another process; skipping clearance does not provide exclusive access.
   `BLEConfig.CLEAR_STALE_CONNECTIONS = False` disables the behavior.
-  `--ble-scan` never clears.
+  `--ble-scan` never clears. Clearance needs the radio's address, because a
+  name target must first be found by scanning, and a radio held by a
+  stranded link isn't advertising.
   Process-local gates protect registered owners. Direct `BLEClient` and raw
   Bleak connections do not participate in that registry and can be
   disconnected by clearance from another caller.
