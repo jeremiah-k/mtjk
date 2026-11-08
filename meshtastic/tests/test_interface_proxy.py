@@ -14,6 +14,7 @@ import pytest
 
 from meshtastic.cli import bootstrap
 from meshtastic.cli import parser as cli_parser
+from meshtastic.interface_proxy import channels as channels_mod
 from meshtastic.interface_proxy.channels import BLECentralChannel
 from meshtastic.interface_proxy.endpoints import (
     BLEMailbox,
@@ -819,6 +820,42 @@ def test_ble_central_failed_connect_disconnects_client(
         client.disconnect.assert_awaited_once()
 
     asyncio.run(scenario())
+
+
+def test_ble_central_open_skips_clearance_when_owned_elsewhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The proxy channel never clears a link owned by this process."""
+    from unittest.mock import AsyncMock
+
+    cleared: list[str] = []
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        cleared.append(address)
+        return False
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.start_notify = AsyncMock()
+        client.read_gatt_char = AsyncMock(return_value=b"")
+        client.disconnect = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+        )
+        monkeypatch.setattr(
+            channels_mod,
+            "_is_currently_connected_elsewhere",
+            lambda _addr: True,
+        )
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await channel.close()
+
+    asyncio.run(scenario())
+    assert cleared == []
 
 
 def test_ble_disconnect_drains_packet_waiting_for_queue_space(

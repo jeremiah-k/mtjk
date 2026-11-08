@@ -16,6 +16,8 @@ from meshtastic.interfaces.ble.constants import (
     FROMRADIO_UUID,
     TORADIO_UUID,
 )
+from meshtastic.interfaces.ble.gating import _is_currently_connected_elsewhere
+from meshtastic.interfaces.ble.stale_connection import _clear_stale_connection
 from meshtastic.stream_interface import DEVICE_WAKE_DELAY, START2, WAKE_BYTE_COUNT
 
 if TYPE_CHECKING:
@@ -196,6 +198,14 @@ class BLECentralChannel:
     ) -> BLECentralChannel:
         """Connect to a BLE radio using the existing Bleak dependency."""
         from bleak import BleakClient  # pylint: disable=import-outside-toplevel
+
+        # BlueZ keeps a link open until something disconnects it; a link
+        # stranded by a dead process stops the radio from advertising and
+        # would break this connect. Even with clearance enabled, never
+        # disconnect a link owned by a live BLEInterface in this process.
+        # Best-effort: never raises, never blocks long.
+        if not _is_currently_connected_elsewhere(address):
+            await _clear_stale_connection(address, adapter=adapter)
 
         loop = asyncio.get_running_loop()
         link: BLECentralChannel | None = None

@@ -49,6 +49,7 @@ import meshtastic.interfaces.ble.constants as _ble_constants
 from meshtastic._publishing import publishing_thread as publishingThread
 from meshtastic._transport_selection import _validate_ble_adapter
 from meshtastic.cancellation import (
+    ConnectionCancelledError,
     _acquire_lock,
     _cancellable_init,
     _check_cancelled,
@@ -148,6 +149,10 @@ from meshtastic.interfaces.ble.reconnection import ReconnectScheduler
 from meshtastic.interfaces.ble.session_state import (
     BLESessionState,
     _BLESessionStateCompatMixin,
+)
+from meshtastic.interfaces.ble.stale_connection import (
+    _clear_stale_connection_before_central_connect,
+    _stale_clearance_suppressed,
 )
 from meshtastic.interfaces.ble.state import (
     BLEStateManager,
@@ -2800,6 +2805,67 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
     # Main connection method
     # ---------------------------------------------------------------------
 
+    def _clear_stale_link_before_establish(self, target_identifier: str | None) -> None:
+        """Disconnect a BlueZ-reported stale link to the target before connecting.
+
+        Explicit connects only: a central link left open at the OS level by a
+        previous process keeps the radio from advertising and would break the
+        connect attempt that follows. Auto-reconnect suppresses clearance (the
+        radio is this process's own target; Device1.Disconnect is device-global
+        and would fight another local process for it). Best-effort and never
+        raises for transport failures; construction cancellation propagates.
+        Only the single target address is ever touched. Skipped when
+        the address is currently claimed by another owner in this process or
+        held by this interface's own live client — those links are ours, not
+        stale.
+
+        Parameters
+        ----------
+        target_identifier : str | None
+            Resolved connect target; None (implicit discovery) is a no-op.
+        """
+        if target_identifier is None:
+            return
+        if not BLEConfig.CLEAR_STALE_CONNECTIONS:
+            return
+        if _stale_clearance_suppressed():
+            logger.debug(
+                "Skipping stale-connection clearance for %s: suppressed for auto-reconnect",
+                target_identifier,
+            )
+            return
+        try:
+            # Check this interface's own live client as well as another
+            # process-local owner. The registry helper deliberately excludes
+            # self, but reconnecting with a different identifier for the same
+            # device must never tear down our own healthy client.
+            with self._state_lock:
+                current_client = getattr(self, "client", None)
+                if (
+                    current_client is not None
+                    and ConnectionValidator._client_is_connected(current_client)
+                    and _addr_key(self._extract_client_address(current_client))
+                    == _addr_key(target_identifier)
+                ):
+                    return
+            if _is_currently_connected_elsewhere(target_identifier, owner=self):
+                logger.debug(
+                    "Skipping stale-connection clearance for %s: claimed elsewhere in this process",
+                    target_identifier,
+                )
+                return
+            _clear_stale_connection_before_central_connect(
+                target_identifier, adapter=self._adapter
+            )
+        except ConnectionCancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - clearance must never break connect
+            logger.debug(
+                "Stale-connection clearance could not run for %s",
+                target_identifier,
+                exc_info=True,
+            )
+
     def connect(
         self,
         address: str | None = None,
@@ -2967,6 +3033,17 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                         with self._state_lock:
                             if self._client_publish_pending:
                                 raise self.BLEError(ERROR_MANAGEMENT_CONNECTING)
+
+                        # BlueZ keeps a link open until something disconnects
+                        # it; a link stranded by a dead process stops the radio
+                        # from advertising and would break this connect.
+                        # Explicit connects clear it best-effort before the
+                        # Bleak client connects; auto-reconnect suppresses
+                        # clearance so it never fights another local process.
+                        if requested_identifier is not None:
+                            self._clear_stale_link_before_establish(
+                                connect_target_identifier
+                            )
 
                         # Establish new connection and update state
                         (
