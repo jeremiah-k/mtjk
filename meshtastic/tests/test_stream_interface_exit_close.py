@@ -3,6 +3,7 @@
 import atexit
 import gc
 import logging
+import os
 import subprocess
 import sys
 import textwrap
@@ -336,17 +337,32 @@ def test_exit_hook_registered_once_and_lazily(
     """The atexit hook is registered exactly once, on the first tracked interface.
 
     Both interfaces exercise a real connect() so the registration path is the
-    production one, not a direct registry helper call.
+    production one, not a direct registry helper call. Where the platform
+    provides it, the same lazy registration point also registers the
+    post-fork registry reset exactly once.
     """
     register_calls: list[object] = []
+    fork_calls: list[object] = []
     monkeypatch.setattr(
         stream_interface_module._exit_close_hook_state, "registered", False
+    )
+    monkeypatch.setattr(
+        stream_interface_module._exit_close_hook_state, "fork_reset_registered", False
     )
 
     def spy_register(func: object) -> None:
         register_calls.append(func)
 
+    def spy_register_at_fork(
+        before: object | None = None,
+        after_in_parent: object | None = None,
+        after_in_child: object | None = None,
+    ) -> None:
+        fork_calls.append(after_in_child)
+
     monkeypatch.setattr(atexit, "register", spy_register)
+    if hasattr(os, "register_at_fork"):
+        monkeypatch.setattr(os, "register_at_fork", spy_register_at_fork)
 
     iface_one = StreamInterface(noProto=True, connectNow=False)
     iface_two = StreamInterface(noProto=True, connectNow=False)
@@ -356,9 +372,16 @@ def test_exit_hook_registered_once_and_lazily(
             iface.stream.read.return_value = b""
         iface_one.connect()
         assert len(register_calls) == 1
+        assert len(fork_calls) == (1 if hasattr(os, "register_at_fork") else 0)
+        if hasattr(os, "register_at_fork"):
+            assert (
+                stream_interface_module._reset_exit_close_registry_after_fork
+                in fork_calls
+            )
 
         iface_two.connect()
         assert len(register_calls) == 1
+        assert len(fork_calls) == (1 if hasattr(os, "register_at_fork") else 0)
     finally:
         for iface in (iface_one, iface_two):
             iface.close()
@@ -388,6 +411,67 @@ def test_exit_hook_registration_failure_does_not_poison_retry(
     stream_interface_module._register_exit_close_hook_once()
     assert state.registered
     assert successful == [stream_interface_module._close_open_stream_interfaces_at_exit]
+
+
+@pytest.mark.unit
+def test_failed_fork_reset_registration_cannot_publish_an_exit_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = stream_interface_module._ExitCloseHookState()
+    monkeypatch.setattr(stream_interface_module, "_exit_close_hook_state", state)
+    exit_hooks: list[object] = []
+
+    def refuse_fork(**kwargs: object) -> None:
+        raise RuntimeError("fork reset unavailable")
+
+    monkeypatch.setattr(os, "register_at_fork", refuse_fork, raising=False)
+    monkeypatch.setattr(atexit, "register", exit_hooks.append)
+    stream_interface_module._register_exit_close_hook_once()
+    assert exit_hooks == [], "an inherited hook would lack the parent's registry reset"
+    assert not state.registered
+
+
+@pytest.mark.unit
+def test_exit_registration_retry_preserves_fork_reset_and_logs_outside_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = stream_interface_module._ExitCloseHookState()
+    monkeypatch.setattr(stream_interface_module, "_exit_close_hook_state", state)
+    calls: list[str] = []
+    lock_states: list[bool] = []
+
+    def register_fork(**kwargs: object) -> None:
+        calls.append("fork")
+
+    def refuse_exit(callback: object) -> None:
+        calls.append("exit")
+        raise RuntimeError("exit hook unavailable")
+
+    def warning(*args: object, **kwargs: object) -> None:
+        def probe_registry_lock() -> None:
+            lock = stream_interface_module._open_stream_interfaces_lock
+            acquired = lock.acquire(timeout=0.2)
+            lock_states.append(not acquired)
+            if acquired:
+                lock.release()
+
+        probe = threading.Thread(target=probe_registry_lock)
+        probe.start()
+        probe.join(timeout=2)
+        assert not probe.is_alive()
+
+    monkeypatch.setattr(os, "register_at_fork", register_fork, raising=False)
+    monkeypatch.setattr(atexit, "register", refuse_exit)
+    monkeypatch.setattr(stream_interface_module.logger, "warning", warning)
+    stream_interface_module._register_exit_close_hook_once()
+    assert lock_states == [False], "host log callbacks ran under the registry lock"
+    assert calls == ["fork", "exit"]
+    assert not state.registered
+
+    monkeypatch.setattr(atexit, "register", lambda callback: calls.append("exit"))
+    stream_interface_module._register_exit_close_hook_once()
+    assert calls == ["fork", "exit", "exit"]
+    assert state.registered
 
 
 @pytest.mark.unit
@@ -706,6 +790,107 @@ def test_normal_interpreter_exit_sends_disconnect_and_closes_stream() -> None:
     ], result.stderr
     assert "Failed to start" not in result.stderr
     assert "Timed out after" not in result.stderr
+
+
+FORK_EXIT_PROBE_CODE = textwrap.dedent("""
+    import io
+    import os
+    import sys
+
+    from meshtastic.protobuf import mesh_pb2
+    from meshtastic.stream_interface import START1, START2, StreamInterface
+
+    payload = mesh_pb2.ToRadio(disconnect=True).SerializeToString()
+    disconnect = bytes([START1, START2, 0, len(payload)]) + payload
+    write_fd = int(os.environ['MTJK_EXIT_CLOSE_PROBE_FD'])
+
+    class ProbeStream(io.BytesIO):
+        def write(self, data):
+            os.write(write_fd, bytes(data))
+            return super().write(data)
+
+        def close(self):
+            if not self.closed:
+                print('probe-close %d' % os.getpid(), flush=True)
+            super().close()
+
+    interface = StreamInterface(noProto=True, connectNow=False)
+    interface.stream = ProbeStream()
+    interface.connect()
+    # Skip the protocol handshake, but exercise its real disconnect write.
+    interface.noProto = False
+    print('parent-pid %d' % os.getpid(), flush=True)
+    fork_result = os.fork()
+    if fork_result == 0:
+        # The child inherits the registry, the registered atexit hook and
+        # the parent's stream, then exits normally without touching the
+        # interface.
+        print('child-exiting', flush=True)
+        sys.exit(0)
+    os.waitpid(fork_result, 0)
+    print('parent-still-open', flush=True)
+    """)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    not hasattr(os, "fork") or not hasattr(os, "register_at_fork"),
+    reason="requires os.fork and os.register_at_fork",
+)
+def test_forked_child_does_not_close_parents_interface() -> None:
+    """A forked child exiting normally must not close the parent's interface.
+
+    The child inherits the registry, the registered atexit hook, and the
+    parent's stream. Without a post-fork registry reset, the child's normal
+    exit runs the inherited hook and writes the disconnect frame on the
+    shared transport, breaking the parent's session. The probe stream
+    mirrors every write onto a pipe shared with this test process, so
+    exactly one disconnect frame (the parent's exit close) must arrive, and
+    only the parent may close the probe stream.
+    """
+    from meshtastic.protobuf import mesh_pb2
+    from meshtastic.stream_interface import START1, START2
+
+    payload = mesh_pb2.ToRadio(disconnect=True).SerializeToString()
+    disconnect = bytes([START1, START2, 0, len(payload)]) + payload
+    read_fd, write_fd = os.pipe()
+    pipe_data = b""
+    result: subprocess.CompletedProcess[str] | None = None
+    try:
+        try:
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", FORK_EXIT_PROBE_CODE],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                pass_fds=(write_fd,),
+                env={**os.environ, "MTJK_EXIT_CLOSE_PROBE_FD": str(write_fd)},
+            )
+        finally:
+            os.close(write_fd)
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        pipe_data = b"".join(chunks)
+    finally:
+        os.close(read_fd)
+
+    assert result is not None
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "child-exiting" in lines, lines
+    assert "parent-still-open" in lines, lines
+    parent_pid = next(
+        line.split()[-1] for line in lines if line.startswith("parent-pid ")
+    )
+    close_pids = [line.split()[-1] for line in lines if line.startswith("probe-close")]
+    assert close_pids == [parent_pid], lines
+    assert pipe_data.count(disconnect) == 1, pipe_data
+    assert pipe_data.endswith(disconnect), pipe_data
 
 
 @pytest.mark.unit

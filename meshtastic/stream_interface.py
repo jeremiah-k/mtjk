@@ -134,6 +134,7 @@ class _ExitCloseHookState:
     def __init__(self) -> None:
         """Start with the exit hook unregistered."""
         self.registered = False
+        self.fork_reset_registered = False
 
 
 _exit_close_hook_state = _ExitCloseHookState()
@@ -145,6 +146,31 @@ def _add_open_stream_interface(interface: "StreamInterface") -> None:
         _open_stream_interfaces.add(interface)
 
 
+def _untrack_open_stream_interface(interface: "StreamInterface") -> None:
+    """Drop an interface from the exit-close registry."""
+    with _open_stream_interfaces_lock:
+        _open_stream_interfaces.discard(interface)
+
+
+def _reset_exit_close_registry_after_fork() -> None:
+    """Drop inherited exit-close registry state in a forked child.
+
+    A child forked after an interface was opened inherits the registry, the
+    registered atexit hook, and the parent's transport file descriptor or
+    socket. If the child exits normally it would run the inherited hook and
+    close the parent's live interface, writing a disconnect frame on the
+    shared fd or socket and breaking the parent's session. The child also
+    inherits the registry lock, possibly mid-acquire from a parent thread
+    that does not exist in the child, so the lock is re-created first; the
+    child has a single thread and the freshly created registry starts
+    empty. The inherited atexit hook stays registered and becomes a no-op on
+    the empty registry.
+    """
+    global _open_stream_interfaces_lock  # pylint: disable=global-statement
+    _open_stream_interfaces_lock = threading.RLock()
+    _open_stream_interfaces.clear()
+
+
 def _register_exit_close_hook_once() -> None:
     """Register the module-level atexit hook exactly once.
 
@@ -152,28 +178,40 @@ def _register_exit_close_hook_once() -> None:
     one-shot flag before registration finished could lose the hook entirely if
     registration failed or the thread was interrupted. No caller holds an
     interface's connect lock here, and registering a callback does not invoke
-    interface code.
+    interface code. Where the platform provides it, the same registration
+    point also registers the post-fork registry reset, so a forked child
+    inherits the hook but not the parent's tracked interfaces.
     """
+    registration_error: Exception | None = None
     with _open_stream_interfaces_lock:
         if _exit_close_hook_state.registered:
             return
         try:
+            # Publish the child reset before an exit hook can be inherited.
+            # Failure here must never leave an unprotected close hook behind.
+            if (
+                hasattr(os, "register_at_fork")
+                and not _exit_close_hook_state.fork_reset_registered
+            ):
+                os.register_at_fork(
+                    after_in_child=_reset_exit_close_registry_after_fork
+                )
+                _exit_close_hook_state.fork_reset_registered = True
             atexit.register(_close_open_stream_interfaces_at_exit)
-        except Exception:
+        except Exception as exc:
             # A successful transport connect should not be undone because an
             # interpreter shutting down refused a best-effort exit hook.
-            logger.warning("Could not register stream exit-close hook", exc_info=True)
-            return
-        # A BaseException in this gap could let a later connect register the
-        # hook twice; harmless, because every close() untracks first, so a
-        # duplicate exit run only re-attempts closes that never started.
-        _exit_close_hook_state.registered = True
-
-
-def _untrack_open_stream_interface(interface: "StreamInterface") -> None:
-    """Drop an interface from the exit-close registry."""
-    with _open_stream_interfaces_lock:
-        _open_stream_interfaces.discard(interface)
+            registration_error = exc
+        else:
+            # A BaseException in this gap could let a later connect register
+            # twice; every close() untracks before native teardown begins.
+            _exit_close_hook_state.registered = True
+    if registration_error is not None:
+        # Host log handlers are arbitrary callbacks and must run outside the
+        # registry lock, just like interface cleanup itself.
+        logger.warning(
+            "Could not register stream exit-close hook", exc_info=registration_error
+        )
 
 
 def _exit_close_interface(interface: "StreamInterface") -> None:
