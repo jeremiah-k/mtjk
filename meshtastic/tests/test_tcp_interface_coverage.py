@@ -314,14 +314,23 @@ def test_TCPInterface_close_socket_if_current_mismatch() -> None:
 
 @pytest.mark.unit
 def test_TCPInterface_close_socket_if_current_match() -> None:
-    """Test _close_socket_if_current when socket matches."""
+    """Test _close_socket_if_current when socket matches.
+
+    Builds the interface without a reader thread (connectNow=False) and
+    installs the socket explicitly: with connectNow=True the live reader
+    treats a cleared socket as a disconnect and reconnects on the patched
+    create_connection, reassigning the same mock back to `iface.socket`
+    and racing the assertion below.
+    """
     with patch("socket.socket"):
         with patch("meshtastic.tcp_interface.socket.create_connection") as mock_connect:
             current_socket = MagicMock()
             mock_connect.return_value = current_socket
 
-            iface = TCPInterface(hostname="localhost", noProto=True, connectNow=True)
+            iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
             try:
+                iface.socket = current_socket
+
                 result = iface._close_socket_if_current(current_socket)
 
                 # Should return True and clear socket
