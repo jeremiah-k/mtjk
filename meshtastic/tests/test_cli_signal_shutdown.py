@@ -492,6 +492,31 @@ def test_signal_self_suppresses_delivery_oserror(
     assert resets == [signal.SIGINT]
 
 
+@pytest.mark.skipif(
+    os.name != "posix", reason="real self-signal delivery requires POSIX"
+)
+def test_signal_self_preserves_restored_handler_exception() -> None:
+    """A restored host handler's exception propagates from the re-delivery seam.
+
+    The TERM/HUP re-delivery rides the host's restored disposition: when that
+    Python-level handler raises while receiving the delivered signal, its
+    exception must reach the caller instead of being masked by the seam's
+    silent delivery-failure fallback. The real disposition is restored in a
+    finally so the autouse disposition guard sees no leak.
+    """
+    before = _ORIGINAL_GETSIGNAL(signal.SIGTERM)
+
+    def _failing_host_handler(signum: int, frame: Any) -> None:
+        raise ValueError("host handler failed")
+
+    _ORIGINAL_SIGNAL_FUNCTION(signal.SIGTERM, _failing_host_handler)
+    try:
+        with pytest.raises(ValueError, match="host handler failed"):
+            _REAL_SIGNAL_SELF(signal.SIGTERM, reset_to_default=False)
+    finally:
+        _ORIGINAL_SIGNAL_FUNCTION(signal.SIGTERM, before)
+
+
 def test_sigint_re_delivery_eligible_under_default_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
