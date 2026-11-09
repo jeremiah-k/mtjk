@@ -106,14 +106,14 @@ lint:
           # is cheap next to reporting stale results.
           stdin: false
   enabled:
-    - grype@0.121.2
+    - grype@0.121.3
     - black@26.10.1
     - checkov@3.4.3
     - git-diff-check
     - gitleaks@8.30.1
     - isort@9.0.2
     - markdownlint@0.50.0
-    - osv-scanner@2.7.0
+    - osv-scanner@2.7.1
     - prettier@3.9.10
     - ruff@0.17.4
     - shellcheck@0.11.0
