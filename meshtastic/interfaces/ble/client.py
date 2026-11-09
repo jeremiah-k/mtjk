@@ -162,6 +162,7 @@ def _spawn_interrupted_cleanup_fence_watcher(
     """
 
     def _watch() -> None:
+        """Wait for the straggler cleanup and retire this watcher's fence token."""
         retired = retirement.wait_cleanup(max(deadline - time.monotonic(), 0.0))
         if not retired:
             logger.warning(

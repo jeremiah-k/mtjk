@@ -58,6 +58,7 @@ class TestInterruptedCleanupFenceRegistry:
     """Register/expire/refuse lifecycle of the gating fence record."""
 
     def test_register_and_retire(self) -> None:
+        """A registered fence refuses connects until it is retired."""
         assert not gating._interrupted_cleanup_fenced(_TARGET)
         deadline = gating._register_interrupted_cleanup_fence(_TARGET)
         assert deadline > time.monotonic()
@@ -66,18 +67,21 @@ class TestInterruptedCleanupFenceRegistry:
         assert not gating._interrupted_cleanup_fenced(_TARGET)
 
     def test_retire_is_idempotent(self) -> None:
+        """Retiring an already-retired fence keeps the address unfenced."""
         gating._register_interrupted_cleanup_fence(_TARGET)
         gating._retire_interrupted_cleanup_fence(_TARGET)
         gating._retire_interrupted_cleanup_fence(_TARGET)
         assert not gating._interrupted_cleanup_fenced(_TARGET)
 
     def test_none_address_is_a_noop(self) -> None:
+        """Registering, consulting, and retiring None never fences anything."""
         assert gating._register_interrupted_cleanup_fence(None) == 0.0
         assert not gating._interrupted_cleanup_fenced(None)
         gating._retire_interrupted_cleanup_fence(None)
         assert not gating._interrupted_cleanup_fenced(None)
 
     def test_normalization_collapses_address_spellings(self) -> None:
+        """All address spellings normalize to the same fence key."""
         gating._register_interrupted_cleanup_fence("aa:bb-cc_dd ee:ff")
         assert gating._interrupted_cleanup_fenced("AABBCCDDEEFF")
         assert gating._interrupted_cleanup_fenced(_TARGET)
@@ -85,6 +89,7 @@ class TestInterruptedCleanupFenceRegistry:
     def test_registration_refreshes_deadline(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """A repeated registration extends the fence deadline."""
         clock = SimpleNamespace(now=1000.0)
         monkeypatch.setattr(
             gating, "time", SimpleNamespace(monotonic=lambda: clock.now)
@@ -151,6 +156,7 @@ class TestInterruptedCleanupFenceRegistry:
         assert "aabbccddeeff" not in _INTERRUPTED_CLEANUP_FENCES
 
     def test_clear_all_registries_clears_fences(self) -> None:
+        """Clearing the gate registries drops every fence record."""
         gating._register_interrupted_cleanup_fence(_TARGET)
         gating._clear_all_registries()
         assert _INTERRUPTED_CLEANUP_FENCES == {}
@@ -182,6 +188,7 @@ def _interrupt_at_wait(
     """
 
     def interrupt_wait(future: Any, timeout: float | None) -> Any:
+        """Stand in for _wait_future and raise the interrupt once the wait starts."""
         assert started.wait(timeout=2)
         raise KeyboardInterrupt()
 
@@ -197,10 +204,12 @@ class TestClientFenceRegistration:
     def test_overrunning_cleanup_registers_fence_on_both_layers(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """An interrupted connect whose cleanup overruns fences the address from both call sites, and the retirement watcher releases it."""
         started = threading.Event()
         release_cleanup = threading.Event()
 
         async def connect(**kwargs: Any) -> None:
+            """Block native cleanup past the bound so both fence layers register."""
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -229,9 +238,11 @@ class TestClientFenceRegistration:
     def test_cleanup_within_bound_does_not_fence(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Cleanup retiring within its bound leaves no fence behind."""
         started = threading.Event()
 
         async def connect(**kwargs: Any) -> None:
+            """Retire native cleanup promptly so no fence registers."""
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -252,10 +263,12 @@ class TestClientFenceRegistration:
     def test_unretired_cleanup_expires_by_deadline(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """A straggler cleanup that never retires is released by the deadline backstop."""
         started = threading.Event()
         release_cleanup = threading.Event()
 
         async def connect(**kwargs: Any) -> None:
+            """Keep cleanup pending past the fence deadline."""
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -285,10 +298,12 @@ class TestClientFenceRegistration:
     def test_client_without_address_does_not_fence(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """An addressless client cannot fence anything when its cleanup overruns."""
         started = threading.Event()
         release_cleanup = threading.Event()
 
         async def connect(**kwargs: Any) -> None:
+            """Keep cleanup pending; the client has no address to fence."""
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -337,6 +352,7 @@ def _stub_interface(monkeypatch: pytest.MonkeyPatch) -> BLEInterface:
         pair_on_connect: bool = False,
         connect_timeout: float | None = None,
     ) -> tuple[object, str | None, None]:
+        """Return the stub client without touching the transport."""
         _ = pair_on_connect, connect_timeout
         return sentinel_client, "aabbccddeeff", None
 
@@ -397,6 +413,7 @@ class TestInterfacePathRefusal:
     def test_connect_refused_while_fenced(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The interface connect path raises while the fence is active."""
         interface = _stub_interface(monkeypatch)
         gating._register_interrupted_cleanup_fence(_TARGET)
         with pytest.raises(
@@ -419,6 +436,7 @@ class TestInterfacePathRefusal:
     def test_connect_allowed_after_fence_retires(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The interface connect succeeds once the fence retires."""
         interface = _stub_interface(monkeypatch)
         deadline = gating._register_interrupted_cleanup_fence(_TARGET)
         gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=deadline)
@@ -430,10 +448,12 @@ class TestProxyClaimPathRefusal:
     """The proxy claim path refuses while the fence is active."""
 
     def test_claim_refused_while_fenced(self) -> None:
+        """The proxy claim path refuses while the fence is active."""
         gating._register_interrupted_cleanup_fence(_TARGET)
         assert channels._try_claim_ble_address(_TARGET, object()) is False
 
     def test_claim_allowed_after_fence_retires(self) -> None:
+        """The proxy claim succeeds once the fence retires."""
         deadline = gating._register_interrupted_cleanup_fence(_TARGET)
         gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=deadline)
         owner = object()
