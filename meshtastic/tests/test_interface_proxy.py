@@ -1132,6 +1132,39 @@ def test_ble_disconnect_drains_packet_waiting_for_queue_space(
     asyncio.run(scenario())
 
 
+def test_ble_central_close_stops_poll_loop_woken_as_close_starts(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """close() ends the poll loop even when a wake lands as it cancels.
+
+    A FROMNUM notification, or the wake open() sets itself, can finish the
+    poll loop's wait in the same loop step that close() cancels it. Python
+    3.11's asyncio.wait_for returned the wait's result there instead of
+    raising the cancel, so the loop kept polling and close() never returned.
+    """
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        return False
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        receive_task = channel._receive_task
+        assert receive_task is not None
+        # Let the loop drain open()'s wake and park on its next wait.
+        await asyncio.sleep(0.05)
+        channel._wake.set()  # A notification arrives as close() starts.
+        close_task = asyncio.create_task(channel.close())
+        done, _ = await asyncio.wait({close_task}, timeout=5)
+        assert close_task in done, "close() hung on a poll loop that kept polling"
+        assert receive_task.cancelled()
+        client.disconnect.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.skipif(os.name != "posix", reason="PTY is available on POSIX")
 def test_pty_waits_for_initial_client_but_reports_session_close() -> None:
     """An absent initial slave can attach; closing that slave ends the session."""

@@ -322,9 +322,13 @@ class BLECentralChannel:
     async def _poll_radio(self) -> None:
         try:
             while not self._transport_disconnected.is_set():
+                # asyncio.timeout, not wait_for: on Python 3.11 wait_for
+                # swallows a cancel that lands as the wake completes, which
+                # kept this loop polling and close() waiting on it forever.
                 try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=0.4)
-                except asyncio.TimeoutError:
+                    async with asyncio.timeout(0.4):
+                        await self._wake.wait()
+                except TimeoutError:
                     pass
                 self._wake.clear()
                 # Multiple packets can accumulate for a single FROMNUM change.
