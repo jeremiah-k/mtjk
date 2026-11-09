@@ -5595,6 +5595,7 @@ class DeviceMetadata(_message.Message):
     HAS_XEDDSA_FIELD_NUMBER: _builtins.int
     DISPLAY_FIELD_NUMBER: _builtins.int
     BLE_ADDRESS_FIELD_NUMBER: _builtins.int
+    BOOTLOADER_VERSION_FIELD_NUMBER: _builtins.int
     firmware_version: _builtins.str
     """
     Device firmware version string
@@ -5659,6 +5660,13 @@ class DeviceMetadata(_message.Message):
     hardware address is known. Empty when the device has no BLE radio or the
     address cannot be determined.
     """
+    bootloader_version: _builtins.int
+    """
+    nRF52 bootloader version, packed as major << 16 | minor << 8 | patch, as the
+    bootloader hands it to the application at boot. Meshtastic nRF52 Bootloader
+    releases before 2.6.0 report 0.9.2, the same as stock Adafruit 0.9.2. 0 means
+    not reported: a non-nRF52 device, or firmware that predates this field.
+    """
     @_builtins.property
     def display(self) -> Global___DisplayInfo:
         """
@@ -5686,10 +5694,11 @@ class DeviceMetadata(_message.Message):
         has_xeddsa: _builtins.bool = ...,
         display: Global___DisplayInfo | None = ...,
         ble_address: _builtins.str = ...,
+        bootloader_version: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["display", b"display"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["ble_address", b"ble_address", "canShutdown", b"canShutdown", "device_state_version", b"device_state_version", "display", b"display", "excluded_modules", b"excluded_modules", "firmware_version", b"firmware_version", "hasBluetooth", b"hasBluetooth", "hasEthernet", b"hasEthernet", "hasPKC", b"hasPKC", "hasRemoteHardware", b"hasRemoteHardware", "hasWifi", b"hasWifi", "has_xeddsa", b"has_xeddsa", "hw_model", b"hw_model", "position_flags", b"position_flags", "role", b"role"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["ble_address", b"ble_address", "bootloader_version", b"bootloader_version", "canShutdown", b"canShutdown", "device_state_version", b"device_state_version", "display", b"display", "excluded_modules", b"excluded_modules", "firmware_version", b"firmware_version", "hasBluetooth", b"hasBluetooth", "hasEthernet", b"hasEthernet", "hasPKC", b"hasPKC", "hasRemoteHardware", b"hasRemoteHardware", "hasWifi", b"hasWifi", "has_xeddsa", b"has_xeddsa", "hw_model", b"hw_model", "position_flags", b"position_flags", "role", b"role"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
