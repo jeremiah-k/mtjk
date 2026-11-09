@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, create_autospec, patch
@@ -28,6 +29,7 @@ from ..protobuf import (
     mesh_pb2,
     portnums_pb2,
 )
+from ..stream_interface import StreamInterface
 
 # TODO
 # from ..config import Config
@@ -493,6 +495,350 @@ def test_close_waits_for_inflight_heartbeat_send(
         assert close_done.is_set()
         assert not close_thread.is_alive()
         assert not start_thread.is_alive()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_close_times_out_waiting_for_inflight_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """close() must return within its drain bound when a heartbeat send never finishes.
+
+    The bound wait logs a warning, skips the disconnect frame (the transport
+    write is wedged), and still releases resources.
+    """
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.2
+        )
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+
+        with caplog.at_level(logging.WARNING):
+            close_start = time.monotonic()
+            iface.close()
+            elapsed = time.monotonic() - close_start
+
+        # close() returned while the heartbeat send is still in flight, so the
+        # wait is bounded instead of unbounded.
+        assert elapsed < 2.0
+        assert not release_send.is_set()
+        assert iface._closing is True
+        assert disconnect_calls == []
+        # The remaining teardown still released resources.
+        assert iface.debugOut is None
+        assert "timed out after" in caplog.text
+        assert "skipping the disconnect frame" in caplog.text
+
+        release_send.set()
+        start_thread.join(timeout=1.0)
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_close_sends_disconnect_after_heartbeat_drains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A heartbeat send that finishes in time still gets the disconnect frame."""
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+
+        release_send.set()
+        iface.close()
+        start_thread.join(timeout=1.0)
+
+        assert disconnect_calls == [1]
+        assert not start_thread.is_alive()
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_late_heartbeat_after_close_timeout_does_not_rearm_or_send(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    fake_timer_cls: type["FakeTimer"],
+) -> None:
+    """A heartbeat completing after close() gave up cannot re-arm or send again."""
+    iface = MeshInterface(noProto=False)
+    try:
+        iface.debugOut = io.StringIO()
+        send_started = threading.Event()
+        release_send = threading.Event()
+        disconnect_calls: list[int] = []
+        send_count: list[int] = []
+
+        def blocking_send_heartbeat() -> None:
+            send_count.append(1)
+            send_started.set()
+            release_send.wait(timeout=2.0)
+
+        def record_disconnect() -> None:
+            disconnect_calls.append(1)
+
+        monkeypatch.setattr(iface, "sendHeartbeat", blocking_send_heartbeat)
+        monkeypatch.setattr(iface, "_send_disconnect", record_disconnect)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.1
+        )
+
+        start_thread = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        start_thread.start()
+        assert send_started.wait(timeout=1.0)
+        assert len(fake_timer_cls.created) == 1
+        late_timer = fake_timer_cls.created[0]
+
+        with caplog.at_level(logging.WARNING):
+            iface.close()
+
+        # close() timed out, skipped the disconnect, and cancelled the
+        # re-armed timer.
+        assert disconnect_calls == []
+        assert late_timer.cancelled is True
+
+        # Simulate the re-armed timer firing late despite cancellation: the
+        # callback must observe _closing and neither schedule a new timer nor
+        # send another heartbeat.
+        late_timer.function()
+        assert len(fake_timer_cls.created) == 1
+        assert send_count == [1]
+
+        # Let the in-flight send finish after close() returned: it only
+        # drains the inflight counter, with no further timer or sends.
+        release_send.set()
+        start_thread.join(timeout=1.0)
+        assert not start_thread.is_alive()
+        assert iface._heartbeat_inflight == 0
+        assert len(fake_timer_cls.created) == 1
+        assert send_count == [1]
+        assert disconnect_calls == []
+    finally:
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_stale_heartbeat_does_not_write_into_replacement_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A heartbeat parked past close() and reconnect must never reach the replacement transport.
+
+    The heartbeat is parked before its transport write while the original
+    connection is still current. close() exhausts its drain deadline, a
+    replacement stream is bound by a reconnect, and only then is the parked
+    send released. The connection fence must drop the frame: nothing from the
+    old lifetime may be written into the replacement transport.
+    """
+    iface = StreamInterface(noProto=True, connectNow=False)
+    release_send = threading.Event()
+    worker: threading.Thread | None = None
+    try:
+        monkeypatch.setattr(iface, "_sleep_after_write", lambda: None)
+        iface.stream = io.BytesIO()
+        iface.connect()
+        iface.noProto = False
+
+        entered = threading.Event()
+        original_send = iface.sendHeartbeat
+
+        def parked_send() -> None:
+            entered.set()
+            assert release_send.wait(timeout=5)
+            original_send()
+
+        monkeypatch.setattr(iface, "sendHeartbeat", parked_send)
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+
+        with caplog.at_level(logging.DEBUG):
+            monkeypatch.setattr(
+                mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.01
+            )
+            iface.close()
+
+            replacement = io.BytesIO()
+            iface.stream = replacement
+            iface.noProto = True
+            iface.connect()
+            iface.noProto = False
+
+            release_send.set()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+
+            heartbeat_payload = mesh_pb2.ToRadio(
+                heartbeat=mesh_pb2.Heartbeat()
+            ).SerializeToString()
+            assert not replacement.getvalue().endswith(heartbeat_payload)
+            assert "fenced to a previous connection lifetime" in caplog.text
+    finally:
+        release_send.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_connect_without_close_invalidates_parked_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reconnect without close() still fences a parked heartbeat.
+
+    The reader is stopped and a replacement stream is bound, but close() never
+    runs, so the connection-generation bump in connect() is the only thing that
+    can invalidate the parked send. Releasing the heartbeat afterwards must
+    drop the frame instead of writing it into the replacement stream.
+    """
+    iface = StreamInterface(noProto=True, connectNow=False)
+    release_send = threading.Event()
+    worker: threading.Thread | None = None
+    try:
+        monkeypatch.setattr(iface, "_sleep_after_write", lambda: None)
+        iface.stream = io.BytesIO()
+        iface.connect()
+        iface.noProto = False
+
+        entered = threading.Event()
+        original_send = iface.sendHeartbeat
+
+        def parked_send() -> None:
+            entered.set()
+            assert release_send.wait(timeout=5)
+            original_send()
+
+        monkeypatch.setattr(iface, "sendHeartbeat", parked_send)
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+
+        # Stop the reader and replace the transport without going through
+        # close(); connect() alone must open the new connection lifetime.
+        iface._wantExit = True
+        old_reader = iface._rxThread
+        old_reader.join(timeout=5)
+        assert not old_reader.is_alive()
+
+        with caplog.at_level(logging.DEBUG):
+            replacement = io.BytesIO()
+            iface.stream = replacement
+            iface.noProto = True
+            iface.connect()
+            iface.noProto = False
+
+            release_send.set()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+
+            heartbeat_payload = mesh_pb2.ToRadio(
+                heartbeat=mesh_pb2.Heartbeat()
+            ).SerializeToString()
+            assert not replacement.getvalue().endswith(heartbeat_payload)
+            assert "fenced to a previous connection lifetime" in caplog.text
+    finally:
+        release_send.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        if not getattr(iface, "_closing", False):
+            iface.close()
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_heartbeat_in_current_lifetime_writes_to_its_own_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A heartbeat captured in the still-current lifetime reaches that lifetime's transport.
+
+    Same parking structure as the replacement-stream regression, but without a
+    close() or transport replacement: releasing the parked send must let the
+    fenced write through to the stream it was captured against.
+    """
+    iface = StreamInterface(noProto=True, connectNow=False)
+    release_send = threading.Event()
+    worker: threading.Thread | None = None
+    try:
+        monkeypatch.setattr(iface, "_sleep_after_write", lambda: None)
+        iface.stream = io.BytesIO()
+        iface.connect()
+        iface.noProto = False
+
+        entered = threading.Event()
+        original_send = iface.sendHeartbeat
+
+        def parked_send() -> None:
+            entered.set()
+            assert release_send.wait(timeout=5)
+            original_send()
+
+        monkeypatch.setattr(iface, "sendHeartbeat", parked_send)
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+
+        release_send.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+
+        heartbeat_payload = mesh_pb2.ToRadio(
+            heartbeat=mesh_pb2.Heartbeat()
+        ).SerializeToString()
+        assert iface.stream is not None
+        assert iface.stream.getvalue().endswith(heartbeat_payload)
+    finally:
+        release_send.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        if not getattr(iface, "_closing", False):
+            iface.close()
 
 
 @pytest.mark.unit

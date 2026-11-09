@@ -5,6 +5,7 @@ including connection timeouts, network errors, socket closure scenarios,
 and partial read/write handling.
 """
 
+import logging
 import socket
 import threading
 from typing import Any, cast
@@ -12,6 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import meshtastic.mesh_interface as mesh_interface_module
+from meshtastic.protobuf import mesh_pb2
+from meshtastic.stream_interface import START1, START2
 from meshtastic.tcp_interface import TCPInterface, _is_transport_fd_state_value_error
 
 # ============================================================================
@@ -544,6 +548,116 @@ def test_TCPInterface_write_bytes_multiple_partial_sends() -> None:
                     assert call.args[0] == expected_remaining
         finally:
             iface.close()
+
+
+@pytest.mark.unit
+def test_stale_heartbeat_does_not_write_into_replacement_socket(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A heartbeat parked past close() must never write into a replacement socket.
+
+    The heartbeat is parked before its transport write while the interface is
+    still current. close() exhausts its drain deadline and a replacement socket
+    is installed the way a reconnect would bind one; releasing the parked send
+    must drop the frame instead of writing it into the replacement socket. The
+    worker has fully exited before the replacement receive side is checked, so
+    any write that escaped the fence would already be buffered there.
+    """
+    iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    old_send_sock, old_receive_sock = socket.socketpair()
+    replacement_send_sock, replacement_receive_sock = socket.socketpair()
+    release_send = threading.Event()
+    worker: threading.Thread | None = None
+    try:
+        iface.noProto = False
+        iface.socket = old_send_sock
+
+        entered = threading.Event()
+        original_send = iface.sendHeartbeat
+
+        def parked_send() -> None:
+            entered.set()
+            assert release_send.wait(timeout=5)
+            original_send()
+
+        monkeypatch.setattr(iface, "sendHeartbeat", parked_send)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.01
+        )
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+
+        with caplog.at_level(logging.DEBUG):
+            iface.close()
+            iface.socket = replacement_send_sock
+
+            release_send.set()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+
+            assert "fenced to a previous connection lifetime" in caplog.text
+
+        replacement_receive_sock.settimeout(0)
+        with pytest.raises(BlockingIOError):
+            replacement_receive_sock.recv(64)
+    finally:
+        release_send.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        iface.close()
+        old_send_sock.close()
+        old_receive_sock.close()
+        replacement_send_sock.close()
+        replacement_receive_sock.close()
+
+
+@pytest.mark.unit
+def test_heartbeat_in_current_lifetime_writes_to_socket() -> None:
+    """A heartbeat captured in the still-current lifetime reaches that socket.
+
+    Positive control for the connection fence: with no close() or socket
+    replacement, the parked send is released and its framed heartbeat bytes
+    arrive on the socket it was captured against.
+    """
+    iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    send_sock, receive_sock = socket.socketpair()
+    try:
+        iface.noProto = False
+        iface.socket = send_sock
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+
+        heartbeat_payload = mesh_pb2.ToRadio(
+            heartbeat=mesh_pb2.Heartbeat()
+        ).SerializeToString()
+        header = bytes(
+            [
+                START1,
+                START2,
+                (len(heartbeat_payload) >> 8) & 0xFF,
+                len(heartbeat_payload) & 0xFF,
+            ]
+        )
+        expected_frame = header + heartbeat_payload
+
+        receive_sock.settimeout(5.0)
+        received = b""
+        while len(received) < len(expected_frame):
+            chunk = receive_sock.recv(64)
+            if not chunk:
+                break
+            received += chunk
+        assert received == expected_frame
+    finally:
+        iface.close()
+        send_sock.close()
+        receive_sock.close()
 
 
 @pytest.mark.unit
@@ -1356,3 +1470,85 @@ def test_TCPInterface_multiple_concurrent_close_attempts() -> None:
                 assert all(not t.is_alive() for t in threads)
             finally:
                 pass
+
+
+@pytest.mark.unit
+def test_TCPInterface_myConnect_invalidates_fence_before_socket_binding() -> None:
+    """A direct myConnect() call fences a parked heartbeat before adoption.
+
+    myConnect() is public and is the only path that adopts a replacement
+    socket. Calling it directly must advance the connection generation before
+    the new socket can be observed, so an old lifetime's parked heartbeat
+    cannot write into it.
+    """
+    with patch("meshtastic.tcp_interface.socket.create_connection") as mock_connect:
+        mock_connect.return_value = MagicMock()
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+        try:
+            original = iface._connection_generation
+            iface.myConnect()
+            assert iface._connection_generation == original + 1
+        finally:
+            iface.close()
+
+
+@pytest.mark.unit
+def test_TCPInterface_connect_invalidates_fence_before_socket_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A public TCP reconnect cannot expose a new socket to an old heartbeat."""
+    from meshtastic.stream_interface import StreamInterface
+
+    with patch("socket.socket"):
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    try:
+        original = iface._connection_generation
+        observed: list[int] = []
+
+        def bind_socket() -> None:
+            observed.append(iface._connection_generation)
+
+        monkeypatch.setattr(iface, "_connect_socket_if_needed", bind_socket)
+        monkeypatch.setattr(StreamInterface, "connect", lambda _self: None)
+        iface.connect()
+        assert observed == [original + 1]
+    finally:
+        iface.close()
+
+
+@pytest.mark.unit
+def test_TCPInterface_auto_reconnect_invalidates_heartbeat_before_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reader reconnect path bypasses base connect, but still fences writes."""
+    from meshtastic.mesh_interface_runtime.connection_fence import (
+        _connection_fence_begin,
+        _connection_fence_end,
+    )
+
+    with patch("socket.socket"):
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    try:
+        previous = iface._connection_generation
+        socket_after_reconnect = MagicMock()
+        observed: list[int] = []
+
+        def bind_socket() -> None:
+            observed.append(iface._connection_generation)
+            iface.socket = socket_after_reconnect
+
+        monkeypatch.setattr(iface, "myConnect", bind_socket)
+        monkeypatch.setattr(iface, "_start_config", lambda: None)
+        monkeypatch.setattr(iface, "_sleep_reconnect_delay", lambda _delay: True)
+        assert iface._attempt_reconnect()
+        assert observed == [previous + 1]
+        assert iface._connection_generation == previous + 1
+        _connection_fence_begin(previous)
+        try:
+            # Neither select() nor send() may run for the old heartbeat.
+            iface._write_bytes(b"stale heartbeat")
+        finally:
+            _connection_fence_end()
+        socket_after_reconnect.send.assert_not_called()
+    finally:
+        iface.close()

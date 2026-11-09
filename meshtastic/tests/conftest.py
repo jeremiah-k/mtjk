@@ -31,6 +31,7 @@ from meshtastic.util import DeferredExecution
 
 from ..mesh_interface import MeshInterface
 from ..serial_interface import SerialInterface
+from ..stream_interface import _open_stream_interfaces
 from .simradio_harness import (
     CHAIN_TOPOLOGY,
     DEFAULT_BASE_PORT,
@@ -50,6 +51,19 @@ if TYPE_CHECKING:
 
 SINGLE_NODE_PORT_OFFSET = 100
 _SINGLE_NODE_PORT_SEQUENCE = itertools.count()
+
+
+@pytest.fixture(autouse=True)
+def _clear_exit_close_registry() -> Generator[None, None, None]:
+    """Drop tracked open stream interfaces after each test without closing them.
+
+    The interpreter-exit close hook would otherwise close thousands of
+    test-created interfaces at session exit and log to already-closed capture
+    streams. Clearing the weak registry keeps session shutdown quiet; closing
+    remains each test's own responsibility.
+    """
+    yield
+    _open_stream_interfaces.clear()
 
 
 @pytest.fixture(name="isolated_dotdict_deprecation_state")

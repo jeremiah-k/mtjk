@@ -1,5 +1,6 @@
 """Stream Interface base class."""
 
+import atexit
 import contextlib
 import glob
 import logging
@@ -7,6 +8,7 @@ import os
 import platform
 import threading
 import time
+import weakref
 from typing import IO, Any, BinaryIO, Callable
 
 import serial  # type: ignore[import-untyped]
@@ -17,6 +19,10 @@ from meshtastic.cancellation import _acquire_lock, _cancellable_init, _check_can
 from meshtastic.cancellation import _sleep as _connection_sleep
 from meshtastic.cancellation import _uncancelled_cleanup
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.mesh_interface_runtime.connection_fence import (
+    _connection_fence_expected,
+    _connection_fence_is_stale,
+)
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.transport_retry import _linear_retry_delay
 from meshtastic.util import is_windows11, stripnl
@@ -52,6 +58,18 @@ STREAM_IO_EXCEPTIONS = (
     serial.SerialException,
     serial.SerialTimeoutException,
 )
+EXIT_CLOSE_JOIN_BUDGET_SECONDS = 3.0
+"""Total seconds the exit hook waits for the per-interface close threads.
+
+A normal stream close takes roughly 0.2-0.5 seconds (disconnect write plus a
+bounded reader join), so the budget absorbs several interfaces still open at
+interpreter exit while keeping the process shutdown prompt. The budget is one
+shared deadline measured from the hook start: each interface is closed on its
+own daemon thread and every join gets the remaining time, so one wedged
+transport cannot spend the budget on behalf of another interface. When the
+deadline expires the unfinished threads are abandoned (they are daemons) and
+a warning is logged.
+"""
 _TRANSPORT_FD_STATE_TYPEERROR_MARKERS: tuple[str, ...] = (
     "fd is none",
     "'nonetype' object cannot be interpreted as an integer",
@@ -87,6 +105,199 @@ def _is_bootstrap_stream_closed_retryable(
     return not any(
         marker in message for marker in BOOTSTRAP_STREAM_CLOSED_FAILFAST_MARKERS
     )
+
+
+_open_stream_interfaces: "weakref.WeakSet[StreamInterface]" = weakref.WeakSet()
+# Reentrant lock for the interpreter-exit close registry: guards every add,
+# discard and the exit hook's snapshot, plus the one-shot hook-registration
+# flag and the atexit.register call that publishes it. Lock order: a
+# per-interface _connect_lock may be held while acquiring this lock
+# (connect()'s tracked add and _shared_close()'s discard); this lock must
+# never be held while acquiring any other lock in this package or running
+# interface code, so atexit.register is safe to call under it: it only
+# stores the callback, acquires no lock in this package and runs no
+# interface code. The exit hook releases this lock before any close() work
+# starts.
+# The lock must be reentrant because close() can re-enter a registry
+# critical section on the same thread. An application's signal handler runs
+# on the main thread between bytecodes, possibly while the main thread is
+# inside one of these critical sections (WeakSet.add and WeakSet.discard
+# are Python code); if the handler calls interface.close(), the close path
+# runs _untrack_open_stream_interface(), which acquires this same lock
+# again on the same thread, so a plain Lock would self-deadlock there.
+# This does not make close() fully signal-reentrant: _connect_lock is
+# still a plain Lock, so a handler interrupting close() itself or
+# connect()'s _connect_lock critical section remains pre-existing
+# behavior outside this registry's scope.
+_open_stream_interfaces_lock = threading.RLock()
+
+
+class _ExitCloseHookState:
+    """Mutable holder for the one-shot exit hook registration flag."""
+
+    def __init__(self) -> None:
+        """Start with the exit hook unregistered."""
+        self.registered = False
+        self.fork_reset_registered = False
+
+
+_exit_close_hook_state = _ExitCloseHookState()
+
+
+def _add_open_stream_interface(interface: "StreamInterface") -> None:
+    """Add an interface to the exit-close registry under the leaf lock."""
+    with _open_stream_interfaces_lock:
+        _open_stream_interfaces.add(interface)
+
+
+def _untrack_open_stream_interface(interface: "StreamInterface") -> None:
+    """Drop an interface from the exit-close registry."""
+    with _open_stream_interfaces_lock:
+        _open_stream_interfaces.discard(interface)
+
+
+def _reset_exit_close_registry_after_fork() -> None:
+    """Drop inherited exit-close registry state in a forked child.
+
+    A child forked after an interface was opened inherits the registry, the
+    registered atexit hook, and the parent's transport file descriptor or
+    socket. If the child exits normally it would run the inherited hook and
+    close the parent's live interface, writing a disconnect frame on the
+    shared fd or socket and breaking the parent's session. The child also
+    inherits the registry lock, possibly mid-acquire from a parent thread
+    that does not exist in the child, so the lock is re-created first; the
+    child has a single thread and the freshly created registry starts
+    empty. The inherited atexit hook stays registered and becomes a no-op on
+    the empty registry.
+    """
+    global _open_stream_interfaces_lock  # pylint: disable=global-statement
+    _open_stream_interfaces_lock = threading.RLock()
+    _open_stream_interfaces.clear()
+
+
+def _register_exit_close_hook_once() -> None:
+    """Register the module-level atexit hook exactly once.
+
+    Registration is serialized under the registry's leaf lock. Publishing the
+    one-shot flag before registration finished could lose the hook entirely if
+    registration failed or the thread was interrupted. No caller holds an
+    interface's connect lock here, and registering a callback does not invoke
+    interface code. Where the platform provides it, the same registration
+    point also registers the post-fork registry reset, so a forked child
+    inherits the hook but not the parent's tracked interfaces.
+    """
+    registration_error: Exception | None = None
+    with _open_stream_interfaces_lock:
+        if _exit_close_hook_state.registered:
+            return
+        try:
+            # Publish the child reset before an exit hook can be inherited.
+            # Failure here must never leave an unprotected close hook behind.
+            if (
+                hasattr(os, "register_at_fork")
+                and not _exit_close_hook_state.fork_reset_registered
+            ):
+                os.register_at_fork(
+                    after_in_child=_reset_exit_close_registry_after_fork
+                )
+                _exit_close_hook_state.fork_reset_registered = True
+            atexit.register(_close_open_stream_interfaces_at_exit)
+        except Exception as exc:
+            # A successful transport connect should not be undone because an
+            # interpreter shutting down refused a best-effort exit hook.
+            registration_error = exc
+        else:
+            # A BaseException in this gap could let a later connect register
+            # twice; every close() untracks before native teardown begins.
+            _exit_close_hook_state.registered = True
+    if registration_error is not None:
+        # Host log handlers are arbitrary callbacks and must run outside the
+        # registry lock, just like interface cleanup itself.
+        logger.warning(
+            "Could not register stream exit-close hook", exc_info=registration_error
+        )
+
+
+def _exit_close_interface(interface: "StreamInterface") -> None:
+    """Close one snapshot interface, swallowing per-interface errors."""
+    try:
+        interface.close()
+    except Exception:
+        logger.debug(
+            "Exit-time close of %r failed; continuing shutdown.",
+            interface,
+            exc_info=True,
+        )
+
+
+def _close_open_stream_interfaces_at_exit() -> None:
+    """Close stream interfaces still open at interpreter exit.
+
+    Snapshots the registry under the leaf lock and releases it before any
+    close() runs, so a concurrent add/discard can neither raise out of this
+    atexit hook nor be observed mid-iteration. Each interface is closed on
+    its own daemon thread, so one wedged transport cannot consume the whole
+    join budget on behalf of the others; the threads are joined against a
+    single deadline of EXIT_CLOSE_JOIN_BUDGET_SECONDS measured from the hook
+    start, so two blocked closes still cost about one budget. Thread starts
+    are guarded individually: one failed start never prevents the remaining
+    starts, every start failing produces one warning, and a budget expiry
+    warns with the number of unfinished interfaces. Per-interface exceptions
+    are swallowed with a debug log.
+    """
+    with _open_stream_interfaces_lock:
+        interfaces = list(_open_stream_interfaces)
+    if not interfaces:
+        return
+    deadline = time.monotonic() + EXIT_CLOSE_JOIN_BUDGET_SECONDS
+    threads: list[threading.Thread] = []
+    start_failures: list[tuple["StreamInterface", Exception]] = []
+    for index, interface in enumerate(interfaces):
+        thread = threading.Thread(
+            target=_exit_close_interface,
+            args=(interface,),
+            daemon=True,
+            name=f"meshtastic-exit-close-{index}",
+        )
+        try:
+            thread.start()
+        except Exception as exc:
+            # CPython 3.12.0-3.12.2 refuses to start threads during
+            # interpreter shutdown (gh-113964, fixed in 3.12.3); the guarded
+            # start turns that into a warning and a skipped close instead of
+            # an error out of the atexit hook.
+            start_failures.append((interface, exc))
+        else:
+            threads.append(thread)
+    if len(start_failures) == len(interfaces):
+        logger.warning(
+            "Failed to start any exit-close thread; skipping "
+            "interpreter-exit close of %d open stream interface(s).",
+            len(interfaces),
+            exc_info=start_failures[0][1],
+        )
+        return
+    for failed_interface, failed_exc in start_failures:
+        logger.warning(
+            "Failed to start the exit-close thread for %r; skipping "
+            "interpreter-exit close of that interface, %d of %d open stream "
+            "interface(s) will still be closed.",
+            failed_interface,
+            len(threads),
+            len(interfaces),
+            exc_info=failed_exc,
+        )
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    unfinished = sum(1 for thread in threads if thread.is_alive())
+    if unfinished:
+        logger.warning(
+            "Timed out after %.1fs closing %d open stream interface(s) at "
+            "interpreter exit; continuing shutdown (%d unfinished).",
+            EXIT_CLOSE_JOIN_BUDGET_SECONDS,
+            len(interfaces),
+            unfinished,
+        )
 
 
 class StreamInterface(MeshInterface):
@@ -257,6 +468,13 @@ class StreamInterface(MeshInterface):
                 raise StreamInterface.StreamInterfaceError(
                     "Cannot reconnect: reader thread from previous attempt is still alive"
                 )
+            # Open the new connection lifetime before any stream reopening,
+            # wake-byte writes, or reader start in this base-class path.
+            # TCPInterface may bind its socket before calling this method and
+            # must invalidate the previous lifetime before doing so. A fenced
+            # heartbeat must never write into a replacement transport.
+            # _write_bytes does not take _connect_lock, avoiding a deadlock.
+            self._bump_connection_generation()
             self._ensure_stream_for_connect_locked(requires_stream=requires_stream)
             if self.stream is None and requires_stream:
                 raise StreamInterface.StreamInterfaceError(
@@ -301,6 +519,23 @@ class StreamInterface(MeshInterface):
             with contextlib.suppress(Exception):
                 _uncancelled_cleanup(self.close)()
             raise
+        # The transport is open and the reader is running: record the interface
+        # for best-effort close at interpreter exit. WeakSet membership is
+        # idempotent, so repeated serial reconnect attempts are harmless. The
+        # add runs under _connect_lock together with a shutdown-intent check
+        # so a close() that publishes its intent while this connect() is in
+        # flight always wins: once close() has begun, the interface is never
+        # re-added and close() always leaves the registry without it. The
+        # hook registration happens after the lock is released.
+        with self._connect_lock:
+            if self._wantExit or self._stream_close_in_progress:
+                logger.debug(
+                    "connect() finished after close() published shutdown "
+                    "intent; not registering for interpreter-exit close"
+                )
+                return
+            _add_open_stream_interface(self)
+        _register_exit_close_hook_once()
 
     def _ensure_stream_for_connect_locked(self, *, requires_stream: bool) -> None:
         """Initialize or reopen stream under connect lock in subclasses."""
@@ -362,6 +597,24 @@ class StreamInterface(MeshInterface):
             If no stream is configured or the configured stream is closed.
         """
         s = self.stream
+        # Connection fence: a send marked in flight in a previous connection
+        # lifetime must never write into this lifetime's transport. The check
+        # runs after the transport was captured into the local ``s`` and the
+        # write loop below writes only that captured object. The generation is
+        # bumped before any transport replacement (close() begin, connect()
+        # start), so a passing check proves ``s`` is the lifetime the send
+        # started in; a failing check drops the frame without touching any
+        # transport. This read takes no locks, so connect()'s wake-byte write
+        # under _connect_lock cannot self-deadlock here.
+        if _connection_fence_is_stale(self._connection_generation):
+            logger.debug(
+                "Dropping send fenced to a previous connection lifetime "
+                "(send generation %s, transport generation %s); the "
+                "transport has been replaced.",
+                _connection_fence_expected(),
+                self._connection_generation,
+            )
+            return
         # Treat stream objects without is_open as open for backward compatibility
         # with test doubles and wrappers that expose only write/flush.
         if s is None or not getattr(s, "is_open", True):
@@ -512,6 +765,15 @@ class StreamInterface(MeshInterface):
     def _shared_close(self) -> None:
         """Run close() cleanup shared by stream-like subclasses.
 
+        The interface is removed from the interpreter-exit close registry
+        first, regardless of the close outcome, so the exit hook never
+        re-closes an interface the caller has already shut down, and removed
+        again inside the critical section that publishes the shutdown intent,
+        so a connect() still in flight when close() runs can never re-add it.
+        Both final close paths (StreamInterface.close() and
+        TCPInterface.close()) reach this helper, making it the single
+        discard point.
+
         Sets the shutdown intent before delegating to MeshInterface.close() so
         background readers don't treat intentional close as an unexpected
         disconnect. Calls MeshInterface.close() while the stream is still open
@@ -529,6 +791,7 @@ class StreamInterface(MeshInterface):
         close() then retires any socket, and the MeshInterface state has not
         yet been initialized or adopted.
         """
+        _untrack_open_stream_interface(self)
         connect_lock = getattr(self, "_connect_lock", None)
         if connect_lock is None:
             # Serial/TCP may cancel before StreamInterface.__init__ creates its
@@ -542,6 +805,11 @@ class StreamInterface(MeshInterface):
                 return
             self._stream_close_in_progress = True
             self._wantExit = True
+            # Discard under the same critical section that publishes the
+            # shutdown intent: a connect() blocked on _connect_lock can only
+            # observe the intent after this section, so once it completes a
+            # closed interface can never re-enter the registry.
+            _untrack_open_stream_interface(self)
         try:
             super().close()
         finally:
