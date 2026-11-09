@@ -31,6 +31,10 @@ from meshtastic._interface_errors import MeshInterfaceError as _MeshInterfaceErr
 from meshtastic._publishing import publishing_thread as publishingThread
 from meshtastic._response_types import ResponseHandler
 from meshtastic.cancellation import _cancellable_init, _check_cancelled
+from meshtastic.mesh_interface_runtime.connection_fence import (
+    _connection_fence_begin,
+    _connection_fence_end,
+)
 from meshtastic.mesh_interface_runtime.flows import (
     DEFAULT_TELEMETRY_TYPE,
     TelemetryType,
@@ -352,7 +356,7 @@ class MeshInterface:  # pylint: disable=R0902
         #   + _response_wait_acks + _active_wait_request_ids
         #   + _retired_wait_request_ids
         # - _heartbeat_lock: _closing, heartbeatTimer, _heartbeat_inflight,
-        #   isConnected, _bootstrap_decode_error_count
+        #   _connection_generation, isConnected, _bootstrap_decode_error_count
         # - _packet_id_lock: currentPacketId generation
         # - _queue_lock: queue + queueStatus
         # - _node_db_lock: nodes/nodesByNum/_localChannels plus myInfo/metadata
@@ -389,6 +393,12 @@ class MeshInterface:  # pylint: disable=R0902
         # Track heartbeat sends that have passed the _closing gate but have not
         # finished I/O yet. close() waits on this to avoid post-close sends.
         self._heartbeat_inflight = 0
+        # Monotonic connection-lifetime counter. Bumped when close() begins and
+        # when a reconnect starts binding a new transport, so a heartbeat send
+        # fenced to an older generation can never write into a replacement
+        # transport. Guarded by _heartbeat_lock alongside the in-flight
+        # accounting it fences.
+        self._connection_generation = 0
         self._heartbeat_idle_condition = threading.Condition(self._heartbeat_lock)
         self._packet_id_lock = threading.Lock()
         self._queue_lock = threading.RLock()
@@ -546,6 +556,21 @@ class MeshInterface:  # pylint: disable=R0902
             self._closing = False
             self._bootstrap_decode_error_count = 0
 
+    def _bump_connection_generation(self) -> None:
+        """Open a new connection lifetime by invalidating fenced sends.
+
+        Called from transport connect implementations before any code that can
+        bind a replacement transport, so a heartbeat send marked in flight in a
+        previous lifetime can never pass the connection fence after a
+        replacement transport exists. Taking only _heartbeat_lock keeps the
+        no-nested-MeshInterface-locks contract intact; callers may hold the
+        transport connect lock, which is ordered before _heartbeat_lock
+        everywhere (nothing takes the connect lock while holding
+        _heartbeat_lock).
+        """
+        with self._heartbeat_lock:
+            self._connection_generation += 1
+
     def _record_bootstrap_decode_error(self) -> int:
         """Record one malformed protocol frame observed before connection completes."""
         with self._heartbeat_lock:
@@ -580,6 +605,11 @@ class MeshInterface:  # pylint: disable=R0902
                 if self._closing:
                     return
                 self._closing = True
+                # Begin a new (closed) connection lifetime: any heartbeat send
+                # still parked in the previous lifetime is fenced off from the
+                # transports bound from here on, including a replacement
+                # transport bound by a later reconnect.
+                self._connection_generation += 1
                 timer = self.heartbeatTimer
                 self.heartbeatTimer = None
             if timer:
@@ -1794,8 +1824,11 @@ class MeshInterface:  # pylint: disable=R0902
         threading.Timer to invoke subsequent heartbeats at a fixed 300-second interval. The
         scheduler respects shutdown by checking self._closing and uses self._heartbeat_lock to
         avoid scheduling or storing timers after shutdown begins. Heartbeat sends are tracked
-        as in-flight so close() can wait for quiescence and guarantee no post-close sends. The
-        actual call to self.sendHeartbeat() is still performed outside the lock.
+        as in-flight so close() can wait for quiescence and guarantee no post-close sends. Each
+        send also captures the connection generation in the same critical section and fences
+        its transport write with it, so a send parked past close() and a reconnect cannot write
+        into the replacement transport. The actual call to self.sendHeartbeat() is still
+        performed outside the lock.
         """
 
         def callback() -> None:
@@ -1820,11 +1853,20 @@ class MeshInterface:  # pylint: disable=R0902
                 # Mark this send as in-flight before releasing the lock so
                 # close() cannot miss it when establishing shutdown quiescence.
                 self._heartbeat_inflight += 1
+                # Capture the connection lifetime atomically with the in-flight
+                # marking: the transport write fences itself against this
+                # generation, so a send parked past close() and a reconnect can
+                # never write into the replacement transport.
+                fence_generation = self._connection_generation
             # sendHeartbeat() is intentionally outside the lock to avoid
             # holding the lock during I/O. close() handles timer cancellation.
+            # The fence context marks this thread's send as belonging to the
+            # captured lifetime for the duration of the transport write.
+            _connection_fence_begin(fence_generation)
             try:
                 self.sendHeartbeat()
             finally:
+                _connection_fence_end()
                 with self._heartbeat_lock:
                     self._heartbeat_inflight -= 1
                     if self._heartbeat_inflight == 0:

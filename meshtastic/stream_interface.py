@@ -19,6 +19,10 @@ from meshtastic.cancellation import _acquire_lock, _cancellable_init, _check_can
 from meshtastic.cancellation import _sleep as _connection_sleep
 from meshtastic.cancellation import _uncancelled_cleanup
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.mesh_interface_runtime.connection_fence import (
+    _connection_fence_expected,
+    _connection_fence_is_stale,
+)
 from meshtastic.protobuf import mesh_pb2
 from meshtastic.transport_retry import _linear_retry_delay
 from meshtastic.util import is_windows11, stripnl
@@ -464,6 +468,14 @@ class StreamInterface(MeshInterface):
                 raise StreamInterface.StreamInterfaceError(
                     "Cannot reconnect: reader thread from previous attempt is still alive"
                 )
+            # Open the new connection lifetime before any code below can bind a
+            # replacement transport (subclass stream reopening, wake-byte
+            # writes, reader start): a heartbeat send fenced to the previous
+            # lifetime must never pass the fence once a replacement transport
+            # exists. _write_bytes performs the fence check without taking
+            # _connect_lock, so this call cannot self-deadlock the wake-byte
+            # write below.
+            self._bump_connection_generation()
             self._ensure_stream_for_connect_locked(requires_stream=requires_stream)
             if self.stream is None and requires_stream:
                 raise StreamInterface.StreamInterfaceError(
@@ -586,6 +598,24 @@ class StreamInterface(MeshInterface):
             If no stream is configured or the configured stream is closed.
         """
         s = self.stream
+        # Connection fence: a send marked in flight in a previous connection
+        # lifetime must never write into this lifetime's transport. The check
+        # runs after the transport was captured into the local ``s`` and the
+        # write loop below writes only that captured object. The generation is
+        # bumped before any transport replacement (close() begin, connect()
+        # start), so a passing check proves ``s`` is the lifetime the send
+        # started in; a failing check drops the frame without touching any
+        # transport. This read takes no locks, so connect()'s wake-byte write
+        # under _connect_lock cannot self-deadlock here.
+        if _connection_fence_is_stale(self._connection_generation):
+            logger.debug(
+                "Dropping send fenced to a previous connection lifetime "
+                "(send generation %s, transport generation %s); the "
+                "transport has been replaced.",
+                _connection_fence_expected(),
+                self._connection_generation,
+            )
+            return
         # Treat stream objects without is_open as open for backward compatibility
         # with test doubles and wrappers that expose only write/flush.
         if s is None or not getattr(s, "is_open", True):

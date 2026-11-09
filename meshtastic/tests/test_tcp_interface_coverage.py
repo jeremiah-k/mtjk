@@ -5,6 +5,7 @@ including connection timeouts, network errors, socket closure scenarios,
 and partial read/write handling.
 """
 
+import logging
 import socket
 import threading
 from typing import Any, cast
@@ -12,6 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import meshtastic.mesh_interface as mesh_interface_module
+from meshtastic.protobuf import mesh_pb2
+from meshtastic.stream_interface import START1, START2
 from meshtastic.tcp_interface import TCPInterface, _is_transport_fd_state_value_error
 
 # ============================================================================
@@ -544,6 +548,117 @@ def test_TCPInterface_write_bytes_multiple_partial_sends() -> None:
                     assert call.args[0] == expected_remaining
         finally:
             iface.close()
+
+
+@pytest.mark.unit
+def test_stale_heartbeat_does_not_write_into_replacement_socket(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A heartbeat parked past close() must never write into a replacement socket.
+
+    The heartbeat is parked before its transport write while the interface is
+    still current. close() exhausts its drain deadline and a replacement socket
+    is installed the way a reconnect would bind one; releasing the parked send
+    must drop the frame instead of writing it into the replacement socket. The
+    worker has fully exited before the replacement receive side is checked, so
+    any write that escaped the fence would already be buffered there.
+    """
+    iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    old_send_sock, old_receive_sock = socket.socketpair()
+    replacement_send_sock, replacement_receive_sock = socket.socketpair()
+    release_send = threading.Event()
+    worker: threading.Thread | None = None
+    try:
+        iface.noProto = False
+        iface.socket = old_send_sock
+
+        entered = threading.Event()
+        original_send = iface.sendHeartbeat
+
+        def parked_send() -> None:
+            entered.set()
+            assert release_send.wait(timeout=5)
+            original_send()
+
+        monkeypatch.setattr(iface, "sendHeartbeat", parked_send)
+        monkeypatch.setattr(
+            mesh_interface_module, "CLOSE_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.01
+        )
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+
+        with caplog.at_level(logging.DEBUG):
+            iface.close()
+            iface.socket = replacement_send_sock
+
+            release_send.set()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+
+            mesh_pb2.ToRadio(heartbeat=mesh_pb2.Heartbeat()).SerializeToString()
+            assert "fenced to a previous connection lifetime" in caplog.text
+
+        replacement_receive_sock.settimeout(0)
+        with pytest.raises(BlockingIOError):
+            replacement_receive_sock.recv(64)
+    finally:
+        release_send.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        iface.close()
+        old_send_sock.close()
+        old_receive_sock.close()
+        replacement_send_sock.close()
+        replacement_receive_sock.close()
+
+
+@pytest.mark.unit
+def test_heartbeat_in_current_lifetime_writes_to_socket() -> None:
+    """A heartbeat captured in the still-current lifetime reaches that socket.
+
+    Positive control for the connection fence: with no close() or socket
+    replacement, the parked send is released and its framed heartbeat bytes
+    arrive on the socket it was captured against.
+    """
+    iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    send_sock, receive_sock = socket.socketpair()
+    try:
+        iface.noProto = False
+        iface.socket = send_sock
+
+        worker = threading.Thread(target=iface._start_heartbeat, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+
+        heartbeat_payload = mesh_pb2.ToRadio(
+            heartbeat=mesh_pb2.Heartbeat()
+        ).SerializeToString()
+        header = bytes(
+            [
+                START1,
+                START2,
+                (len(heartbeat_payload) >> 8) & 0xFF,
+                len(heartbeat_payload) & 0xFF,
+            ]
+        )
+        expected_frame = header + heartbeat_payload
+
+        receive_sock.settimeout(5.0)
+        received = b""
+        while len(received) < len(expected_frame):
+            chunk = receive_sock.recv(64)
+            if not chunk:
+                break
+            received += chunk
+        assert received == expected_frame
+    finally:
+        iface.close()
+        send_sock.close()
+        receive_sock.close()
 
 
 @pytest.mark.unit

@@ -21,6 +21,10 @@ from meshtastic.cancellation import (
     _connect_socket,
     _current_event,
 )
+from meshtastic.mesh_interface_runtime.connection_fence import (
+    _connection_fence_expected,
+    _connection_fence_is_stale,
+)
 from meshtastic.stream_interface import (
     WRITE_PROGRESS_TIMEOUT_SECONDS,
     StreamInterface,
@@ -484,6 +488,22 @@ class TCPInterface(StreamInterface):  # pylint: disable=too-many-instance-attrib
         # Intentionally snapshot without _reconnect_lock; concurrent close/reconnect
         # is handled by sendall() exceptions and _close_socket_if_current().
         sock = self.socket
+        # Connection fence: a send marked in flight in a previous connection
+        # lifetime must never write into this lifetime's socket. The check runs
+        # after the socket was captured into the local ``sock`` and the write
+        # loop below sends only that captured object; the generation is bumped
+        # before any replacement transport can be bound, so a passing check
+        # proves ``sock`` is the lifetime the send started in. This read takes
+        # no locks, so it cannot self-deadlock against _reconnect_lock.
+        if _connection_fence_is_stale(self._connection_generation):
+            logger.debug(
+                "Dropping send fenced to a previous connection lifetime "
+                "(send generation %s, transport generation %s); the "
+                "socket has been replaced.",
+                _connection_fence_expected(),
+                self._connection_generation,
+            )
+            return
         if sock is None:
             raise ConnectionError(self.SOCKET_NOT_CONNECTED_ERROR)
         # Validate payload shape before entering socket-recovery handling so
