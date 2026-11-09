@@ -124,6 +124,18 @@ def test_get_field_metadata_resolves_config_path() -> None:
 
 
 @pytest.mark.unit
+def test_sensitive_marker_reaches_normalized_metadata() -> None:
+    """Upstream sensitive markers surface as an optional boolean attribute."""
+    marked = getFieldMetadata("security.private_key")
+    unmarked = getFieldMetadata("security.public_key")
+
+    assert marked is not None
+    assert marked.sensitive is True
+    assert unmarked is not None
+    assert unmarked.sensitive is None
+
+
+@pytest.mark.unit
 def test_get_field_metadata_normalizes_camel_case_segments() -> None:
     """CamelCase segments resolve to the same metadata as snake_case ones."""
     assert getFieldMetadata("lora.hopLimit") == getFieldMetadata("lora.hop_limit")

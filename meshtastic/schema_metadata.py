@@ -49,6 +49,8 @@ class FieldMetadata:
         Declared unit of measurement, when present.
     deprecated : bool | None
         Whether the field is marked deprecated in the schema.
+    sensitive : bool | None
+        Whether the schema marks the field as credential-bearing.
     label : str | None
         Human-readable short label, when present.
     description : str | None
@@ -63,6 +65,7 @@ class FieldMetadata:
     max_value: float | None = None
     unit: str | None = None
     deprecated: bool | None = None
+    sensitive: bool | None = None
     label: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] = ()
@@ -293,6 +296,7 @@ def _normalize_metadata(
             if standard_deprecated
             else (metadata.deprecated if metadata.HasField("deprecated") else None)
         ),
+        sensitive=metadata.sensitive if metadata.HasField("sensitive") else None,
         label=metadata.label if metadata.HasField("label") else None,
         description=(
             metadata.description if metadata.HasField("description") else None
