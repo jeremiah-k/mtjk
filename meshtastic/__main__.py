@@ -2444,6 +2444,8 @@ _cli_signal_shutdown_lock = threading.Lock()
 _cli_signal_defer_exit = False
 _cli_signal_invocation_active = False
 _CLI_OUTPUT_FLUSH_TIMEOUT_SECONDS = 0.2
+_cli_signal_flush_lock = threading.Lock()
+_cli_signal_flush_worker: threading.Thread | None = None
 
 
 def _flush_cli_output_streams() -> None:
@@ -2462,7 +2464,15 @@ def _flush_cli_output_streams() -> None:
             with contextlib.suppress(OSError, ValueError, AttributeError):
                 stream.flush()
 
-    worker = threading.Thread(target=_flush, daemon=True, name="mtjk-signal-flush")
+    global _cli_signal_flush_worker  # pylint: disable=global-statement
+    with _cli_signal_flush_lock:
+        # A blocked flush survives an embedded caller that handles SystemExit.
+        # Reusing the live worker bounds accumulation across repeated shutdowns
+        # instead of retaining one thread and stream pair per attempt.
+        if _cli_signal_flush_worker is not None and _cli_signal_flush_worker.is_alive():
+            return
+        worker = threading.Thread(target=_flush, daemon=True, name="mtjk-signal-flush")
+        _cli_signal_flush_worker = worker
     try:
         worker.start()
         worker.join(timeout=_CLI_OUTPUT_FLUSH_TIMEOUT_SECONDS)

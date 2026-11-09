@@ -799,6 +799,36 @@ def test_embedded_main_recorded_sigterm_is_still_re_delivered(
     assert _no_real_self_signals == [(signal.SIGTERM, False)]
 
 
+def test_flush_worker_is_reused_while_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked flush worker is not duplicated by repeated shutdowns."""
+    started: list[object] = []
+
+    class _BlockedThread:
+        def __init__(self, *, target: Any, daemon: bool, name: str) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            started.append(self)
+
+        def join(self, timeout: float | None = None) -> None:
+            pass
+
+        def is_alive(self) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        cli_main, "threading", SimpleNamespace(Thread=_BlockedThread)
+    )
+    monkeypatch.setattr(cli_main, "_cli_signal_flush_worker", None)
+
+    cli_main._flush_cli_output_streams()
+    cli_main._flush_cli_output_streams()
+
+    assert len(started) == 1
+
+
 def test_install_and_restore_reset_recorded_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
