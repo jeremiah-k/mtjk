@@ -34,6 +34,7 @@ class _FakeThread:
     """Lightweight thread stub for testing."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Record constructor arguments and default to the alive, unstarted state."""
         self._args = args
         self._kwargs = kwargs
         self.started = False
@@ -56,6 +57,7 @@ class _FakeWriter:
     """In-memory writer stub for schema assertions."""
 
     def __init__(self, file_path: str) -> None:
+        """Record the file path and start with no schema or rows."""
         self.file_path = file_path
         self.schema: Any = None
         self.rows: list[dict[str, Any]] = []
@@ -77,6 +79,7 @@ class _SlowStopThread:
     """Thread that takes longer than timeout to stop."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG001
+        """Capture the target callable and default to alive and unstarted."""
         self._target = kwargs.get("target")
         self.started = False
         self._is_alive = True
@@ -625,6 +628,55 @@ def test_power_logger_close_from_logging_thread(
     assert "deferring dependency cleanup until thread exit" in caplog.text
     logger.thread.join(timeout=1.0)
     assert not logger.thread.is_alive()
+    meter.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_power_logger_dependency_close_runs_on_caller_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dependency teardown must run on the caller, not inside the join window.
+
+    The worker must leave meter/writer cleanup to the caller once its sampling
+    loop exits; otherwise a slow dependency close (first Arrow flush, Feather
+    conversion) can consume the bounded join budget and fail healthy shutdowns
+    under load.
+    """
+    close_callers: list[threading.Thread] = []
+    worker_exited_at_close: list[bool] = []
+
+    class _RecordingCloseWriter:
+        """Writer stub that records which thread invokes close()."""
+
+        def __init__(self, file_path: str) -> None:
+            """Record the file path and start with no schema or rows."""
+            self.file_path = file_path
+            self.schema: Any = None
+            self.rows: list[dict[str, Any]] = []
+
+        def setSchema(self, schema: Any) -> None:
+            """Record the schema for assertions."""
+            self.schema = schema
+
+        def addRow(self, _row: dict[str, Any]) -> None:
+            """Accept rows without writing."""
+
+        def close(self) -> None:
+            """Record the calling thread."""
+            close_callers.append(threading.current_thread())
+            worker_exited_at_close.append(not worker.is_alive())
+
+    monkeypatch.setattr(slog_module, "FeatherWriter", _RecordingCloseWriter)
+
+    meter = _make_meter_with_voltage(3.3)
+    logger = PowerLogger(meter, "unused-path")
+    worker = logger.thread
+    logger.close()
+
+    assert len(close_callers) == 1, "writer.close() must be called exactly once"
+    assert close_callers[0] is not worker
+    assert worker_exited_at_close == [True]
+    assert not worker.is_alive()
     meter.close.assert_called_once_with()
 
 
