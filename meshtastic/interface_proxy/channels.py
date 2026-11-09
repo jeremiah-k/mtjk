@@ -21,6 +21,7 @@ from meshtastic.interfaces.ble.constants import (
 from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_connecting,
+    _interrupted_cleanup_fenced,
     _is_currently_connected_elsewhere,
     _live_ble_client_owns_address,
     _mark_connected,
@@ -199,7 +200,9 @@ def _try_claim_ble_address(
     starts a dedicated thread): it takes the
     same per-address lock an in-flight ``BLEInterface.connect()`` holds,
     refuses when another in-process owner already holds a connected or
-    connecting claim, and otherwise records a provisional connecting claim.
+    connecting claim, refuses while an interrupted connect's disconnect
+    cleanup is still fenced for the address, and otherwise records a
+    provisional connecting claim.
     Because the check and the claim happen under one lock acquisition, a
     concurrent interface connect either wins first (and this refuses) or sees
     this claim recorded (and its duplicate gate refuses).
@@ -214,6 +217,10 @@ def _try_claim_ble_address(
                 return False
         try:
             if aborted is not None and aborted.is_set():
+                return False
+            # An interrupted direct client's BlueZ disconnect may still be
+            # pending for this address; a new link here could race it.
+            if _interrupted_cleanup_fenced(address):
                 return False
             if _is_currently_connected_elsewhere(address, owner=owner):
                 return False
@@ -346,6 +353,12 @@ class BLECentralChannel:
                 worker_future.add_done_callback(_release_if_claimed)
             raise
         if not claimed:
+            if _interrupted_cleanup_fenced(address):
+                raise RuntimeError(
+                    f"BLE address {address} is fenced: an interrupted "
+                    "connection's disconnect cleanup has not been confirmed "
+                    "retired; retry after it finishes or the fence expires"
+                )
             raise RuntimeError(
                 f"BLE address {address} is already claimed by another "
                 "in-process owner"

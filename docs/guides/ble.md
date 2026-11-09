@@ -133,7 +133,12 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   before the connect deadline, the connect is refused rather than started
   while a late disconnect could tear down the new link.
   Process-local gates protect registered owners, and live direct `BLEClient`
-  connections are tracked so clearance leaves their link alone. Raw Bleak
+  connections are tracked so clearance leaves their link alone. When a direct
+  `BLEClient` connect is interrupted and its bounded native disconnect
+  cleanup wait expires, an address-level fence refuses new interface and
+  proxy connects to that address until the pending disconnect retires or a
+  bounded deadline (`BLEConfig.INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS`)
+  passes, so the new link cannot race the straggler disconnect. Raw Bleak
   connections do not participate in either protocol and can be disconnected
   by clearance from another caller.
 

@@ -10,7 +10,7 @@ import weakref
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from threading import Event, Lock, RLock, current_thread
+from threading import Event, Lock, RLock, Thread, current_thread
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 from uuid import UUID
 
@@ -58,7 +58,12 @@ from meshtastic.interfaces.ble.constants import (
     logger,
 )
 from meshtastic.interfaces.ble.errors import BLEErrorHandler
-from meshtastic.interfaces.ble.gating import _register_live_ble_client
+from meshtastic.interfaces.ble.gating import (
+    _addr_key,
+    _register_interrupted_cleanup_fence,
+    _register_live_ble_client,
+    _retire_interrupted_cleanup_fence,
+)
 from meshtastic.interfaces.ble.runner import BLECoroutineRunner
 from meshtastic.interfaces.ble.utils import (
     _is_unexpected_keyword_error,
@@ -117,6 +122,68 @@ class _CoroutineRetirement:
                 self._coro.close()
                 self._done.set()
         return self._done.wait(timeout)
+
+    def wait_cleanup(self, timeout: float | None) -> bool:
+        """Wait a bounded time for the native coroutine cleanup to finish.
+
+        Unlike :meth:`retire`, this never closes or abandons the coroutine;
+        it only observes the completion event, so a fence watcher can wait
+        for an already-running cleanup without claiming ownership of it.
+        """
+        return self._done.wait(timeout)
+
+
+# Daemon watcher threads release interrupted-cleanup fences. Rare by
+# construction: one is spawned only when a cleanup wait budget expires.
+_CLEANUP_FENCE_WATCHER_THREAD_NAME = "mtjk-ble-cleanup-fence"
+
+
+def _spawn_interrupted_cleanup_fence_watcher(
+    retirement: _CoroutineRetirement, key: str, deadline: float
+) -> None:
+    """Release the address fence when the straggler cleanup retires or expires.
+
+    The watcher waits for the native cleanup coroutine to finish and then
+    retires the fence recorded for ``key``. If the cleanup never confirms
+    before the registration deadline, the fence is retired anyway so an
+    address can never stay fenced permanently; a fence that outlives a dead
+    watcher is still pruned lazily by
+    :func:`meshtastic.interfaces.ble.gating._interrupted_cleanup_fenced`.
+
+    Parameters
+    ----------
+    retirement : _CoroutineRetirement
+        Retirement object whose completion signals the pending disconnect
+        has finished.
+    key : str
+        Normalized address key the fence was registered under.
+    deadline : float
+        Monotonic deadline the fence was registered with.
+    """
+
+    def _watch() -> None:
+        retired = retirement.wait_cleanup(max(deadline - time.monotonic(), 0.0))
+        if not retired:
+            logger.warning(
+                "Interrupted-cleanup fence for %s reached its deadline; "
+                "releasing it while the disconnect may still be pending",
+                key,
+            )
+        _retire_interrupted_cleanup_fence(key, expected_deadline=deadline)
+
+    try:
+        watcher = Thread(
+            target=_watch,
+            name=_CLEANUP_FENCE_WATCHER_THREAD_NAME,
+            daemon=True,
+        )
+        watcher.start()
+    except Exception:  # noqa: BLE001 - must never break the interrupted path
+        logger.debug(
+            "Could not start interrupted-cleanup fence watcher for %s",
+            key,
+            exc_info=True,
+        )
 
 
 class BLEClient:
@@ -458,6 +525,27 @@ class BLEClient:
             raise self.BLEError(error_message)
         return cast(BleakRootClient, bleak_client)
 
+    def _fence_interrupted_cleanup(self, retirement: _CoroutineRetirement) -> None:
+        """Retain an address-level fence for an overrunning connect cleanup.
+
+        Called after the bounded native cleanup wait expired: a BlueZ
+        disconnect may still be pending, so both connect paths refuse a new
+        link to this client's address until the cleanup retires or the
+        fence deadline expires. A client without a usable address (for
+        example discovery-only) cannot be fenced.
+
+        Parameters
+        ----------
+        retirement : _CoroutineRetirement
+            Retirement whose wait budget expired; its completion releases
+            the fence.
+        """
+        key = _addr_key(getattr(self, "address", None))
+        if key is None:
+            return
+        deadline = _register_interrupted_cleanup_fence(key)
+        _spawn_interrupted_cleanup_fence_watcher(retirement, key, deadline)
+
     def _run_transport_operation(
         self,
         *,
@@ -510,6 +598,7 @@ class BLEClient:
                 logger.warning(
                     "BLE connect cleanup exceeded %.1fs", DISCONNECT_TIMEOUT_SECONDS
                 )
+                self._fence_interrupted_cleanup(retirement)
         if sync_address:
             self._sync_address_from_bleak()
         return result
@@ -1326,6 +1415,7 @@ class BLEClient:
                         "BLE construction cancellation cleanup exceeded %.1fs",
                         DISCONNECT_TIMEOUT_SECONDS,
                     )
+                    self._fence_interrupted_cleanup(retirement)
                 self._with_pending_futures(
                     lambda pending_futures: pending_futures.discard(future)
                 )
