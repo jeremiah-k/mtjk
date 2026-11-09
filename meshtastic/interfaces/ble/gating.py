@@ -26,6 +26,7 @@ Context Manager Usage:
 """
 
 import logging
+import math
 import time
 import weakref
 from collections.abc import Generator
@@ -33,7 +34,7 @@ from contextlib import contextmanager
 from threading import Lock, RLock
 from typing import Any
 
-from meshtastic.interfaces.ble.constants import BLEConfig
+from meshtastic.interfaces.ble.constants import DISCONNECT_TIMEOUT_SECONDS, BLEConfig
 from meshtastic.interfaces.ble.utils import sanitize_address
 
 logger = logging.getLogger("meshtastic.ble")
@@ -65,6 +66,13 @@ class _BLEAddressRegistry:
         self.connecting_owner_ids: dict[str, int | None] = {}
         self.connecting_marked_at: dict[str, float] = {}
         self.lock_holders: dict[str, int] = {}
+        # Addresses fenced because an interrupted connect's native disconnect
+        # cleanup exceeded its bounded wait. Maps normalized address key to
+        # the monotonic deadline after which the fence expires.
+        self.interrupted_cleanup_fences: dict[str, float] = {}
+        # Every overrunning cleanup has an independent retirement. A newer
+        # cleanup finishing must not release an older still-running disconnect.
+        self.interrupted_cleanup_pending: dict[str, set[float]] = {}
 
     def clear(self) -> None:
         """Clear every registry collection while holding the owner lock."""
@@ -79,6 +87,8 @@ class _BLEAddressRegistry:
             self.connected_owners.clear()
             self.connecting_owners.clear()
             self.lock_holders.clear()
+            self.interrupted_cleanup_fences.clear()
+            self.interrupted_cleanup_pending.clear()
 
 
 _DEFAULT_REGISTRY = _BLEAddressRegistry()
@@ -96,6 +106,8 @@ _CONNECTING_OWNERS = _DEFAULT_REGISTRY.connecting_owners
 _CONNECTING_OWNER_IDS = _DEFAULT_REGISTRY.connecting_owner_ids
 _CONNECTING_MARKED_AT = _DEFAULT_REGISTRY.connecting_marked_at
 _LOCK_HOLDERS = _DEFAULT_REGISTRY.lock_holders
+_INTERRUPTED_CLEANUP_FENCES = _DEFAULT_REGISTRY.interrupted_cleanup_fences
+_INTERRUPTED_CLEANUP_PENDING = _DEFAULT_REGISTRY.interrupted_cleanup_pending
 
 # BLEClient instances register themselves here so stale-link clearance can
 # recognize a direct client's live link. Entries are weak: a client that goes
@@ -151,6 +163,139 @@ def _live_ble_client_owns_address(addr: str | None) -> bool:
         except Exception:  # noqa: BLE001 - a broken probe must not block clearance
             logger.debug("Failed to probe a live BLE client for %s", key, exc_info=True)
     return False
+
+
+def _register_interrupted_cleanup_fence(addr: str | None) -> float:
+    """Fence an address while an interrupted connect's cleanup is pending.
+
+    A direct ``BLEClient`` connect that is interrupted waits a bounded time
+    for its native disconnect cleanup. When that wait expires, a BlueZ
+    disconnect may still be pending; the fence recorded here lets both
+    connect paths refuse a new link to the same address so it cannot race
+    the straggler disconnect. Registration is idempotent per address and
+    refreshes the deadline, so repeated overrunning cleanups extend the
+    fence. Each cleanup retains its own retirement token until it finishes;
+    one cleanup cannot release another's fence. The deadline backstop is read from
+    :data:`BLEConfig.INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS` at call time.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address to fence; normalized via :func:`_addr_key`. None or empty
+        is a no-op that returns ``0.0``.
+
+    Returns
+    -------
+    float
+        The monotonic deadline until which the fence refuses connects, or
+        ``0.0`` when the address is unusable.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return 0.0
+    max_seconds = BLEConfig.INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS
+    if (
+        not isinstance(max_seconds, (int, float))
+        or isinstance(max_seconds, bool)
+        or not math.isfinite(max_seconds)
+        or max_seconds <= 0
+    ):
+        logger.warning(
+            "Invalid interrupted-cleanup fence timeout %r; using the safe default",
+            max_seconds,
+        )
+        max_seconds = DISCONNECT_TIMEOUT_SECONDS * 6.0
+    deadline = time.monotonic() + max_seconds
+    with _REGISTRY_LOCK:
+        pending = _INTERRUPTED_CLEANUP_PENDING.setdefault(key, set())
+        # Treat the deadline as this cleanup's retirement token. Even on a
+        # coarse clock, successive registrations must have distinct tokens.
+        if pending:
+            deadline = max(deadline, math.nextafter(max(pending), math.inf))
+        pending.add(deadline)
+        _INTERRUPTED_CLEANUP_FENCES[key] = max(pending)
+    logger.debug(
+        "Fenced %s while interrupted connect cleanup is pending (deadline %.1fs)",
+        key,
+        deadline,
+    )
+    return deadline
+
+
+def _retire_interrupted_cleanup_fence(
+    addr: str | None, expected_deadline: float | None = None
+) -> None:
+    """Release an interrupted-cleanup fence once the pending disconnect retires.
+
+    Idempotent. When ``expected_deadline`` is provided, only that cleanup's
+    registration is retired; other pending cleanups keep the address fenced.
+    With no deadline, all registrations are explicitly cleared.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address whose fence should be released; normalized via
+        :func:`_addr_key`. None or empty is a no-op.
+    expected_deadline : float | None
+        Deadline the fence must still carry to be released. (Default
+        value = None)
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return
+    with _REGISTRY_LOCK:
+        deadline = _INTERRUPTED_CLEANUP_FENCES.get(key)
+        if deadline is None:
+            return
+        if expected_deadline is None:
+            _INTERRUPTED_CLEANUP_PENDING.pop(key, None)
+            _INTERRUPTED_CLEANUP_FENCES.pop(key, None)
+        else:
+            pending = _INTERRUPTED_CLEANUP_PENDING.get(key)
+            if pending is None or expected_deadline not in pending:
+                return
+            pending.remove(expected_deadline)
+            if pending:
+                _INTERRUPTED_CLEANUP_FENCES[key] = max(pending)
+            else:
+                _INTERRUPTED_CLEANUP_PENDING.pop(key, None)
+                _INTERRUPTED_CLEANUP_FENCES.pop(key, None)
+    logger.debug(
+        "Released interrupted-cleanup fence for %s (pending disconnect retired "
+        "or fence expired)",
+        key,
+    )
+
+
+def _interrupted_cleanup_fenced(addr: str | None) -> bool:
+    """Return whether an interrupted-cleanup fence currently covers ``addr``.
+
+    An expired fence is pruned lazily here, so an address can never stay
+    fenced permanently even if the retirement watcher never runs.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address to check; normalized via :func:`_addr_key`.
+
+    Returns
+    -------
+    bool
+        True while a non-expired fence refuses new connects to the address.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return False
+    with _REGISTRY_LOCK:
+        deadline = _INTERRUPTED_CLEANUP_FENCES.get(key)
+        if deadline is None:
+            return False
+        if time.monotonic() >= deadline:
+            _INTERRUPTED_CLEANUP_FENCES.pop(key, None)
+            _INTERRUPTED_CLEANUP_PENDING.pop(key, None)
+            logger.debug("Interrupted-cleanup fence for %s expired by deadline", key)
+            return False
+        return True
 
 
 def _clear_all_registries() -> None:

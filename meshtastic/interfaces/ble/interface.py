@@ -87,6 +87,7 @@ from meshtastic.interfaces.ble.constants import (
     ERROR_CONNECTION_FAILED,
     ERROR_CONNECTION_SUPPRESSED,
     ERROR_INTERFACE_CLOSING,
+    ERROR_INTERRUPTED_CLEANUP_FENCED,
     ERROR_MANAGEMENT_CONNECTING,
     ERROR_MULTIPLE_DEVICES,
     ERROR_MULTIPLE_DEVICES_DISCOVERY,
@@ -127,6 +128,7 @@ from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_connecting,
     _clear_connecting_for_owner,
+    _interrupted_cleanup_fenced,
     _is_currently_connected_elsewhere,
     _live_ble_client_owns_address,
     _mark_connected,
@@ -2316,6 +2318,32 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                 requested_identifier=requested_identifier or connection_key,
             )
 
+    def _raise_if_interrupted_cleanup_fenced(self, connection_key: str | None) -> None:
+        """Raise BLEError when an interrupted-cleanup fence covers this address.
+
+        A direct ``BLEClient`` connect that was interrupted may still have a
+        BlueZ disconnect pending after its bounded cleanup wait expired. The
+        address-level fence recorded for that case refuses a new link here so
+        the connect cannot race the straggler disconnect. Unlike duplicate
+        suppression this check runs regardless of clearance policy, because
+        the pending disconnect comes from this process's own interrupted
+        cleanup.
+
+        Parameters
+        ----------
+        connection_key : str | None
+            Address registry key to check; None (discovery mode) is a no-op.
+
+        Raises
+        ------
+        BLEInterface.BLEError
+            If the address is fenced by an overrunning interrupted cleanup.
+        """
+        if connection_key is None:
+            return
+        if _interrupted_cleanup_fenced(connection_key):
+            raise self.BLEError(ERROR_INTERRUPTED_CLEANUP_FENCED.format(connection_key))
+
     def _get_existing_client_if_valid(
         self, normalized_request: str | None
     ) -> BLEClient | None:
@@ -3110,6 +3138,11 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                                 requested_identifier=requested_identifier,
                                 resolved_address=resolved_connect_target,
                             )
+                        for reservation_key in reservation_keys:
+                            # An interrupted direct client's disconnect may
+                            # still be pending; refuse while fenced, whatever
+                            # the clearance policy says.
+                            self._raise_if_interrupted_cleanup_fenced(reservation_key)
                         with self._state_lock:
                             if self._client_publish_pending:
                                 raise self.BLEError(ERROR_MANAGEMENT_CONNECTING)

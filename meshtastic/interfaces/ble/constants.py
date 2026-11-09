@@ -53,6 +53,16 @@ class BLEConfig:
     AUTO_RECONNECT_JITTER_RATIO = 0.15
     DBUS_ERROR_RECONNECT_DELAY = 30.0
     CONNECTION_GATE_UNOWNED_STALE_SECONDS = 300.0
+    # Address-level fence for an interrupted BLEClient connect whose native
+    # disconnect cleanup exceeded its bounded wait. While the fence is active,
+    # new connects to that address are refused so they cannot race the
+    # still-pending BlueZ disconnect. The cleanup already overran
+    # DISCONNECT_TIMEOUT_SECONDS when the fence is registered, so the
+    # backstop deadline allows several further disconnect budgets before
+    # expiring; the retirement watcher normally releases the fence as soon
+    # as the straggler cleanup coroutine finishes. Read at call time so
+    # embedders can tune it.
+    INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS = DISCONNECT_TIMEOUT_SECONDS * 6.0
     BLECLIENT_EVENT_THREAD_JOIN_TIMEOUT = 2.0
     # Runner configuration
     RUNNER_LOOP_READY_TIMEOUT_SECONDS = 5.0
@@ -153,6 +163,11 @@ ERROR_CONNECTION_SUPPRESSED: str = "Connection suppressed: recently connected el
 ERROR_STALE_CLEARANCE_ABANDONED: str = (
     "Stale connection clearance did not finish; not starting a new connection "
     "while a late disconnect could tear it down."
+)
+ERROR_INTERRUPTED_CLEANUP_FENCED: str = (
+    "Interrupted connection cleanup did not finish; not starting a new "
+    "connection to {0} while a late disconnect could tear it down. "
+    "Retry after the cleanup retires or the fence expires."
 )
 ERROR_NO_CLIENT_ESTABLISHED: str = "Connection failed: no BLE client established"
 ERROR_MANAGEMENT_ADDRESS_EMPTY: str = (
