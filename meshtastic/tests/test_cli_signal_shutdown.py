@@ -934,12 +934,28 @@ def test_install_and_restore_reset_recorded_signal(
 def test_cli_signal_handler_performs_no_logging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A signal must unwind even when the interrupted logger is unavailable."""
+    """A signal must unwind even when the interrupted logger is unavailable.
+
+    Every level method and alias is forbidden, not only ``info``: logging from
+    the handler can block shutdown if the signal interrupts a non-reentrant
+    queue lock.
+    """
 
     def forbidden_log(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("signal handler attempted logging")
 
-    monkeypatch.setattr(cli_main.logger, "info", forbidden_log)
+    for method in (
+        "debug",
+        "info",
+        "warning",
+        "warn",
+        "error",
+        "exception",
+        "critical",
+        "fatal",
+        "log",
+    ):
+        monkeypatch.setattr(cli_main.logger, method, forbidden_log, raising=False)
     with pytest.raises(SystemExit):
         cli_main._cli_signal_handler(signal.SIGTERM, None)
 
