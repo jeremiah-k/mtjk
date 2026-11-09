@@ -1083,6 +1083,32 @@ def test_entrypoint_maps_keyboard_interrupt_during_handler_install(
     assert restored == [{}]
 
 
+@pytest.mark.usefixtures("reset_mt_config")
+def test_keyboard_interrupt_during_restoration_resets_invocation_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Ctrl+C escaping handler restoration still resets invocation ownership.
+
+    Restoration runs inside the entrypoint's finally: an interrupt delivered at
+    that boundary must not skip the ownership-reset tail, or a later embedded
+    entrypoint would silently lose handler ownership for the rest of the
+    process.
+    """
+
+    def _interrupted_restore(
+        previous: dict[int, Any] | None, *, reset_state: bool = True
+    ) -> None:
+        raise KeyboardInterrupt()
+
+    _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
+    monkeypatch.setattr(cli_main, "_restore_cli_signal_handlers", _interrupted_restore)
+    with pytest.raises(KeyboardInterrupt):
+        cli_main._run_cli_entrypoint(lambda: None)
+    assert not cli_main._cli_signal_invocation_active
+    assert not cli_main._cli_signal_defer_exit
+    assert not cli_main._cli_signal_shutdown_started
+
+
 def test_cli_main_installs_handlers_at_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

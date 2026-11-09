@@ -2738,13 +2738,13 @@ def _run_cli_entrypoint(
                 _cli_signal_defer_exit = True
     finally:
         signum = None
-        if owns_handlers:
-            try:
-                _restore_cli_signal_handlers(previous, reset_state=False)
-                signum = _cli_signal_received
-            finally:
-                _cli_signal_received = None
         try:
+            if owns_handlers:
+                try:
+                    _restore_cli_signal_handlers(previous, reset_state=False)
+                    signum = _cli_signal_received
+                finally:
+                    _cli_signal_received = None
             if signum is not None:
                 # A recorded TERM/HUP is fatal here (NoReturn), so it takes
                 # precedence over the SIGINT re-delivery below. This re-delivery
@@ -2760,6 +2760,12 @@ def _run_cli_entrypoint(
                 )
         finally:
             if owns_handlers:
+                # The ownership reset must run even when restoration or the
+                # re-delivery itself is interrupted: a KeyboardInterrupt
+                # escaping either boundary would otherwise leave the
+                # invocation-ownership flags set, and a later embedded
+                # entrypoint would silently lose handler ownership for the
+                # rest of the process.
                 _cli_signal_shutdown_started = False
                 _cli_signal_shutdown_lock = threading.Lock()
                 _cli_signal_defer_exit = False
