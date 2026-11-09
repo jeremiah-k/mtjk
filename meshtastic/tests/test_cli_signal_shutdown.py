@@ -940,6 +940,7 @@ def test_inherited_non_python_handler_is_preserved(
     assert registrations == []
 
 
+@pytest.mark.usefixtures("reset_mt_config")
 def test_cli_main_installs_handlers_at_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1012,6 +1013,7 @@ def test_tunnel_entry_installs_and_restores_handlers(
     assert all(signal.getsignal(sig) is handler for sig, handler in before.items())
 
 
+@pytest.mark.usefixtures("reset_mt_config")
 def test_tunnel_main_keyboard_interrupt_maps_to_130(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1068,6 +1070,7 @@ def test_console_tunnel_main_keyboard_interrupt_records_sigint_request(
     assert _no_real_self_signals == [(signal.SIGINT, True)]
 
 
+@pytest.mark.usefixtures("reset_mt_config")
 def test_tunnel_main_mesh_interface_error_maps_to_1(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

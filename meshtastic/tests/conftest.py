@@ -13,7 +13,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 from unittest.mock import MagicMock, create_autospec, patch
@@ -24,6 +24,9 @@ import meshtastic.util as util_module
 from meshtastic import mt_config, publishingThread
 from meshtastic._branding import PRIMARY_CLI_NAME
 from meshtastic.powermon import power_supply as power_supply_module
+
+# Registers the autouse _no_real_self_signals fixture for this test root.
+from meshtastic.tests._self_signal_fixture import _no_real_self_signals  # noqa: F401
 from meshtastic.util import DeferredExecution
 
 from ..mesh_interface import MeshInterface
@@ -742,36 +745,3 @@ def mock_interface_with_nodes(mock_interface: MeshInterface) -> MeshInterface:
     """
     # Already configured in mock_interface
     return mock_interface
-
-
-@pytest.fixture(autouse=True)
-def _no_real_self_signals() -> Iterator[list[tuple[int, bool]]]:
-    """Replace the CLI self-signal seam so no test can signal this process.
-
-    Every CLI fatal-signal path (the TERM/HUP re-delivery after teardown, the
-    second-delivery forced exit, and the SIGINT re-delivery after a Ctrl+C
-    teardown) delivers through ``meshtastic._self_signal._signal_self``. The
-    recorder notes each request and returns, so callers keep their
-    ``SystemExit`` fallbacks and the pytest process is never signaled. Tests
-    that verify the delivery itself opt back in by patching the seam with
-    their own fake. The seam module is imported lazily here and is stdlib-only,
-    so conftest collection imports nothing heavy and no import-order effects
-    are possible.
-    """
-    from meshtastic import _self_signal
-
-    requests: list[tuple[int, bool]] = []
-
-    def _recorder(signum: int, *, reset_to_default: bool) -> None:
-        requests.append((signum, reset_to_default))
-
-    # A private patcher, NOT the shared monkeypatch fixture: requesting that
-    # fixture from an autouse conftest fixture sets it up before module-level
-    # autouse fixtures, and LIFO teardown would then run their teardowns while
-    # the test's own monkeypatches were still active. The context below keeps
-    # this guard's patch bracketed around the test without touching that
-    # order: a test's shared-monkeypatch undo restores the recorder first,
-    # and this guard's undo restores the real function last.
-    with pytest.MonkeyPatch.context() as patcher:
-        patcher.setattr(_self_signal, "_signal_self", _recorder)
-        yield requests
