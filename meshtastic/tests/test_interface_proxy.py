@@ -834,6 +834,39 @@ def test_ble_central_failed_connect_disconnects_client(
     asyncio.run(scenario())
 
 
+def test_ble_central_open_refuses_when_clearance_cannot_retire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unconfirmed stale-link clearance makes open refuse and still clean up."""
+    from meshtastic.interfaces.ble import stale_connection as stale_connection_mod
+
+    async def _abandoned(address: str, *, adapter: str | None = None) -> bool:
+        raise stale_connection_mod._ClearanceAbandonedError(
+            "stale-connection clearance did not retire within the D-Bus budget"
+        )
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+        )
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _abandoned)
+        with pytest.raises(RuntimeError, match="did not retire"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        # The refusal still cleans up: the native disconnect runs and the
+        # process-local claim retires so a successor can own the address.
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere(
+            "AA:BB:CC:DD:EE:FF", owner=object()
+        )
+
+    asyncio.run(scenario())
+
+
 def test_ble_central_open_refuses_when_owned_elsewhere(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

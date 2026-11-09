@@ -362,7 +362,8 @@ class BLECentralChannel:
             # would break this connect. The claim excludes other registered
             # BLEInterface and proxy owners; low-level clients that bypass the
             # registry are outside this ownership protocol.
-            # Best-effort: never raises, never blocks long.
+            # Transport failures are best-effort; an unconfirmed timeout
+            # refuses this open so a late Disconnect cannot tear it down.
             if not _is_currently_connected_elsewhere(
                 address, owner=link
             ) and not _live_ble_client_owns_address(address):

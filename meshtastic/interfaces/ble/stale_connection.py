@@ -7,13 +7,13 @@ handles the transport owned by *this* process; nothing clears a link still
 owned by a *previous* process. These helpers ask BlueZ, over D-Bus, to
 disconnect the one target device before a central connection is opened.
 
-Clearance is strictly best-effort: transport failures are logged at debug
-level and do not fail the connection attempt. Construction cancellation and
-fatal-signal exceptions propagate so the caller can unwind promptly. If the
-synchronous bridge cannot confirm that a queued attempt retired within its
-wait budget, it raises :class:`_ClearanceAbandonedError` instead of returning:
-the caller must not establish a replacement link while a late ``Disconnect``
-could still tear it down.
+Clearance is best-effort for transport failures: those are logged at debug
+level and do not fail the connection attempt. An attempt that does not retire
+within its wait budget cannot be confirmed, so it raises
+:class:`_ClearanceAbandonedError` — both from the coroutine itself and through
+the synchronous bridge — and the caller must refuse a replacement link while
+a late ``Disconnect`` could still tear it down. Construction cancellation and
+fatal-signal exceptions propagate so the caller can unwind promptly.
 
 Embedders can disable the behavior entirely by setting
 ``BLEConfig.CLEAR_STALE_CONNECTIONS = False``; the D-Bus bus is then never
@@ -330,8 +330,10 @@ async def _clear_stale_connection(
     ever touched; nothing else on the bus is disconnected.
 
     The whole D-Bus interaction (bus connect, enumeration, disconnect) is
-    bounded by ``BLEConfig.STALE_CONNECTION_DISCONNECT_TIMEOUT``. Every failure
-    is swallowed and logged at debug level; the helper never raises.
+    bounded by ``BLEConfig.STALE_CONNECTION_DISCONNECT_TIMEOUT``. Transport
+    failures are swallowed and logged at debug level; a wait-budget timeout
+    raises :class:`_ClearanceAbandonedError` so the caller refuses a new link
+    a late ``Disconnect`` could still tear down.
 
     Disabled (no bus query, immediate ``False``) when
     ``BLEConfig.CLEAR_STALE_CONNECTIONS`` is False or the host is not
@@ -352,7 +354,14 @@ async def _clear_stale_connection(
     -------
     bool
         True when a stale connection was found and the ``Disconnect`` call
-        succeeded; False otherwise.
+        succeeded; False when clearance is disabled, the address is
+        unusable, or a transport failure occurred.
+
+    Raises
+    ------
+    _ClearanceAbandonedError
+        If the attempt did not retire within the wait budget and can still
+        land its ``Device1.Disconnect`` after this call returns.
     """
     if not _clear_stale_connection_enabled():
         return False
@@ -364,7 +373,11 @@ async def _clear_stale_connection(
             _disconnect_connected_target(normalized, adapter=adapter, aborted=aborted),
             timeout=BLEConfig.STALE_CONNECTION_DISCONNECT_TIMEOUT,
         )
-    except Exception:  # noqa: BLE001 - clearance is strictly best-effort
+    except TimeoutError as exc:
+        raise _ClearanceAbandonedError(
+            "stale-connection clearance did not retire within the D-Bus budget"
+        ) from exc
+    except Exception:  # noqa: BLE001 - transport failures are best-effort
         logger.debug(
             "Stale BLE connection clearance failed for %s",
             normalized,
@@ -380,7 +393,9 @@ def _clear_stale_connection_before_central_connect(
 
     The coroutine is bridged through the shared ``BLECoroutineRunner`` loop
     (the same loop ``BLEClient`` uses); no new event loop or runner is created.
-    Transport failures return False. Construction cancellation and fatal-signal
+    Transport failures return False. An inner wait-budget timeout arrives
+    through the future result as :class:`_ClearanceAbandonedError` and
+    propagates. Construction cancellation and fatal-signal
     exceptions propagate after the abandoned job is fenced and cancelled.
 
     The bridged job checks an abandonment fence: on any exit
@@ -472,6 +487,10 @@ def _clear_stale_connection_before_central_connect(
             exc_info=True,
         )
         return False
+    except _ClearanceAbandonedError:
+        # The inner job exceeded its own wait budget; the unconfirmed attempt
+        # arrives through the future result and must refuse the caller.
+        raise
     except Exception:  # noqa: BLE001 - clearance is strictly best-effort
         logger.debug(
             "Stale BLE connection clearance could not run for %s",

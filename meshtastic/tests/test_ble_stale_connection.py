@@ -231,10 +231,10 @@ def test_clear_stale_connection_swallows_bus_connect_failure(
     assert asyncio.run(stale_connection._clear_stale_connection(_TARGET)) is False
 
 
-def test_clear_stale_connection_times_out_without_raising(
+def test_clear_stale_connection_abandons_unconfirmed_attempt_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A wedged D-Bus call is bounded by the disconnect timeout constant."""
+    """A wait-budget timeout abandons the attempt instead of reporting False."""
     _message, _bus = _fake_dbus(monkeypatch, hang_call=True)
     monkeypatch.setattr(BLEConfig, "STALE_CONNECTION_DISCONNECT_TIMEOUT", 0.05)
     wait_for = asyncio.wait_for
@@ -245,7 +245,8 @@ def test_clear_stale_connection_times_out_without_raising(
         return await wait_for(coro, timeout=timeout)
 
     monkeypatch.setattr(asyncio, "wait_for", record_wait)
-    assert asyncio.run(stale_connection._clear_stale_connection(_TARGET)) is False
+    with pytest.raises(stale_connection._ClearanceAbandonedError):
+        asyncio.run(stale_connection._clear_stale_connection(_TARGET))
     assert observed_timeouts == [0.05]
 
 
