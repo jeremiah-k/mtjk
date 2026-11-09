@@ -34,6 +34,7 @@ class _FakeThread:
     """Lightweight thread stub for testing."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Record constructor arguments and default to the alive, unstarted state."""
         self._args = args
         self._kwargs = kwargs
         self.started = False
@@ -56,6 +57,7 @@ class _FakeWriter:
     """In-memory writer stub for schema assertions."""
 
     def __init__(self, file_path: str) -> None:
+        """Record the file path and start with no schema or rows."""
         self.file_path = file_path
         self.schema: Any = None
         self.rows: list[dict[str, Any]] = []
@@ -77,6 +79,7 @@ class _SlowStopThread:
     """Thread that takes longer than timeout to stop."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG001
+        """Capture the target callable and default to alive and unstarted."""
         self._target = kwargs.get("target")
         self.started = False
         self._is_alive = True
@@ -646,6 +649,7 @@ def test_power_logger_dependency_close_runs_on_caller_thread(
         """Writer stub that records which thread invokes close()."""
 
         def __init__(self, file_path: str) -> None:
+            """Record the file path and start with no schema or rows."""
             self.file_path = file_path
             self.schema: Any = None
             self.rows: list[dict[str, Any]] = []
