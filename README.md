@@ -179,7 +179,7 @@ The CLI niceties (`segno` for `--qr`, `print-color`, `argcomplete`,
 CLI, including QR rendering. The `cli` extra is still accepted as a
 no-op, so `mtjk[cli]` keeps working for existing scripts.
 
-`--qr`, `--qr-all`, and `--qr-contact` use compact Unicode blocks.
+`--qr`, `--qr-all`, and `--contact-qr` (which renders a node's contact data and its shareable contact URL) use compact Unicode blocks.
 Interactive output selects the strongest error correction that fits the
 terminal while preserving the QR quiet zone. If no complete code fits,
 enlarge the terminal or open the displayed URL. Redirected output keeps
