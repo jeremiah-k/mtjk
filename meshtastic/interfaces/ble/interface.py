@@ -70,6 +70,10 @@ from meshtastic.interfaces.ble.connect_transaction import (
     _BLEClientAdoption,
     _BLEConnectStateSnapshot,
 )
+from meshtastic.interfaces.ble.connected_devices import (
+    _connected_meshtastic_devices,
+    _merge_devices_by_address,
+)
 from meshtastic.interfaces.ble.connection import (
     ClientManager,
     ConnectionOrchestrator,
@@ -172,6 +176,18 @@ from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import mesh_pb2
 
 T = TypeVar("T")
+
+# Failures that degrade the best-effort OS-level connected-device lookup in
+# `BLEInterface.scan` to scan-only results. Bound at import time so the tuple
+# keeps the real `BLEClient.BLEError` even when `BLEClient` itself is replaced
+# by test doubles.
+_CONNECTED_DEVICE_LOOKUP_ERRORS: tuple[type[Exception], ...] = (
+    BLEClient.BLEError,
+    BleakError,
+    OSError,
+    NotImplementedError,
+    ImportError,
+)
 
 MALFORMED_NOTIFICATION_THRESHOLD: int = _ble_constants.MALFORMED_NOTIFICATION_THRESHOLD
 _MANAGEMENT_SHUTDOWN_WAIT_TIMEOUT_SECONDS: float = 30.0
@@ -897,20 +913,61 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         """Scan for BLE devices advertising the Meshtastic service UUID.
 
         Performs a timed scan and returns discovered devices that advertise the Meshtastic service.
-        Returns an empty list if no matching devices are found or if the scan fails for non-DBus reasons.
+        Radios that are already connected at the OS level (but may not be advertising) are
+        reported first, when the OS-level connected-device query succeeds; that query is
+        best-effort and bounded by a short timeout, and any failure degrades to scan-only
+        results. Returns an empty list if no matching devices are found or if the scan fails
+        for non-DBus reasons; previously discovered OS-connected radios are
+        still returned when advertisement discovery itself fails.
 
         Returns
         -------
         list[BLEDevice]
-            Discovered BLEDevice instances advertising the Meshtastic service.
+            Discovered BLEDevice instances advertising the Meshtastic service, with
+            OS-connected devices merged in ahead of them when available.
 
         Raises
         ------
         BleakDBusError
             If a DBus-level error occurs during scanning (propagated to callers).
+        ConnectionCancelledError
+            If the calling construction was cancelled while the connected-device
+            lookup or advertisement discovery was running.
         """
         _validate_ble_adapter(adapter)
         with BLEClient(log_if_no_address=False) as client:
+            # Best-effort connected-device lookup: never gates the scan and never
+            # changes its error behavior. A wedged D-Bus is bounded by the short
+            # timeout passed to the shared BLE event loop below.
+            connected: list[BLEDevice] = []
+            # BLEClient owns disposal before submission and cancellation after
+            # it; caller-thread close() could interrupt async cleanup on its loop.
+            connected_coro = _connected_meshtastic_devices(adapter=adapter)
+            try:
+                connected = cast(
+                    list[BLEDevice],
+                    client._async_await(
+                        connected_coro, timeout=BLEConfig.BLE_CONNECTED_DEVICES_TIMEOUT
+                    ),
+                )
+            except ConnectionCancelledError:
+                # Construction cancellation owns the outcome; the lookup's
+                # best-effort degradation must not swallow it.
+                raise
+            except _CONNECTED_DEVICE_LOOKUP_ERRORS as e:
+                # Unsupported backend/platform, D-Bus unavailable, event-loop
+                # problems, or the query being disabled by the environment.
+                logger.debug(
+                    "Connected-device lookup unavailable: %s", e, exc_info=True
+                )
+            except (
+                Exception
+            ) as e:  # noqa: BLE001 - connected lookup must never break the scan
+                logger.debug(
+                    "Unexpected error during connected-device lookup: %s",
+                    e,
+                    exc_info=True,
+                )
             logger.debug(
                 "Scanning for BLE devices (takes %.0f seconds)...",
                 BLEConfig.BLE_SCAN_TIMEOUT,
@@ -922,20 +979,26 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                     service_uuids=[SERVICE_UUID],
                     **({"bluez": {"adapter": adapter}} if adapter is not None else {}),
                 )
-                return _parse_scan_response(response)
+                return _merge_devices_by_address(
+                    connected, _parse_scan_response(response)
+                )
+            except ConnectionCancelledError:
+                # Advertisement discovery reports the same cancellation
+                # contract as every other transport operation.
+                raise
             except BleakDBusError:
                 # Propagate DBus-level failures so callers can back off appropriately
                 raise
             except (BleakError, RuntimeError) as e:
                 logger.warning("Device scan failed: %s", e, exc_info=True)
-                return []
-            except (
-                Exception
-            ) as e:  # noqa: BLE001 # pragma: no cover - defensive last resort
+                # A failed advertisement scan must not hide radios already
+                # returned by the independent OS-connected lookup.
+                return connected
+            except Exception as e:  # noqa: BLE001 - defensive last resort
                 logger.warning(
                     "Unexpected error during device scan: %s", e, exc_info=True
                 )
-                return []
+                return connected
 
     def findDevice(self, address: str | None) -> BLEDevice:
         """Locate a Meshtastic BLEDevice by address or device name.
