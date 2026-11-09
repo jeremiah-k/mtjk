@@ -503,6 +503,9 @@ def test_power_logger_worker_finally_closes_dependencies_after_deferred_close() 
     logger_obj._dependency_close_lock = threading.Lock()
     logger_obj._dependencies_closed = False
     logger_obj._deferred_dependency_close = True
+    logger_obj._worker_exited_loop = False
+    # Worker-owned teardown: no caller remains to close dependencies.
+    logger_obj._worker_should_close_dependencies = True
     logger_obj._background_close_error = None
     store_current_reading = MagicMock()
     logger_obj._store_current_reading = (  # type: ignore[method-assign]

@@ -265,6 +265,13 @@ class PowerLogger:
         self._dependencies_closed = False
         self._deferred_dependency_close = False
         self._background_close_error: Exception | None = None
+        # Dependency-teardown ownership handshake, guarded by
+        # _dependency_close_lock: the worker records that it left its sampling
+        # loop in _worker_exited_loop; the caller grants it ownership of the
+        # (potentially slow) meter/writer teardown via
+        # _worker_should_close_dependencies only when no caller will do it.
+        self._worker_exited_loop = False
+        self._worker_should_close_dependencies = False
         self._health = _SlogHealthTracker()
         self.is_logging = True
         self.thread = threading.Thread(
@@ -462,7 +469,16 @@ class PowerLogger:
                         )
                 self._stop_event.wait(self.interval)
         finally:
-            if self._deferred_dependency_close:
+            # Record loop exit and check teardown ownership under the lock so
+            # the caller's decision is coherent with ours. Only abandoned or
+            # self-closing workers tear down dependencies here; otherwise the
+            # caller closes them after a successful join, keeping slow
+            # dependency cleanup (Arrow flush, Feather conversion) outside the
+            # bounded join window.
+            with self._dependency_close_lock:
+                self._worker_exited_loop = True
+                worker_owns_cleanup = self._worker_should_close_dependencies
+            if self._deferred_dependency_close and worker_owns_cleanup:
                 self._close_dependencies_after_worker_exit()
 
     def _close_dependencies_locked(self) -> None:
@@ -535,10 +551,14 @@ class PowerLogger:
     def close(self) -> None:
         """Stop sampling before closing meter/writer dependencies.
 
-        A worker that outlives the bounded join retains ownership of dependency
-        cleanup and closes them in ``_logging_thread``'s ``finally`` block. The
-        caller receives an explicit shutdown error instead of racing the live
-        sampler by closing resources underneath it.
+        The bounded join covers only the sampling loop's exit. Dependency
+        teardown (meter close, Arrow flush, Feather conversion) runs on the
+        caller thread after the worker has been reaped, so a slow dependency
+        close can never consume the join budget. A worker that outlives the
+        join retains ownership of dependency cleanup and closes them in
+        ``_logging_thread``'s ``finally`` block; the caller receives an
+        explicit shutdown error instead of racing the live sampler by closing
+        resources underneath it.
         """
         dependencies_closed, background_error = self._take_closed_dependency_error()
         if dependencies_closed:
@@ -548,15 +568,24 @@ class PowerLogger:
 
         self.is_logging = False
         self._deferred_dependency_close = True
-        self._stop_event.set()
         if threading.current_thread() is self.thread:
             logger.debug(
                 "PowerLogger.close() called from logging thread; deferring dependency cleanup until thread exit."
             )
+            # No external caller remains to clean up after the loop exits.
+            # Grant ownership BEFORE signalling stop so the worker's teardown
+            # check cannot race this decision.
+            with self._dependency_close_lock:
+                self._worker_should_close_dependencies = True
+            self._stop_event.set()
             return
 
+        self._stop_event.set()
         self.thread.join(timeout=POWER_LOGGER_JOIN_TIMEOUT)
         if self.thread.is_alive():
+            with self._dependency_close_lock:
+                self._worker_should_close_dependencies = True
+                worker_exited_loop = self._worker_exited_loop
             shutdown_error = _PowerLoggerShutdownError(
                 "PowerLogger background thread did not stop within "
                 f"{POWER_LOGGER_JOIN_TIMEOUT:.1f}s; meter and writer remain open "
@@ -565,10 +594,24 @@ class PowerLogger:
             _get_health_tracker(self)._record_failure(
                 POWER_SHUTDOWN_HEALTH_COMPONENT, shutdown_error
             )
+            if not worker_exited_loop:
+                raise shutdown_error
+            # The worker already left its sampling loop, so cleanup cannot race
+            # a live sampler. It may have passed its own cleanup decision point
+            # before ownership was assigned above; close here so dependencies
+            # are not leaked, then still surface the late shutdown.
+            self._close_dependencies()
+            _dependencies_closed, background_error = (
+                self._take_closed_dependency_error()
+            )
+            if background_error is not None:
+                raise background_error
             raise shutdown_error
 
-        # Fake/test threads may not execute _logging_thread's finally block, so
-        # the caller also finalizes once the thread is confirmed stopped.
+        # The worker leaves dependency cleanup to the caller so slow teardown
+        # never runs inside the join window; fake/test threads may not execute
+        # _logging_thread's finally block at all. Either way the caller
+        # finalizes once the thread is confirmed stopped.
         self._close_dependencies()
         _dependencies_closed, background_error = self._take_closed_dependency_error()
         if background_error is not None:

@@ -629,6 +629,54 @@ def test_power_logger_close_from_logging_thread(
 
 
 @pytest.mark.unit
+def test_power_logger_dependency_close_runs_on_caller_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dependency teardown must run on the caller, not inside the join window.
+
+    The worker must leave meter/writer cleanup to the caller once its sampling
+    loop exits; otherwise a slow dependency close (first Arrow flush, Feather
+    conversion) can consume the bounded join budget and fail healthy shutdowns
+    under load.
+    """
+    close_callers: list[threading.Thread] = []
+
+    class _RecordingCloseWriter:
+        """Writer stub that records which thread invokes close()."""
+
+        def __init__(self, file_path: str) -> None:
+            self.file_path = file_path
+            self.schema: Any = None
+            self.rows: list[dict[str, Any]] = []
+
+        def setSchema(self, schema: Any) -> None:
+            """Record the schema for assertions."""
+            self.schema = schema
+
+        def addRow(self, _row: dict[str, Any]) -> None:
+            """Accept rows without writing."""
+
+        def close(self) -> None:
+            """Record the calling thread."""
+            close_callers.append(threading.current_thread())
+
+    monkeypatch.setattr(slog_module, "FeatherWriter", _RecordingCloseWriter)
+
+    meter = _make_meter_with_voltage(3.3)
+    logger = PowerLogger(meter, "unused-path")
+    worker = logger.thread
+    logger.close()
+
+    assert close_callers, "writer.close() must be called exactly once on shutdown"
+    for caller in close_callers:
+        assert (
+            caller is not worker
+        ), "writer.close() ran on the logging thread inside the join window"
+    assert not worker.is_alive()
+    meter.close.assert_called_once_with()
+
+
+@pytest.mark.unit
 def test_power_logger_both_pmeter_args_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

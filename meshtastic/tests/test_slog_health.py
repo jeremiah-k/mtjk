@@ -112,12 +112,18 @@ def test_power_logger_join_timeout_records_shutdown_failure(
     )
     power_logger.is_logging = True
     power_logger._deferred_dependency_close = False
+    power_logger._dependency_close_lock = threading.Lock()
+    power_logger._worker_exited_loop = False
+    power_logger._worker_should_close_dependencies = False
     power_logger._stop_event = MagicMock()
     power_logger.thread = MagicMock()
     power_logger.thread.is_alive.return_value = True
 
     with pytest.raises(_PowerLoggerShutdownError):
         power_logger.close()
+
+    # The timed-out caller hands dependency teardown ownership to the worker.
+    assert power_logger._worker_should_close_dependencies is True
 
     health = power_logger.getHealth()
     assert health.degraded_components == (POWER_SHUTDOWN_HEALTH_COMPONENT,)
