@@ -28,7 +28,7 @@ from ..node import Node
 
 # from ..radioconfig_pb2 import UserPreferences
 # import meshtastic.config_pb2
-from ..protobuf import channel_pb2, localonly_pb2
+from ..protobuf import channel_pb2, config_pb2, localonly_pb2
 from ..protobuf.channel_pb2 import Channel  # pylint: disable=E0611
 from ..serial_interface import SerialInterface
 from ..util import Timeout
@@ -1028,6 +1028,53 @@ def test_get_pref_allow_secrets_shows_security_section_keys(
     assert base64.b64encode(private_key).decode("utf-8") in out
     assert base64.b64encode(public_key).decode("utf-8") in out
     assert base64.b64encode(private_key).decode("utf-8") not in caplog.text
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_redacts_device_ui_pin_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """getPref() should redact the device UI PIN like other fixed-pin credentials."""
+    node = SimpleNamespace(
+        localConfig=config_pb2.Config(),
+        moduleConfig=localonly_pb2.LocalModuleConfig(),
+        requestConfig=MagicMock(),
+    )
+    node.localConfig.device_ui.pin_code = 654321
+
+    assert main_module.getPref(node, "device_ui.pin_code") is True
+
+    out, err = capsys.readouterr()
+    assert "device_ui.pin_code: <redacted>" in out
+    assert "654321" not in out
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_get_pref_allow_secrets_shows_device_ui_pin_code(
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An explicit --get (allow_secrets=True) still shows the raw device UI PIN."""
+    node = SimpleNamespace(
+        localConfig=config_pb2.Config(),
+        moduleConfig=localonly_pb2.LocalModuleConfig(),
+        requestConfig=MagicMock(),
+    )
+    node.localConfig.device_ui.pin_code = 654321
+
+    with caplog.at_level(logging.DEBUG):
+        assert (
+            main_module.getPref(node, "device_ui.pin_code", allow_secrets=True) is True
+        )
+
+    out, err = capsys.readouterr()
+    assert "device_ui.pin_code: <redacted>" not in out
+    assert "device_ui.pin_code: 654321" in out
+    assert "654321" not in caplog.text
     assert err == ""
 
 

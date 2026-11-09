@@ -74,6 +74,9 @@ SECRET_PREF_PATHS: frozenset[str] = frozenset(
         "mqtt.password",
         "bluetooth.fixed_pin",
         "security.session_passkey",
+        # The device UI PIN unlocks the node screen, so it redacts like the
+        # other fixed PIN credentials (upstream marks it sensitive).
+        "device_ui.pin_code",
     }
 )
 REDACTED_PREF_VALUE = "<redacted>"
