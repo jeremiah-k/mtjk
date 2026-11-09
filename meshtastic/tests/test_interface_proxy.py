@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 import threading
@@ -1058,6 +1059,40 @@ def test_ble_central_close_releases_claim_for_new_owner(
     asyncio.run(scenario())
 
 
+def test_ble_central_close_bounds_stalled_receive_task(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A read that ignores cancellation cannot keep disconnect from running."""
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+
+        if channel._receive_task is not None:
+            channel._receive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await channel._receive_task
+
+        async def stalled_receive() -> None:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+
+        channel._receive_task = asyncio.create_task(stalled_receive())
+        monkeypatch.setattr(
+            channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01
+        )
+
+        await channel.close()
+
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+
+
 def test_ble_central_failed_connect_releases_claim(
     monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
 ) -> None:
@@ -1194,6 +1229,48 @@ def test_ble_disconnect_drains_packet_waiting_for_queue_space(
             ]
         finally:
             await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_close_disconnects_when_receive_suppresses_cancellation(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The receive stop deadline cannot wait for cancellation acknowledgement."""
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        return False
+
+    async def scenario() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def stubborn_receive(self: BLECentralChannel) -> None:
+            started.set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    pass
+
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        monkeypatch.setattr(BLECentralChannel, "_poll_radio", stubborn_receive)
+        monkeypatch.setattr(channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await asyncio.wait_for(started.wait(), 1)
+        closing = asyncio.create_task(channel.close())
+        try:
+            done, _ = await asyncio.wait({closing}, timeout=0.25)
+            assert closing in done, "receive cancellation blocked native disconnect"
+            await closing
+            client.disconnect.assert_awaited_once()
+            assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+        finally:
+            release.set()
+            assert channel._receive_task is not None
+            await asyncio.gather(closing, channel._receive_task)
 
     asyncio.run(scenario())
 

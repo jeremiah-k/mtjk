@@ -37,6 +37,7 @@ _LOG = logging.getLogger(__name__)
 _READ_CHUNK = 4096
 _CLAIM_LOCK_POLL_SECONDS = 0.05
 _BLE_DISCONNECT_TIMEOUT_SECONDS = 10.0
+_BLE_RECEIVE_STOP_TIMEOUT_SECONDS = 5.0
 _ble_close_tasks: set[asyncio.Task[None]] = set()
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -484,10 +485,15 @@ class BLECentralChannel:
     async def _close_transport(self) -> None:
         """Keep the address reserved until bounded native cleanup retires."""
         try:
-            if self._receive_task is not None:
-                self._receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._receive_task
+            receive_task = self._receive_task
+            if receive_task is not None:
+                receive_task.cancel()
+                # A pending GATT read can ignore cancellation on some
+                # backends. Bound the stop wait so the disconnect below still
+                # runs and the claim can retire.
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    async with asyncio.timeout(_BLE_RECEIVE_STOP_TIMEOUT_SECONDS):
+                        await asyncio.shield(receive_task)
             async with asyncio.timeout(_BLE_DISCONNECT_TIMEOUT_SECONDS):
                 await self._client.disconnect()
         finally:
