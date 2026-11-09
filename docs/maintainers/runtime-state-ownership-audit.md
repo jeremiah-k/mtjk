@@ -347,5 +347,10 @@ offset-read review finding; neither branch received modifications in this
 follow-up. Both still require backend and hardware integration validation
 before any merge decision.
 
+Follow-up (2026-11-09): #690 and #708 merged on 2026-11-07 (commits
+7790c314b and b1cc29004). Their behavior is documented in the
+[interface proxy](../guides/interface-proxy.md) and
+[transport selection](../guides/transport-selection.md) guides.
+
 The follow-up regressions are subject to the same CI gates as the fixes
 above and to the integration gaps listed in **Not covered by unit tests**.
