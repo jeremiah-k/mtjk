@@ -41,7 +41,7 @@ def test_rewrite_proto_source_moves_package_imports_and_qualified_symbols() -> N
         package meshtastic;
 
         import "meshtastic/device_ui.proto";
-        /* trunk-ignore(buf-lint/COMPILE) */
+        /* block comment between imports */
         import public "meshtastic/field_metadata.proto";
         // nanopb is staged beside the Meshtastic schemas.
         import weak "nanopb.proto";
@@ -58,7 +58,7 @@ def test_rewrite_proto_source_moves_package_imports_and_qualified_symbols() -> N
 
     assert "package meshtastic.protobuf;" in rewritten
     assert 'import "meshtastic/protobuf/device_ui.proto";' in rewritten
-    assert "/* trunk-ignore(buf-lint/COMPILE) */" in rewritten
+    assert "/* block comment between imports */" in rewritten
     assert 'import public "meshtastic/protobuf/field_metadata.proto";' in rewritten
     assert "// nanopb is staged beside the Meshtastic schemas." in rewritten
     assert 'import weak "meshtastic/protobuf/nanopb.proto";' in rewritten
