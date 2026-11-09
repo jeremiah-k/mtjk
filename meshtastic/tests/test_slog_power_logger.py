@@ -685,3 +685,40 @@ def test_power_logger_interrupted_stop_signal_keeps_worker_cleanup_owned() -> No
     assert logger_obj._stop_event.set.call_count == 2
     logger_obj.thread.join.assert_not_called()
     logger_obj.writer.close.assert_not_called()
+
+
+@pytest.mark.unit
+def test_power_logger_interrupted_join_systemexit_transfers_cleanup() -> None:
+    """SystemExit during the join is handled like KeyboardInterrupt."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=False)
+    logger_obj.thread.join.side_effect = SystemExit()
+
+    with pytest.raises(SystemExit):
+        logger_obj.close()
+
+    assert logger_obj._stop_event.is_set()
+    assert logger_obj._worker_should_close_dependencies is True
+    logger_obj._p_meter.close.assert_not_called()
+    logger_obj.writer.close.assert_not_called()
+
+    # Once the worker reaches its finally block it honors the ownership grant.
+    logger_obj._logging_thread()
+    logger_obj._p_meter.close.assert_called_once_with()
+    logger_obj.writer.close.assert_called_once_with()
+    logger_obj.close()
+    logger_obj.writer.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_power_logger_interrupted_join_cleanup_failure_preserves_interrupt() -> None:
+    """A cleanup failure after an interrupted join must not mask the interrupt."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=True)
+    logger_obj.thread.join.side_effect = KeyboardInterrupt()
+    logger_obj._p_meter.close.side_effect = OSError("meter close failed")
+
+    with pytest.raises(KeyboardInterrupt):
+        logger_obj.close()
+
+    assert logger_obj._dependencies_closed is True
+    logger_obj.writer.close.assert_called_once_with()
+    assert logger_obj.getHealth().degraded
