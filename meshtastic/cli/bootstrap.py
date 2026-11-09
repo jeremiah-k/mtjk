@@ -66,6 +66,7 @@ def _enter_transport(
                 close()  # pylint: disable=not-callable
         raise
 
+
 if TYPE_CHECKING:
     pass
 

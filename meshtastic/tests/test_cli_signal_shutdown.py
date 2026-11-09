@@ -818,9 +818,7 @@ def test_flush_worker_is_reused_while_blocked(
         def is_alive(self) -> bool:
             return True
 
-    monkeypatch.setattr(
-        cli_main, "threading", SimpleNamespace(Thread=_BlockedThread)
-    )
+    monkeypatch.setattr(cli_main, "threading", SimpleNamespace(Thread=_BlockedThread))
     monkeypatch.setattr(cli_main, "_cli_signal_flush_worker", None)
 
     cli_main._flush_cli_output_streams()

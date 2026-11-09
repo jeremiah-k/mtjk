@@ -84,11 +84,11 @@ from meshtastic.interfaces.ble.constants import (
     ERROR_CONNECTION_SUPPRESSED,
     ERROR_INTERFACE_CLOSING,
     ERROR_MANAGEMENT_CONNECTING,
-    ERROR_STALE_CLEARANCE_ABANDONED,
     ERROR_MULTIPLE_DEVICES,
     ERROR_MULTIPLE_DEVICES_DISCOVERY,
     ERROR_NO_CLIENT_ESTABLISHED,
     ERROR_NO_PERIPHERALS_FOUND,
+    ERROR_STALE_CLEARANCE_ABANDONED,
     ERROR_TIMEOUT,
     ERROR_TRUST_ADDRESS_NOT_RESOLVED,
     ERROR_WRITING_BLE,
@@ -153,8 +153,8 @@ from meshtastic.interfaces.ble.session_state import (
     _BLESessionStateCompatMixin,
 )
 from meshtastic.interfaces.ble.stale_connection import (
-    _ClearanceAbandonedError,
     _clear_stale_connection_before_central_connect,
+    _ClearanceAbandonedError,
     _stale_clearance_suppressed,
 )
 from meshtastic.interfaces.ble.state import (

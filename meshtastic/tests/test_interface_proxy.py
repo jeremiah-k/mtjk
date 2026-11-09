@@ -1081,9 +1081,7 @@ def test_ble_central_close_bounds_stalled_receive_task(
                 await asyncio.sleep(0.05)
 
         channel._receive_task = asyncio.create_task(stalled_receive())
-        monkeypatch.setattr(
-            channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01
-        )
+        monkeypatch.setattr(channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01)
 
         await channel.close()
 
