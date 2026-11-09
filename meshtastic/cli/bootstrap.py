@@ -61,7 +61,9 @@ def _enter_transport(
         close = getattr(resource, "close", None)
         if callable(close):
             with contextlib.suppress(Exception):
-                close()
+                # callable() above proves the handoff close exists; pylint cannot
+                # narrow through getattr, so silence its not-callable inference.
+                close()  # pylint: disable=not-callable
         raise
 
 if TYPE_CHECKING:
