@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -165,6 +165,55 @@ def test_open_serial_transport_falls_back_to_localhost_tcp_without_devpath() -> 
     tcp_args, tcp_kwargs = tcp_calls[0]
     assert tcp_args[0] == "localhost"
     assert tcp_kwargs["timeout"] is None
+
+
+class _HandoffResource:
+    """Context-managed transport double that records close calls."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __enter__(self) -> "_HandoffResource":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> Literal[False]:
+        self.closed = True
+        return False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.unit
+def test_enter_transport_returns_registered_resource() -> None:
+    """A completed handoff returns the resource without closing it."""
+    resource = _HandoffResource()
+    session = _session()
+
+    result = bootstrap._enter_transport(session, lambda: resource)
+
+    assert result is resource
+    assert not resource.closed
+
+
+@pytest.mark.unit
+def test_enter_transport_closes_interface_when_handoff_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupt between construction and registration cannot leak the link."""
+    resource = _HandoffResource()
+    session = _session()
+
+    def _interrupted(_resource: Any) -> Any:
+        raise SystemExit(143)
+
+    monkeypatch.setattr(session, "enter_context", _interrupted)
+
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap._enter_transport(session, lambda: resource)
+
+    assert excinfo.value.code == 143
+    assert resource.closed
 
 
 @pytest.mark.unit
