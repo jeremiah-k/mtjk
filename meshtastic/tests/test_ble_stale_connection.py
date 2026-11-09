@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import threading
 import types
@@ -24,6 +25,7 @@ from meshtastic.interfaces.ble.constants import (
 )
 from meshtastic.interfaces.ble.errors import BLEConnectionSuppressedError
 from meshtastic.interfaces.ble.gating import (
+    _addr_lock_context,
     _clear_all_registries,
     _is_currently_connected_elsewhere,
 )
@@ -42,6 +44,9 @@ def _linux_clearance_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(
         stale_connection, "sys", types.SimpleNamespace(platform="linux")
+    )
+    monkeypatch.setattr(
+        proxy_channels_mod, "_clear_stale_connection", AsyncMock(return_value=False)
     )
 
 
@@ -769,68 +774,6 @@ def test_clearance_hooks_are_limited_to_central_paths() -> None:
     }
 
 
-def test_construct_cancellation_fences_clearance_and_propagates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from concurrent.futures import Future
-
-    from meshtastic.cancellation import ConnectionCancelledError, _cancellable_init
-    from meshtastic.interfaces.ble import runner as runner_module
-
-    cancel_event = threading.Event()
-    scheduled: list[Any] = []
-    reply = _managed_objects_reply({_DEVICE_PATH_HCI0: _device_entry(_TARGET, True)})
-    message, _bus = _fake_dbus(monkeypatch, replies=[reply])
-
-    class Pending(Future[bool]):
-        def result(self, timeout: float | None = None) -> bool:
-            cancel_event.set()
-            return super().result(timeout=0.001)
-
-    pending = Pending()
-
-    class Runner:
-        _thread = None
-
-        def _run_coroutine_threadsafe(
-            self, coro: Any, *, startup_timeout: float
-        ) -> Future[bool]:
-            scheduled.append(coro)
-            return pending
-
-    @_cancellable_init
-    def construct(*, cancelEvent: threading.Event) -> bool:
-        return stale_connection._clear_stale_connection_before_central_connect(_TARGET)
-
-    monkeypatch.setattr(runner_module, "BLECoroutineRunner", Runner)
-    with pytest.raises(ConnectionCancelledError):
-        construct(cancelEvent=cancel_event)
-    assert pending.cancelled()
-    assert asyncio.run(scheduled[0]) is False
-    assert not any(
-        call.kwargs.get("member") == "Disconnect" for call in message.call_args_list
-    )
-
-
-
-def test_interface_clearance_does_not_swallow_construction_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from meshtastic.cancellation import ConnectionCancelledError
-
-    interface, order = _ordering_interface(monkeypatch)
-
-    def cancelled(*args: Any, **kwargs: Any) -> bool:
-        raise ConnectionCancelledError()
-
-    monkeypatch.setattr(
-        ble_interface_mod, "_clear_stale_connection_before_central_connect", cancelled
-    )
-    with pytest.raises(ConnectionCancelledError):
-        interface.connect(_TARGET)
-    assert order == []
-
-
 @pytest.fixture
 def clear_ble_registry() -> Generator[None, None, None]:
     """Reset the shared BLE ownership registry around registry-gated tests."""
@@ -951,6 +894,31 @@ def test_proxy_open_loses_registry_race_to_connecting_interface(
 
     establish_entered = threading.Event()
     release_establish = threading.Event()
+    claim_attempted = threading.Event()
+    original_context = _addr_lock_context
+
+    @contextlib.contextmanager
+    def observed_context(address: str) -> Generator[Any, None, None]:
+        with original_context(address) as lock:
+
+            class ObservedLock:
+                def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+                    claim_attempted.set()
+                    return lock.acquire(blocking, timeout)
+
+                def release(self) -> None:
+                    lock.release()
+
+                def __enter__(self) -> "ObservedLock":
+                    self.acquire()
+                    return self
+
+                def __exit__(self, *args: Any) -> None:
+                    self.release()
+
+            yield ObservedLock()
+
+    monkeypatch.setattr(proxy_channels_mod, "_addr_lock_context", observed_context)
 
     def _gated_establish(
         _address: str | None,
@@ -1001,12 +969,20 @@ def test_proxy_open_loses_registry_race_to_connecting_interface(
         open_task = asyncio.create_task(BLECentralChannel.open(_TARGET))
         # Let the interface finish establishing while the proxy claim waits
         # on the per-address lock; the proxy must then lose.
-        release_establish.set()
+        try:
+            assert await asyncio.to_thread(
+                claim_attempted.wait, _REGISTRY_RACE_GATE_TIMEOUT_SECONDS
+            )
+        finally:
+            release_establish.set()
         with pytest.raises(RuntimeError, match=_TARGET):
             await open_task
 
-    asyncio.run(scenario())
-    worker.join(timeout=_REGISTRY_RACE_GATE_TIMEOUT_SECONDS)
+    try:
+        asyncio.run(scenario())
+    finally:
+        release_establish.set()
+        worker.join(timeout=_REGISTRY_RACE_GATE_TIMEOUT_SECONDS)
     assert not worker.is_alive()
     assert "error" not in outcome
     # The loser never cleared the winner's link and never connected.
@@ -1084,3 +1060,78 @@ def test_proxy_open_wins_registry_race_and_interface_refuses_without_clearing(
             await channel.close()
 
     asyncio.run(scenario())
+
+
+def test_construct_cancellation_fences_clearance_and_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from concurrent.futures import Future
+
+    from meshtastic.cancellation import ConnectionCancelledError, _cancellable_init
+    from meshtastic.interfaces.ble import runner as runner_module
+
+    cancel_event = threading.Event()
+    scheduled: list[Any] = []
+    reply = _managed_objects_reply({_DEVICE_PATH_HCI0: _device_entry(_TARGET, True)})
+    message, _bus = _fake_dbus(monkeypatch, replies=[reply])
+
+    class Pending(Future[bool]):
+        def result(self, timeout: float | None = None) -> bool:
+            cancel_event.set()
+            return super().result(timeout=0.001)
+
+    pending = Pending()
+
+    class Runner:
+        _thread = None
+
+        def _run_coroutine_threadsafe(
+            self, coro: Any, *, startup_timeout: float
+        ) -> Future[bool]:
+            scheduled.append(coro)
+            return pending
+
+    @_cancellable_init
+    def construct(*, cancelEvent: threading.Event) -> bool:
+        return stale_connection._clear_stale_connection_before_central_connect(_TARGET)
+
+    monkeypatch.setattr(runner_module, "BLECoroutineRunner", Runner)
+    with pytest.raises(ConnectionCancelledError):
+        construct(cancelEvent=cancel_event)
+    assert pending.cancelled()
+    assert asyncio.run(scheduled[0]) is False
+    assert not any(
+        call.kwargs.get("member") == "Disconnect" for call in message.call_args_list
+    )
+
+
+def test_interface_clearance_does_not_swallow_construction_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from meshtastic.cancellation import ConnectionCancelledError
+
+    interface, order = _ordering_interface(monkeypatch)
+
+    def cancelled(*args: Any, **kwargs: Any) -> bool:
+        raise ConnectionCancelledError()
+
+    monkeypatch.setattr(
+        ble_interface_mod, "_clear_stale_connection_before_central_connect", cancelled
+    )
+    with pytest.raises(ConnectionCancelledError):
+        interface.connect(_TARGET)
+    assert order == []
+
+
+@pytest.mark.parametrize("elsewhere", [False, True])
+def test_connected_interface_cannot_bypass_another_targets_owner(
+    monkeypatch: pytest.MonkeyPatch, elsewhere: bool
+) -> None:
+    interface, _order = _ordering_interface(monkeypatch)
+    monkeypatch.setattr(interface, "_state_manager_is_connected", lambda: True)
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_is_currently_connected_elsewhere",
+        lambda *args, **kwargs: elsewhere,
+    )
+    assert interface._should_suppress_duplicate_connect(_TARGET) is elsewhere

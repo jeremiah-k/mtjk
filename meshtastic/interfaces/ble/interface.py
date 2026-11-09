@@ -2210,12 +2210,9 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             `True` if the connection should be suppressed because the key is connected elsewhere and this interface is
             not the active connection, `False` otherwise.
         """
-        with self._state_lock:
-            is_self_connected = self._state_manager_is_connected()
         return bool(
             connection_key
             and _is_currently_connected_elsewhere(connection_key, owner=self)
-            and not is_self_connected
         )
 
     def _raise_if_duplicate_connect(
@@ -3030,6 +3027,12 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                         if existing_client:
                             logger.debug("Already connected, skipping connect call.")
                             return existing_client
+                        for reservation_key in reservation_keys:
+                            self._raise_if_duplicate_connect(
+                                reservation_key,
+                                requested_identifier=requested_identifier,
+                                resolved_address=resolved_connect_target,
+                            )
                         with self._state_lock:
                             if self._client_publish_pending:
                                 raise self.BLEError(ERROR_MANAGEMENT_CONNECTING)

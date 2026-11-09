@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 import types
 from collections.abc import Iterator
 from enum import IntFlag
@@ -34,6 +35,14 @@ from meshtastic.interfaces.ble.constants import (
 )
 from meshtastic.interfaces.ble.interface import BLEInterface
 from meshtastic.interfaces.ble.state import BLEStateManager
+
+
+@pytest.fixture(autouse=True)
+def _no_host_ble_clearance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BLE transport doubles must never query or disconnect a host radio."""
+    monkeypatch.setattr(
+        channels_mod, "_clear_stale_connection", AsyncMock(return_value=False)
+    )
 
 
 def test_fragmented_and_multiple_frames() -> None:
@@ -1430,3 +1439,139 @@ def test_ble_peripheral_releases_bus_when_unregistering_fails() -> None:
         server.bus.disconnect.assert_called_once()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("claim_raises", [False, True])
+def test_ble_central_double_cancel_during_worker_claim_releases_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    clear_ble_registry: None,
+    claim_raises: bool,
+) -> None:
+    """Two cancellations cannot strand a claim or mask the original cancellation."""
+    address = "AA:BB:CC:DD:EE:FF"
+    claimed = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    retired = threading.Event()
+    real_claim = channels_mod._try_claim_ble_address
+    real_clear = gating._clear_connecting
+
+    def clear(target: str | None, *, owner: object | None = None) -> None:
+        real_clear(target, owner=owner)
+        retired.set()
+
+    monkeypatch.setattr(channels_mod, "_clear_connecting", clear)
+
+    def gated_claim(
+        target: str, owner: object, aborted: threading.Event | None = None
+    ) -> bool:
+        try:
+            result = False if claim_raises else real_claim(target, owner, aborted)
+            claimed.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("test never released the claim worker")
+            if claim_raises:
+                raise OSError("claim worker failed")
+            return result
+        finally:
+            completed.set()
+
+    async def scenario() -> None:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_try_claim_ble_address", gated_claim)
+        opening = asyncio.create_task(BLECentralChannel.open(address))
+        try:
+            assert await asyncio.to_thread(claimed.wait, 2)
+            assert gating._is_currently_connected_elsewhere(address) is (
+                not claim_raises
+            )
+            opening.cancel()
+            await asyncio.sleep(0)
+            opening.cancel()
+            with pytest.raises(asyncio.CancelledError) as cancel_info:
+                await opening
+        finally:
+            release.set()
+        assert await asyncio.to_thread(completed.wait, 2)
+        if not claim_raises:
+            assert await asyncio.to_thread(retired.wait, 2)
+        # The raised cancellation keeps the aborted link's frames alive, so a
+        # stranded claim cannot hide behind dead-owner weakref pruning before
+        # this check; an embedder that logs the error holds the same
+        # reference for far longer.
+        assert isinstance(cancel_info.value, asyncio.CancelledError)
+        assert not gating._is_currently_connected_elsewhere(address)
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_cancelled_claim_release_survives_loop_teardown(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The claim release cannot depend on the caller's event loop surviving.
+
+    An embedder that closes its loop without joining background claim threads can have the loop
+    gone before the claim worker finishes, so the release must run on the
+    worker side. The surfaced CancelledError stays referenced because
+    embedders log it, keeping the aborted link alive.
+    """
+    address = "AA:BB:CC:DD:EE:FF"
+    claimed = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    retired = threading.Event()
+    real_claim = channels_mod._try_claim_ble_address
+    real_clear = gating._clear_connecting
+
+    def clear(target: str | None, *, owner: object | None = None) -> None:
+        real_clear(target, owner=owner)
+        retired.set()
+
+    monkeypatch.setattr(channels_mod, "_clear_connecting", clear)
+
+    def gated_claim(
+        target: str, owner: object, aborted: threading.Event | None = None
+    ) -> bool:
+        try:
+            result = real_claim(target, owner, aborted)
+            claimed.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("test never released the claim worker")
+            return result
+        finally:
+            completed.set()
+
+    def scenario() -> list[BaseException]:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_try_claim_ble_address", gated_claim)
+
+        async def run() -> list[BaseException]:
+            opening = asyncio.create_task(BLECentralChannel.open(address))
+            assert await asyncio.to_thread(claimed.wait, 2)
+            assert gating._is_currently_connected_elsewhere(address)
+            opening.cancel()
+            await asyncio.sleep(0)
+            opening.cancel()
+            surfaced: list[BaseException] = []
+            try:
+                await opening
+            except asyncio.CancelledError as exc:
+                surfaced.append(exc)
+            return surfaced
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(run())
+        finally:
+            loop.close()
+
+    try:
+        surfaced = scenario()
+    finally:
+        release.set()
+    assert completed.wait(2)
+    assert retired.wait(2)
+    # surfaced pins the aborted link exactly like an embedder's error log;
+    # the registry must still be clear with no loop running anywhere.
+    assert surfaced
+    assert not gating._is_currently_connected_elsewhere(address)
