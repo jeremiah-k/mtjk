@@ -13,6 +13,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -81,16 +82,29 @@ class TestInterruptedCleanupFenceRegistry:
         assert gating._interrupted_cleanup_fenced("AABBCCDDEEFF")
         assert gating._interrupted_cleanup_fenced(_TARGET)
 
-    def test_registration_refreshes_deadline(self) -> None:
+    def test_registration_refreshes_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = SimpleNamespace(now=1000.0)
+        monkeypatch.setattr(
+            gating, "time", SimpleNamespace(monotonic=lambda: clock.now)
+        )
         first = gating._register_interrupted_cleanup_fence(_TARGET)
-        time.sleep(0.005)
+        clock.now += 1.0
         second = gating._register_interrupted_cleanup_fence(_TARGET)
         assert second > first
         assert _INTERRUPTED_CLEANUP_FENCES["aabbccddeeff"] == second
 
-    def test_expected_deadline_guard_keeps_newer_fence(self) -> None:
+    def test_expected_deadline_guard_keeps_newer_fence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """An older watcher must not release a fence a newer cleanup refreshed."""
+        clock = SimpleNamespace(now=1000.0)
+        monkeypatch.setattr(
+            gating, "time", SimpleNamespace(monotonic=lambda: clock.now)
+        )
         stale_deadline = gating._register_interrupted_cleanup_fence(_TARGET)
+        clock.now += 1.0
         fresh_deadline = gating._register_interrupted_cleanup_fence(_TARGET)
         gating._retire_interrupted_cleanup_fence(
             _TARGET, expected_deadline=stale_deadline
@@ -99,6 +113,35 @@ class TestInterruptedCleanupFenceRegistry:
         gating._retire_interrupted_cleanup_fence(
             _TARGET, expected_deadline=fresh_deadline
         )
+        assert not gating._interrupted_cleanup_fenced(_TARGET)
+
+    def test_newer_retirement_cannot_release_older_cleanup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A completed newer disconnect must not expose an older running one."""
+        clock = SimpleNamespace(now=1000.0)
+        monkeypatch.setattr(
+            gating, "time", SimpleNamespace(monotonic=lambda: clock.now)
+        )
+        older = gating._register_interrupted_cleanup_fence(_TARGET)
+        clock.now += 1.0
+        newer = gating._register_interrupted_cleanup_fence(_TARGET)
+        gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=newer)
+        assert gating._interrupted_cleanup_fenced(_TARGET)
+        gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=older)
+        assert not gating._interrupted_cleanup_fenced(_TARGET)
+
+    def test_same_tick_registrations_have_distinct_retirement_tokens(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Coarse clocks cannot let one watcher retire another's cleanup."""
+        monkeypatch.setattr(gating, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+        older = gating._register_interrupted_cleanup_fence(_TARGET)
+        newer = gating._register_interrupted_cleanup_fence(_TARGET)
+        assert newer > older
+        gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=newer)
+        assert gating._interrupted_cleanup_fenced(_TARGET)
+        gating._retire_interrupted_cleanup_fence(_TARGET, expected_deadline=older)
         assert not gating._interrupted_cleanup_fenced(_TARGET)
 
     def test_expired_fence_is_pruned_lazily_on_consult(self) -> None:
@@ -111,6 +154,7 @@ class TestInterruptedCleanupFenceRegistry:
         gating._register_interrupted_cleanup_fence(_TARGET)
         gating._clear_all_registries()
         assert _INTERRUPTED_CLEANUP_FENCES == {}
+        assert gating._INTERRUPTED_CLEANUP_PENDING == {}
         assert not gating._interrupted_cleanup_fenced(_TARGET)
 
 
@@ -318,6 +362,33 @@ def _stub_interface(monkeypatch: pytest.MonkeyPatch) -> BLEInterface:
         _no_op,
     )
     return interface
+
+
+def test_invalid_fence_config_keeps_interrupted_cleanup_protected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad embedder setting must not disable fencing or mask interruption."""
+    client, _backend = _make_connecting_client()
+    monkeypatch.setattr(BLEConfig, "INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS", None)
+    monkeypatch.setattr(
+        client_module,
+        "_spawn_interrupted_cleanup_fence_watcher",
+        lambda *_args: None,
+    )
+    client._fence_interrupted_cleanup(MagicMock())
+    assert gating._interrupted_cleanup_fenced(_TARGET)
+
+
+def test_failed_fence_registration_never_masks_original_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected address normalization error must remain best effort."""
+    client, _backend = _make_connecting_client()
+    monkeypatch.setattr(
+        client_module, "_addr_key", MagicMock(side_effect=TypeError("bad address"))
+    )
+    client._fence_interrupted_cleanup(MagicMock())
+    assert not gating._interrupted_cleanup_fenced(_TARGET)
 
 
 class TestInterfacePathRefusal:

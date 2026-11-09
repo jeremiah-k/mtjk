@@ -540,11 +540,18 @@ class BLEClient:
             Retirement whose wait budget expired; its completion releases
             the fence.
         """
-        key = _addr_key(getattr(self, "address", None))
-        if key is None:
-            return
-        deadline = _register_interrupted_cleanup_fence(key)
-        _spawn_interrupted_cleanup_fence_watcher(retirement, key, deadline)
+        try:
+            key = _addr_key(getattr(self, "address", None))
+            if key is None:
+                return
+            deadline = _register_interrupted_cleanup_fence(key)
+            _spawn_interrupted_cleanup_fence_watcher(retirement, key, deadline)
+        except Exception:  # noqa: BLE001 - preserve the interrupted operation
+            logger.debug(
+                "Could not fence interrupted cleanup for %s",
+                getattr(self, "address", None),
+                exc_info=True,
+            )
 
     def _run_transport_operation(
         self,
