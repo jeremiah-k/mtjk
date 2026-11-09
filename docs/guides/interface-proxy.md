@@ -64,6 +64,8 @@ Open the advertised PTY slave promptly: while no client consumes its input,
 Linux can fill the kernel's PTY buffer. A write blocked for more than five
 seconds terminates the proxy session; restart the proxy and reconnect the
 client if this happens. Only one client should open the PTY slave at a time.
+The proxy runs until stopped, so long-running sessions end through the CLI's
+signal handling; see [Signals and shutdown](getting-started.md#signals-and-shutdown).
 
 ## On-wire handling
 
