@@ -567,9 +567,18 @@ class MeshInterface:  # pylint: disable=R0902
         transport connect lock, which is ordered before _heartbeat_lock
         everywhere (nothing takes the connect lock while holding
         _heartbeat_lock).
+
+        A transport can bind its first socket before the base constructor
+        creates the heartbeat lock (``TCPInterface`` calls ``myConnect()``
+        before ``StreamInterface.__init__``). That initial lifetime has no
+        heartbeat to invalidate, so the bump is a no-op when the lock does not
+        exist yet.
         """
-        with self._heartbeat_lock:
-            self._connection_generation += 1
+        heartbeat_lock = getattr(self, "_heartbeat_lock", None)
+        if heartbeat_lock is None:
+            return
+        with heartbeat_lock:
+            self._connection_generation = getattr(self, "_connection_generation", 0) + 1
 
     def _record_bootstrap_decode_error(self) -> int:
         """Record one malformed protocol frame observed before connection completes."""

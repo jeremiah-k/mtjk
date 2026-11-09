@@ -598,7 +598,6 @@ def test_stale_heartbeat_does_not_write_into_replacement_socket(
             worker.join(timeout=5)
             assert not worker.is_alive()
 
-            mesh_pb2.ToRadio(heartbeat=mesh_pb2.Heartbeat()).SerializeToString()
             assert "fenced to a previous connection lifetime" in caplog.text
 
         replacement_receive_sock.settimeout(0)
@@ -1471,3 +1470,85 @@ def test_TCPInterface_multiple_concurrent_close_attempts() -> None:
                 assert all(not t.is_alive() for t in threads)
             finally:
                 pass
+
+
+@pytest.mark.unit
+def test_TCPInterface_myConnect_invalidates_fence_before_socket_binding() -> None:
+    """A direct myConnect() call fences a parked heartbeat before adoption.
+
+    myConnect() is public and is the only path that adopts a replacement
+    socket. Calling it directly must advance the connection generation before
+    the new socket can be observed, so an old lifetime's parked heartbeat
+    cannot write into it.
+    """
+    with patch("meshtastic.tcp_interface.socket.create_connection") as mock_connect:
+        mock_connect.return_value = MagicMock()
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+        try:
+            original = iface._connection_generation
+            iface.myConnect()
+            assert iface._connection_generation == original + 1
+        finally:
+            iface.close()
+
+
+@pytest.mark.unit
+def test_TCPInterface_connect_invalidates_fence_before_socket_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A public TCP reconnect cannot expose a new socket to an old heartbeat."""
+    from meshtastic.stream_interface import StreamInterface
+
+    with patch("socket.socket"):
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    try:
+        original = iface._connection_generation
+        observed: list[int] = []
+
+        def bind_socket() -> None:
+            observed.append(iface._connection_generation)
+
+        monkeypatch.setattr(iface, "_connect_socket_if_needed", bind_socket)
+        monkeypatch.setattr(StreamInterface, "connect", lambda _self: None)
+        iface.connect()
+        assert observed == [original + 1]
+    finally:
+        iface.close()
+
+
+@pytest.mark.unit
+def test_TCPInterface_auto_reconnect_invalidates_heartbeat_before_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reader reconnect path bypasses base connect, but still fences writes."""
+    from meshtastic.mesh_interface_runtime.connection_fence import (
+        _connection_fence_begin,
+        _connection_fence_end,
+    )
+
+    with patch("socket.socket"):
+        iface = TCPInterface(hostname="localhost", noProto=True, connectNow=False)
+    try:
+        previous = iface._connection_generation
+        socket_after_reconnect = MagicMock()
+        observed: list[int] = []
+
+        def bind_socket() -> None:
+            observed.append(iface._connection_generation)
+            iface.socket = socket_after_reconnect
+
+        monkeypatch.setattr(iface, "myConnect", bind_socket)
+        monkeypatch.setattr(iface, "_start_config", lambda: None)
+        monkeypatch.setattr(iface, "_sleep_reconnect_delay", lambda _delay: True)
+        assert iface._attempt_reconnect()
+        assert observed == [previous + 1]
+        assert iface._connection_generation == previous + 1
+        _connection_fence_begin(previous)
+        try:
+            # Neither select() nor send() may run for the old heartbeat.
+            iface._write_bytes(b"stale heartbeat")
+        finally:
+            _connection_fence_end()
+        socket_after_reconnect.send.assert_not_called()
+    finally:
+        iface.close()

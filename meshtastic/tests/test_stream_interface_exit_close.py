@@ -408,6 +408,8 @@ def test_exit_hook_registration_failure_does_not_poison_retry(
 
     successful: list[object] = []
     monkeypatch.setattr(atexit, "register", successful.append)
+    if hasattr(os, "register_at_fork"):
+        monkeypatch.setattr(os, "register_at_fork", lambda **_kwargs: None)
     stream_interface_module._register_exit_close_hook_once()
     assert state.registered
     assert successful == [stream_interface_module._close_open_stream_interfaces_at_exit]

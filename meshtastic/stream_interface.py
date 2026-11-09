@@ -468,13 +468,12 @@ class StreamInterface(MeshInterface):
                 raise StreamInterface.StreamInterfaceError(
                     "Cannot reconnect: reader thread from previous attempt is still alive"
                 )
-            # Open the new connection lifetime before any code below can bind a
-            # replacement transport (subclass stream reopening, wake-byte
-            # writes, reader start): a heartbeat send fenced to the previous
-            # lifetime must never pass the fence once a replacement transport
-            # exists. _write_bytes performs the fence check without taking
-            # _connect_lock, so this call cannot self-deadlock the wake-byte
-            # write below.
+            # Open the new connection lifetime before any stream reopening,
+            # wake-byte writes, or reader start in this base-class path.
+            # TCPInterface may bind its socket before calling this method and
+            # must invalidate the previous lifetime before doing so. A fenced
+            # heartbeat must never write into a replacement transport.
+            # _write_bytes does not take _connect_lock, avoiding a deadlock.
             self._bump_connection_generation()
             self._ensure_stream_for_connect_locked(requires_stream=requires_stream)
             if self.stream is None and requires_stream:
