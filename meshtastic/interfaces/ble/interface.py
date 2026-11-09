@@ -2210,8 +2210,7 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         Returns
         -------
         bool
-            `True` if the connection should be suppressed because the key is connected elsewhere and this interface is
-            not the active connection, `False` otherwise.
+            `True` if the connection should be suppressed because the key is connected elsewhere, `False` otherwise.
         """
         return bool(
             connection_key
