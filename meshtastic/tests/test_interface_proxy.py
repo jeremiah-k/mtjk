@@ -783,7 +783,7 @@ def test_proxy_ctrl_c_logs_and_reraises(
 def test_ble_central_disconnect_callback_during_connect_is_thread_safe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A backend callback during connect wakes the new link, even off-loop."""
+    """A backend callback during connect makes open refuse the link, off-loop."""
     from threading import Thread
     from unittest.mock import AsyncMock
 
@@ -806,12 +806,8 @@ def test_ble_central_disconnect_callback_during_connect_is_thread_safe(
         monkeypatch.setitem(
             sys.modules, "bleak", types.SimpleNamespace(BleakClient=FakeBleakClient)
         )
-        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
-        try:
-            assert await asyncio.wait_for(channel.recv(), 1) is None
-            assert channel._disconnected.is_set()
-        finally:
-            await channel.close()
+        with pytest.raises(RuntimeError, match="disconnected during connection setup"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
 
     asyncio.run(scenario())
 
