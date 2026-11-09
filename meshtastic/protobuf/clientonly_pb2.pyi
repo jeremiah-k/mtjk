@@ -47,7 +47,8 @@ class DeviceProfile(_message.Message):
     """
     channel_url: _builtins.str
     """
-    The url of the channels from our node
+    The url of the channels from our node.
+    Carries every channel's PSK, so it is as secret as they are.
     """
     ringtone: _builtins.str
     """

@@ -104,6 +104,7 @@ class FieldMetadata(_message.Message):
     SINCE_FIRMWARE_FIELD_NUMBER: _builtins.int
     DEPRECATED_SINCE_FIELD_NUMBER: _builtins.int
     OEM_FIXED_GPS_FIELD_NUMBER: _builtins.int
+    SENSITIVE_FIELD_NUMBER: _builtins.int
     diy_only: _builtins.bool
     """
     Field is only relevant to DIY hardware builds. Apps hide a GPS field
@@ -212,6 +213,23 @@ class FieldMetadata(_message.Message):
     `diy_only` GPS pin fields do not apply. Apps hide those fields on these
     boards and keep them on any other or unknown board.
     """
+    sensitive: _builtins.bool
+    """
+    Field holds a SECRET: a password, PIN, passphrase or key whose value grants
+    access to the node, to its network, or to the traffic it carries. Knowing a
+    public key or a username does not, so neither is marked.
+
+    Apps should mask the value by default (a password-style control with an
+    explicit reveal), keep it out of logs, crash reports, analytics and debug
+    dumps, and not include it in a shared export, QR code or screenshot without
+    the user knowingly choosing to.
+
+    Handling metadata, not protection: it changes nothing on the wire, and the
+    firmware treats the field no differently. It marks the field alone. A
+    message that merely CONTAINS a sensitive field (`Config` holding
+    `SecurityConfig.private_key`) is not marked itself, so a consumer redacting
+    a whole message should walk into its submessages.
+    """
     def __init__(
         self,
         *,
@@ -227,10 +245,11 @@ class FieldMetadata(_message.Message):
         since_firmware: _builtins.str | None = ...,
         deprecated_since: _builtins.str | None = ...,
         oem_fixed_gps: _builtins.bool | None = ...,
+        sensitive: _builtins.bool | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "sensitive", b"sensitive", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["admin_only", b"admin_only", "deprecated", b"deprecated", "deprecated_since", b"deprecated_since", "description", b"description", "diy_only", b"diy_only", "keywords", b"keywords", "label", b"label", "max_value", b"max_value", "min_value", b"min_value", "oem_fixed_gps", b"oem_fixed_gps", "sensitive", b"sensitive", "since_firmware", b"since_firmware", "unit", b"unit"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
