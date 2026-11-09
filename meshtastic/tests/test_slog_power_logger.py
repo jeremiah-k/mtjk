@@ -568,8 +568,14 @@ def test_power_logger_close_reports_deferred_worker_cleanup_error_once() -> None
     writer.close.assert_called_once_with()
 
 
-def _make_shutdown_race_logger(*, exited_loop: bool) -> PowerLogger:
-    """Construct a logger with controllable worker state and real close behavior."""
+def _make_shutdown_race_logger(*, exited_loop: bool) -> Any:
+    """Construct a logger with controllable worker state and real close behavior.
+
+    The handle is intentionally typed ``Any``: the tests drive MagicMock
+    collaborators through ``PowerLogger``-typed attributes (``thread``,
+    ``writer``, ``_p_meter``), so resolving the declared attribute types would
+    reject mock-only methods such as ``assert_called_once_with``.
+    """
     logger_obj = object.__new__(PowerLogger)
     logger_obj._p_meter = MagicMock()
     logger_obj.writer = MagicMock()
