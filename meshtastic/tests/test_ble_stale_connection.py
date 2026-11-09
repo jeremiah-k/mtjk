@@ -6,12 +6,15 @@ import asyncio
 import sys
 import threading
 import types
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from meshtastic.interface_proxy import channels as proxy_channels_mod
+from meshtastic.interface_proxy.channels import BLECentralChannel
 from meshtastic.interfaces.ble import interface as ble_interface_mod
 from meshtastic.interfaces.ble import stale_connection
 from meshtastic.interfaces.ble.client import BLEClient
@@ -19,8 +22,13 @@ from meshtastic.interfaces.ble.constants import (
     AWAIT_TIMEOUT_BUFFER_SECONDS,
     BLEConfig,
 )
+from meshtastic.interfaces.ble.errors import BLEConnectionSuppressedError
+from meshtastic.interfaces.ble.gating import (
+    _clear_all_registries,
+    _is_currently_connected_elsewhere,
+)
 from meshtastic.interfaces.ble.interface import BLEInterface
-from meshtastic.interfaces.ble.state import BLEStateManager
+from meshtastic.interfaces.ble.state import BLEStateManager, ConnectionState
 
 pytestmark = pytest.mark.unit
 
@@ -823,3 +831,256 @@ def test_interface_clearance_does_not_swallow_construction_cancellation(
     assert order == []
 
 
+@pytest.fixture
+def clear_ble_registry() -> Generator[None, None, None]:
+    """Reset the shared BLE ownership registry around registry-gated tests."""
+    _clear_all_registries()
+    yield
+    _clear_all_registries()
+
+
+# Upper bound for deterministic event handoffs in the registry-race tests; a
+# wait this long only fires when the wiring itself is broken.
+_REGISTRY_RACE_GATE_TIMEOUT_SECONDS = 10.0
+
+
+def _registry_gated_interface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[BLEInterface, list[str]]:
+    """Build a minimal interface whose registry gating runs for real.
+
+    Unlike :func:`_ordering_interface`, the duplicate-connect gate and the
+    connecting/connected registry marks are not stubbed: the connect() call
+    races the real shared ownership registry. The establish step, the gate
+    finalization, and the clearance bridge are stubbed; the clearance stub
+    appends ``"clear"`` and establish appends ``"establish"`` to the shared
+    order log.
+    """
+    interface = BLEInterface.__new__(BLEInterface)
+    state_manager = BLEStateManager()
+    interface._state_manager = state_manager
+    interface._state_lock = state_manager.lock
+    interface._management_lock = threading.RLock()
+    interface._management_idle_condition = threading.Condition()
+    interface._management_inflight = 0
+    interface._connect_lock = threading.RLock()
+    interface._client_publish_pending = False
+    interface._last_connect_pair_override = None
+    interface._last_connect_timeout_override = None
+    interface.pair_on_connect = False
+    interface.address = _TARGET
+    interface._adapter = None
+    interface._closed = False
+
+    order: list[str] = []
+
+    monkeypatch.setattr(interface, "_validate_connection_preconditions", _no_op)
+    monkeypatch.setattr(interface, "_validate_connect_timeout_override", _no_op)
+    monkeypatch.setattr(
+        interface, "_get_existing_client_if_valid", lambda _request: None
+    )
+    monkeypatch.setattr(
+        interface,
+        "_resolve_target_address_for_connect",
+        lambda _requested: _TARGET,
+    )
+    monkeypatch.setattr(interface, "_verify_and_publish_connected", _no_op)
+
+    sentinel_client = object()
+
+    def _establish(
+        _address: str | None,
+        _normalized: str | None,
+        _key: str | None,
+        *,
+        pair_on_connect: bool = False,
+        connect_timeout: float | None = None,
+    ) -> tuple[object, str | None, None]:
+        _ = pair_on_connect, connect_timeout
+        order.append("establish")
+        return sentinel_client, "aabbccddeeff", None
+
+    monkeypatch.setattr(interface, "_establish_and_update_client", _establish)
+
+    def _finalize_gates(
+        _client: object,
+        device_key: str | None,
+        alias_key: str | None,
+    ) -> None:
+        order.append("finalize")
+        # Mirror the real finalize outcome: the state machine reports
+        # CONNECTED so the interface's registry liveness probe agrees with
+        # the connected claim recorded here.
+        state_manager.transition_to(ConnectionState.CONNECTING)
+        state_manager.transition_to(ConnectionState.CONNECTED)
+        interface._mark_address_keys_connected(device_key)
+        if alias_key is not None:
+            interface._mark_address_keys_connected(alias_key)
+
+    monkeypatch.setattr(interface, "_finalize_connection_gates", _finalize_gates)
+
+    def _record_clear(address: str | None, *, adapter: str | None = None) -> bool:
+        _ = adapter
+        order.append("clear")
+        return False
+
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_clear_stale_connection_before_central_connect",
+        _record_clear,
+    )
+    return interface, order
+
+
+def _proxy_bleak_client(connect: Any = None) -> MagicMock:
+    """Build a fake connected BleakClient for BLECentralChannel.open."""
+    client = MagicMock()
+    client.is_connected = True
+    client.connect = connect if connect is not None else AsyncMock()
+    client.start_notify = AsyncMock()
+    client.read_gatt_char = AsyncMock(return_value=b"")
+    client.disconnect = AsyncMock()
+    return client
+
+
+def test_proxy_open_loses_registry_race_to_connecting_interface(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A proxy open during an interface connect refuses without clearing."""
+    interface, order = _registry_gated_interface(monkeypatch)
+
+    establish_entered = threading.Event()
+    release_establish = threading.Event()
+
+    def _gated_establish(
+        _address: str | None,
+        _normalized: str | None,
+        _key: str | None,
+        *,
+        pair_on_connect: bool = False,
+        connect_timeout: float | None = None,
+    ) -> tuple[object, str | None, None]:
+        _ = pair_on_connect, connect_timeout
+        order.append("establish")
+        establish_entered.set()
+        assert release_establish.wait(timeout=_REGISTRY_RACE_GATE_TIMEOUT_SECONDS)
+        return object(), "aabbccddeeff", None
+
+    monkeypatch.setattr(interface, "_establish_and_update_client", _gated_establish)
+
+    proxy_clears: list[str] = []
+
+    async def _record_proxy_clear(address: str, *, adapter: str | None = None) -> bool:
+        proxy_clears.append(address)
+        return False
+
+    proxy_client = _proxy_bleak_client()
+    monkeypatch.setitem(
+        sys.modules,
+        "bleak",
+        types.SimpleNamespace(BleakClient=lambda *a, **kw: proxy_client),
+    )
+    monkeypatch.setattr(
+        proxy_channels_mod, "_clear_stale_connection", _record_proxy_clear
+    )
+
+    outcome: dict[str, Any] = {}
+
+    def _run_interface_connect() -> None:
+        try:
+            outcome["client"] = interface.connect(_TARGET)
+        except BaseException as exc:  # noqa: BLE001 - captured for assertions
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_run_interface_connect)
+    worker.start()
+    # The interface holds the per-address lock inside its critical section.
+    assert establish_entered.wait(timeout=_REGISTRY_RACE_GATE_TIMEOUT_SECONDS)
+
+    async def scenario() -> None:
+        open_task = asyncio.create_task(BLECentralChannel.open(_TARGET))
+        # Let the interface finish establishing while the proxy claim waits
+        # on the per-address lock; the proxy must then lose.
+        release_establish.set()
+        with pytest.raises(RuntimeError, match=_TARGET):
+            await open_task
+
+    asyncio.run(scenario())
+    worker.join(timeout=_REGISTRY_RACE_GATE_TIMEOUT_SECONDS)
+    assert not worker.is_alive()
+    assert "error" not in outcome
+    # The loser never cleared the winner's link and never connected.
+    assert proxy_clears == []
+    assert proxy_client.connect.await_count == 0
+    # The interface ran its own clearance, then won the address.
+    assert order == ["clear", "establish", "finalize"]
+    assert _is_currently_connected_elsewhere(_TARGET)
+    assert not _is_currently_connected_elsewhere(_TARGET, owner=interface)
+
+
+def test_proxy_open_wins_registry_race_and_interface_refuses_without_clearing(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """An interface connect during a proxy open refuses without clearing."""
+    interface, order = _registry_gated_interface(monkeypatch)
+    interface_clears: list[str] = []
+
+    def _record_interface_clear(
+        address: str | None, *, adapter: str | None = None
+    ) -> bool:
+        interface_clears.append(address or "")
+        return False
+
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_clear_stale_connection_before_central_connect",
+        _record_interface_clear,
+    )
+
+    async def scenario() -> None:
+        connect_entered = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        async def slow_connect(*, timeout: float) -> None:
+            connect_entered.set()
+            await release_connect.wait()
+
+        proxy_client = _proxy_bleak_client(connect=slow_connect)
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: proxy_client),
+        )
+        open_task = asyncio.create_task(BLECentralChannel.open(_TARGET))
+        await connect_entered.wait()
+        # The proxy holds a connecting claim spanning its connect attempt.
+        assert _is_currently_connected_elsewhere(_TARGET)
+
+        outcome: dict[str, Any] = {}
+
+        def _run_interface_connect() -> None:
+            try:
+                outcome["client"] = interface.connect(_TARGET)
+            except BaseException as exc:  # noqa: BLE001 - captured for assertions
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=_run_interface_connect)
+        worker.start()
+        await asyncio.get_running_loop().run_in_executor(
+            None, worker.join, _REGISTRY_RACE_GATE_TIMEOUT_SECONDS
+        )
+        assert not worker.is_alive()
+        assert isinstance(outcome.get("error"), BLEConnectionSuppressedError)
+        # The loser never cleared the winner's claim or link.
+        assert interface_clears == []
+        assert order == []
+
+        release_connect.set()
+        channel = await open_task
+        try:
+            assert _is_currently_connected_elsewhere(_TARGET)
+            assert not _is_currently_connected_elsewhere(_TARGET, owner=channel)
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())

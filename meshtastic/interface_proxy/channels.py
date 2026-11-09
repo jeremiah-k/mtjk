@@ -16,7 +16,14 @@ from meshtastic.interfaces.ble.constants import (
     FROMRADIO_UUID,
     TORADIO_UUID,
 )
-from meshtastic.interfaces.ble.gating import _is_currently_connected_elsewhere
+from meshtastic.interfaces.ble.gating import (
+    _addr_lock_context,
+    _clear_connecting,
+    _is_currently_connected_elsewhere,
+    _mark_connected,
+    _mark_connecting,
+    _mark_disconnected,
+)
 from meshtastic.interfaces.ble.stale_connection import _clear_stale_connection
 from meshtastic.stream_interface import DEVICE_WAKE_DELAY, START2, WAKE_BYTE_COUNT
 
@@ -176,15 +183,46 @@ class SerialChannel:
         await asyncio.to_thread(self._port.close)
 
 
+def _try_claim_ble_address(address: str, owner: object) -> bool:
+    """Atomically reserve a BLE address in the shared ownership registry.
+
+    Runs as a short blocking critical section on a worker thread (the caller
+    submits it via ``run_in_executor``/``asyncio.to_thread``): it takes the
+    same per-address lock an in-flight ``BLEInterface.connect()`` holds,
+    refuses when another in-process owner already holds a connected or
+    connecting claim, and otherwise records a provisional connecting claim.
+    Because the check and the claim happen under one lock acquisition, a
+    concurrent interface connect either wins first (and this refuses) or sees
+    this claim recorded (and its duplicate gate refuses).
+
+    The per-address lock is always released before returning, so no registry
+    or address lock is ever held across an ``await`` on the caller's event
+    loop and the loop thread never blocks on it.
+    """
+    with _addr_lock_context(address) as lock:
+        with lock:
+            if _is_currently_connected_elsewhere(address, owner=owner):
+                return False
+            _mark_connecting(address, owner=owner)
+            return True
+
+
 class BLECentralChannel:
     """Bleak central link to a real Meshtastic BLE radio.
 
     FROMNUM indicates queued data; FROMRADIO reads consume it. A slow polling
     fallback handles firmware/backend notification loss. GATT payloads are raw.
+
+    The channel registers itself as the process-local owner of its address in
+    the shared BLE ownership registry for its whole lifetime: a provisional
+    claim from ``open()`` until the client is connected, then a connected
+    claim until ``close()``, a failed/cancelled connect, or the backend
+    disconnect callback releases it.
     """
 
-    def __init__(self, client: BleakClient) -> None:
+    def __init__(self, client: BleakClient, address: str | None = None) -> None:
         self._client = client
+        self._address = address
         self._wake = asyncio.Event()
         self._pending: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
         self._transport_disconnected = asyncio.Event()
@@ -192,20 +230,23 @@ class BLECentralChannel:
         self._receive_error: Exception | None = None
         self._receive_task: asyncio.Task[None] | None = None
 
+    def _is_connection_connected(self) -> bool:
+        """Report the live transport state for ownership-registry pruning."""
+        return bool(self._client.is_connected)
+
     @classmethod
     async def open(
         cls, address: str, *, adapter: str | None = None
     ) -> BLECentralChannel:
-        """Connect to a BLE radio using the existing Bleak dependency."""
-        from bleak import BleakClient  # pylint: disable=import-outside-toplevel
+        """Connect to a BLE radio using the existing Bleak dependency.
 
-        # BlueZ keeps a link open until something disconnects it; a link
-        # stranded by a dead process stops the radio from advertising and
-        # would break this connect. Even with clearance enabled, never
-        # disconnect a link owned by a live BLEInterface in this process.
-        # Best-effort: never raises, never blocks long.
-        if not _is_currently_connected_elsewhere(address):
-            await _clear_stale_connection(address, adapter=adapter)
+        The address is claimed in the process-wide ownership registry before
+        any clearance or connection work, so a concurrent proxy open or
+        ``BLEInterface.connect()`` for the same address serializes with this
+        attempt: exactly one caller wins and the loser never disconnects the
+        winner's link.
+        """
+        from bleak import BleakClient  # pylint: disable=import-outside-toplevel
 
         loop = asyncio.get_running_loop()
         link: BLECentralChannel | None = None
@@ -213,8 +254,10 @@ class BLECentralChannel:
         def _disconnected(_client: object) -> None:
             # Bleak backends may invoke callbacks from a non-event-loop thread,
             # including while connect() is still in progress. Never touch an
-            # asyncio.Event directly from that callback.
+            # asyncio.Event directly from that callback. The registry release
+            # is owner-checked and idempotent and touches no asyncio objects.
             if link is not None:
+                _mark_disconnected(address, owner=link)
                 with contextlib.suppress(RuntimeError):  # event loop already closed
                     loop.call_soon_threadsafe(link._transport_disconnected.set)
                     loop.call_soon_threadsafe(link._wake.set)
@@ -227,21 +270,53 @@ class BLECentralChannel:
             disconnected_callback=_disconnected,
             **transport_options,
         )
-        link = cls(client)
+        link = cls(client, address=address)
+
+        # Claim the shared per-address gate before any clearance or connect
+        # work. The critical section blocks a worker thread, never the event
+        # loop, and releases the lock before the awaits below.
+        claim_future = loop.run_in_executor(None, _try_claim_ble_address, address, link)
+        try:
+            claimed: bool = await asyncio.shield(claim_future)
+        except BaseException:
+            # The worker thread cannot be interrupted; collect the outcome it
+            # produces anyway and release the claim it recorded, so
+            # cancellation never leaks process-local ownership.
+            if await claim_future:
+                _clear_connecting(address, owner=link)
+            raise
+        if not claimed:
+            raise RuntimeError(
+                f"BLE address {address} is already claimed by another "
+                "in-process owner"
+            )
 
         def _notified(_char: object, _value: bytearray) -> None:
             with contextlib.suppress(RuntimeError):  # late notification on shutdown
                 loop.call_soon_threadsafe(link._wake.set)
 
         try:
+            # BlueZ keeps a link open until something disconnects it; a link
+            # stranded by a dead process stops the radio from advertising and
+            # would break this connect. The claim guarantees no other
+            # in-process owner holds the link, so a stale OS-level link left
+            # by a dead process is cleared while live local links never are.
+            # Best-effort: never raises, never blocks long.
+            if not _is_currently_connected_elsewhere(address, owner=link):
+                await _clear_stale_connection(address, adapter=adapter)
             await client.connect(timeout=20)
             await client.start_notify(FROMNUM_UUID, _notified)
             link._wake.set()  # drain anything queued before subscription
             link._receive_task = asyncio.create_task(link._poll_radio())
         except BaseException:
+            # Release the claim before the awaited disconnect so a second
+            # cancellation cannot skip it; the claim never outlives the
+            # attempt that holds it.
+            _clear_connecting(address, owner=link)
             with contextlib.suppress(Exception):
                 await client.disconnect()
             raise
+        _mark_connected(address, owner=link)
         return link
 
     async def _poll_radio(self) -> None:
@@ -315,7 +390,12 @@ class BLECentralChannel:
             self._receive_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._receive_task
-        await self._client.disconnect()
+        try:
+            await self._client.disconnect()
+        finally:
+            # Release the ownership claim on every path; the backend
+            # disconnect callback may already have done so (idempotent).
+            _mark_disconnected(self._address, owner=self)
 
 
 async def connect_upstream(
