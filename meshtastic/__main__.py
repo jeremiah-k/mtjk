@@ -2714,9 +2714,12 @@ def _run_cli_entrypoint(
         if owns_handlers:
             _cli_signal_invocation_active = True
             _cli_signal_defer_exit = True
-            _install_cli_signal_handlers(previous)
         try:
             if owns_handlers:
+                # Installation runs inside the interrupt mapping: Ctrl+C
+                # during disposition setup still reports "Interrupted." and
+                # the outer finally restores whatever was replaced.
+                _install_cli_signal_handlers(previous)
                 _cli_signal_defer_exit = False
                 if _cli_signal_received is not None:
                     raise SystemExit(128 + _cli_signal_received)

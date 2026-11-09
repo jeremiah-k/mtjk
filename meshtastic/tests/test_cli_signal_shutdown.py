@@ -971,6 +971,31 @@ def test_inherited_non_python_handler_is_preserved(
 
 
 @pytest.mark.usefixtures("reset_mt_config")
+def test_entrypoint_maps_keyboard_interrupt_during_handler_install(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Ctrl+C during disposition setup still reports Interrupted and restores."""
+    restored: list[dict[int, Any]] = []
+
+    def _interrupt_install(_previous: dict[int, Any] | None = None) -> dict[int, Any]:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cli_main, "_install_cli_signal_handlers", _interrupt_install)
+    monkeypatch.setattr(
+        cli_main,
+        "_restore_cli_signal_handlers",
+        lambda previous, *, reset_state=True: restored.append(previous),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main._run_cli_entrypoint(lambda: None)
+
+    assert excinfo.value.code == 130
+    assert "Interrupted." in capsys.readouterr().err
+    assert restored == [{}]
+
+
 def test_cli_main_installs_handlers_at_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
