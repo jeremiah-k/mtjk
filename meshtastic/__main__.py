@@ -2744,23 +2744,26 @@ def _run_cli_entrypoint(
                 signum = _cli_signal_received
             finally:
                 _cli_signal_received = None
+        try:
+            if signum is not None:
+                # A recorded TERM/HUP is fatal here (NoReturn), so it takes
+                # precedence over the SIGINT re-delivery below. This re-delivery
+                # is universal: the signal rides the host's restored disposition,
+                # so a host handler runs and a host with SIG_DFL dies.
+                _re_deliver_recorded_signal(signum)
+            if owns_process and redeliver_sigint and _sigint_re_delivery_eligible():
+                _flush_cli_output_streams()
+                # Die by SIGINT like CPython does for an unhandled Ctrl+C; when
+                # the delivery returns, the in-flight SystemExit(130) stands.
+                _self_signal._signal_self(  # noqa: SLF001
+                    signal.SIGINT, reset_to_default=True
+                )
+        finally:
+            if owns_handlers:
                 _cli_signal_shutdown_started = False
                 _cli_signal_shutdown_lock = threading.Lock()
                 _cli_signal_defer_exit = False
                 _cli_signal_invocation_active = False
-        if signum is not None:
-            # A recorded TERM/HUP is fatal here (NoReturn), so it takes
-            # precedence over the SIGINT re-delivery below. This re-delivery
-            # is universal: the signal rides the host's restored disposition,
-            # so a host handler runs and a host with SIG_DFL dies.
-            _re_deliver_recorded_signal(signum)
-        if owns_process and redeliver_sigint and _sigint_re_delivery_eligible():
-            _flush_cli_output_streams()
-            # Die by SIGINT like CPython does for an unhandled Ctrl+C; when
-            # the delivery returns, the in-flight SystemExit(130) stands.
-            _self_signal._signal_self(  # noqa: SLF001
-                signal.SIGINT, reset_to_default=True
-            )
 
 
 def _main_impl(*, owns_process: bool) -> None:

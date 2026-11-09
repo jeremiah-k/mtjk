@@ -260,6 +260,70 @@ def test_entrypoint_re_delivers_recorded_signal(
     assert cli_main._cli_signal_received is None
 
 
+def test_second_term_during_tail_flush_dies_by_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_self_signals: list[tuple[int, bool]],
+) -> None:
+    """A TERM arriving in the post-teardown tail cannot unwind as SystemExit.
+
+    The first TERM is recorded in the body. While the entrypoint tail
+    flushes output streams, a second TERM is delivered: the forced-exit
+    guard must still be armed through the fatal re-delivery, so the handler
+    dies by the signal instead of raising a catchable SystemExit(143) out
+    of the graceful path.
+    """
+    registered: dict[int, Any] = {}
+
+    def _fake_signal(sig: int, handler: Any) -> None:
+        registered[sig] = handler
+
+    def _fake_getsignal(sig: int) -> Any:
+        return registered.get(sig, signal.SIG_DFL)
+
+    class _ImmediateExit(BaseException):
+        """Simulates real os._exit: control never returns to the caller."""
+
+    forced: list[tuple[int, bool]] = []
+    exits: list[int] = []
+    guard_lock_before = cli_main._cli_signal_shutdown_lock
+
+    def _forced_seam(sig: int, *, reset_to_default: bool) -> None:
+        forced.append((sig, reset_to_default))
+
+    def _fake_exit(code: int) -> None:
+        exits.append(code)
+        raise _ImmediateExit()
+
+    def _flush_delivering_second_term() -> None:
+        # TERM #2 arrives while the tail flushes output streams.
+        cli_main._cli_signal_handler(signal.SIGTERM, None)
+
+    monkeypatch.setattr(signal, "signal", _fake_signal)
+    monkeypatch.setattr(signal, "getsignal", _fake_getsignal)
+    monkeypatch.setattr(_self_signal, "_signal_self", _forced_seam)
+    monkeypatch.setattr(os, "_exit", _fake_exit)
+    monkeypatch.setattr(
+        cli_main, "_flush_cli_output_streams", _flush_delivering_second_term
+    )
+
+    def _body() -> None:
+        # TERM #1 during the body: recorded, graceful SystemExit(143).
+        cli_main._cli_signal_handler(signal.SIGTERM, None)
+
+    with pytest.raises(_ImmediateExit):
+        cli_main._run_cli_entrypoint(_body, owns_process=True)
+    # The second delivery took the forced-exit path: die by the signal, then
+    # the immediate os._exit fallback. No graceful SystemExit(143) surfaced.
+    assert forced == [(signal.SIGTERM, True)]
+    assert exits == [143]
+    # The guard reset stayed behind the fatal re-delivery and still ran in
+    # the tail finally after the forced exit interrupted it.
+    assert cli_main._cli_signal_shutdown_started is False
+    assert cli_main._cli_signal_shutdown_lock is not guard_lock_before
+    assert cli_main._cli_signal_defer_exit is False
+    assert cli_main._cli_signal_invocation_active is False
+
+
 @pytest.mark.parametrize(
     "flush_error",
     [OSError, ValueError, AttributeError],
@@ -1245,6 +1309,7 @@ def test_worker_entrypoint_does_not_redeliver_main_thread_shutdown(
 ) -> None:
     _mock_default_sigint_with_fake_signal_handlers(monkeypatch)
     completed = threading.Event()
+    owner_state: list[tuple[bool, bool, bool]] = []
 
     def body() -> None:
         try:
@@ -1260,10 +1325,20 @@ def test_worker_entrypoint_does_not_redeliver_main_thread_shutdown(
             worker.join(timeout=2)
             assert completed.is_set()
             assert _no_real_self_signals == []
+            owner_state.append(
+                (
+                    cli_main._cli_signal_shutdown_started,
+                    cli_main._cli_signal_shutdown_lock.locked(),
+                    cli_main._cli_signal_invocation_active,
+                )
+            )
 
     with pytest.raises(SystemExit):
         cli_main._run_cli_entrypoint(body)
     assert _no_real_self_signals == [(signal.SIGTERM, False)]
+    # Check outside the fatal re-delivery: its SystemExit can mask a failed
+    # assertion in the body's cleanup.
+    assert owner_state == [(True, True, True)]
 
 
 def test_blocked_output_flush_cannot_prevent_signal_redelivery(
