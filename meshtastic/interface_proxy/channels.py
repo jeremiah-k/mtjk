@@ -369,11 +369,18 @@ class BLECentralChannel:
             await client.connect(timeout=20)
             await client.start_notify(FROMNUM_UUID, _notified)
             with link._claim_lock:
-                if link._backend_disconnected.is_set():
-                    link._release_claim()
-                else:
-                    _mark_connected(address, owner=link)
+                disconnected_during_open = link._backend_disconnected.is_set()
                 link._opening = False
+                if not disconnected_during_open:
+                    _mark_connected(address, owner=link)
+            if disconnected_during_open:
+                # The backend dropped the link before the channel was handed
+                # to the caller. Returning it would reserve an address whose
+                # transport is gone and whose EOF latch stays set; fail and
+                # let the outer handler retain the claim through cleanup.
+                raise RuntimeError(
+                    f"BLE transport for {address} disconnected during connection setup"
+                )
             link._wake.set()  # drain anything queued before subscription
             link._receive_task = asyncio.create_task(link._poll_radio())
         except BaseException:

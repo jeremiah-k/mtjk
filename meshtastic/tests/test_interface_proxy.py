@@ -1003,6 +1003,36 @@ def test_ble_central_open_registers_owner_and_blocks_interface_clearance(
     asyncio.run(scenario())
 
 
+def test_ble_central_open_fails_when_backend_disconnects_during_setup(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A disconnect during setup fails the open and retains cleanup ownership."""
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+
+        def create_client(_address: str, *, disconnected_callback: Any) -> Any:
+            client.disconnected_callback = disconnected_callback
+            return client
+
+        monkeypatch.setitem(
+            sys.modules, "bleak", types.SimpleNamespace(BleakClient=create_client)
+        )
+
+        async def disconnect_during_notify(*_args: Any, **_kwargs: Any) -> None:
+            await asyncio.to_thread(client.disconnected_callback, client)
+
+        client.start_notify = disconnect_during_notify
+
+        with pytest.raises(RuntimeError, match="disconnected during connection setup"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+
+
 def test_ble_central_close_releases_claim_for_new_owner(
     monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
 ) -> None:
