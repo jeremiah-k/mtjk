@@ -912,6 +912,33 @@ def _gate_interface() -> Any:
     return interface
 
 
+def test_ble_central_open_skips_clearance_for_live_direct_client(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The proxy never clears an address a live direct BLEClient still holds."""
+    proxy_clears: list[str] = []
+
+    async def _record_clear(address: str, *, adapter: str | None = None) -> bool:
+        proxy_clears.append(address)
+        return False
+
+    async def scenario() -> None:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _record_clear)
+        monkeypatch.setattr(
+            channels_mod,
+            "_live_ble_client_owns_address",
+            lambda _addr: True,
+        )
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            assert proxy_clears == []
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
 def test_ble_central_open_registers_owner_and_blocks_interface_clearance(
     monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
 ) -> None:

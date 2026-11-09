@@ -58,6 +58,7 @@ from meshtastic.interfaces.ble.constants import (
     logger,
 )
 from meshtastic.interfaces.ble.errors import BLEErrorHandler
+from meshtastic.interfaces.ble.gating import _register_live_ble_client
 from meshtastic.interfaces.ble.runner import BLECoroutineRunner
 from meshtastic.interfaces.ble.utils import (
     _is_unexpected_keyword_error,
@@ -204,6 +205,9 @@ class BLEClient:
             log_if_no_address=log_if_no_address,
             **kwargs,
         )
+        # A direct client has no per-address gate claim; stale-link clearance
+        # asks this registry so it never disconnects a link this process holds.
+        _register_live_ble_client(self)
 
     def _initialize_runtime_state(self, address: BLEDevice | str | None) -> None:
         """Initialize non-transport runtime state for a BLEClient instance.

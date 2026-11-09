@@ -22,6 +22,7 @@ from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_connecting,
     _is_currently_connected_elsewhere,
+    _live_ble_client_owns_address,
     _mark_connected,
     _mark_connecting,
     _mark_disconnected,
@@ -361,7 +362,9 @@ class BLECentralChannel:
             # BLEInterface and proxy owners; low-level clients that bypass the
             # registry are outside this ownership protocol.
             # Best-effort: never raises, never blocks long.
-            if not _is_currently_connected_elsewhere(address, owner=link):
+            if not _is_currently_connected_elsewhere(
+                address, owner=link
+            ) and not _live_ble_client_owns_address(address):
                 await _clear_stale_connection(address, adapter=adapter)
             await client.connect(timeout=20)
             await client.start_notify(FROMNUM_UUID, _notified)

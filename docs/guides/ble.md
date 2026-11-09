@@ -130,9 +130,10 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   `--ble-scan` never clears. Clearance needs the radio's address, because a
   name target must first be found by scanning, and a radio held by a
   stranded link isn't advertising.
-  Process-local gates protect registered owners. Direct `BLEClient` and raw
-  Bleak connections do not participate in that registry and can be
-  disconnected by clearance from another caller.
+  Process-local gates protect registered owners, and live direct `BLEClient`
+  connections are tracked so clearance leaves their link alone. Raw Bleak
+  connections do not participate in either protocol and can be disconnected
+  by clearance from another caller.
 
 - **Optional pairing and Linux trust helper.** `BLEInterface` can request pairing
   during connect (`pair_on_connect=True` or `connect(pair=True)`), and also

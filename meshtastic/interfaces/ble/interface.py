@@ -123,6 +123,7 @@ from meshtastic.interfaces.ble.gating import (
     _clear_connecting,
     _clear_connecting_for_owner,
     _is_currently_connected_elsewhere,
+    _live_ble_client_owns_address,
     _mark_connected,
     _mark_connecting,
     _mark_disconnected,
@@ -2848,6 +2849,13 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             if _is_currently_connected_elsewhere(target_identifier, owner=self):
                 logger.debug(
                     "Skipping stale-connection clearance for %s: claimed elsewhere in this process",
+                    target_identifier,
+                )
+                return
+            # A direct BLEClient has no gate claim; its live link is still ours.
+            if _live_ble_client_owns_address(target_identifier):
+                logger.debug(
+                    "Skipping stale-connection clearance for %s: a live BLEClient owns the link",
                     target_identifier,
                 )
                 return

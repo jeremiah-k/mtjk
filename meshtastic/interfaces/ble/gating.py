@@ -30,7 +30,7 @@ import time
 import weakref
 from collections.abc import Generator
 from contextlib import contextmanager
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any
 
 from meshtastic.interfaces.ble.constants import BLEConfig
@@ -97,6 +97,61 @@ _CONNECTING_OWNER_IDS = _DEFAULT_REGISTRY.connecting_owner_ids
 _CONNECTING_MARKED_AT = _DEFAULT_REGISTRY.connecting_marked_at
 _LOCK_HOLDERS = _DEFAULT_REGISTRY.lock_holders
 
+# BLEClient instances register themselves here so stale-link clearance can
+# recognize a direct client's live link. Entries are weak: a client that goes
+# away stops protecting its address. Connection state is probed outside this
+# lock because isConnected() reads backend state.
+_LIVE_BLE_CLIENTS: weakref.WeakSet[Any] = weakref.WeakSet()
+_LIVE_BLE_CLIENTS_LOCK = Lock()
+
+
+def _register_live_ble_client(client: Any) -> None:
+    """Track a BLEClient instance for stale-link clearance decisions.
+
+    Parameters
+    ----------
+    client : Any
+        BLEClient-compatible object. The registry keeps only a weak reference,
+        so the caller's lifetime controls the entry.
+    """
+    with _LIVE_BLE_CLIENTS_LOCK:
+        _LIVE_BLE_CLIENTS.add(client)
+
+
+def _live_ble_client_owns_address(addr: str | None) -> bool:
+    """Return whether a live BLEClient in this process is connected to ``addr``.
+
+    Direct ``BLEClient`` connections do not register a per-address claim, so
+    stale-link clearance cannot see them in the gate registry. Probing the live
+    clients closes that gap: clearance must not disconnect a link this process
+    is still using.
+
+    Parameters
+    ----------
+    addr : str | None
+        BLE address to check, normalized through :func:`_addr_key`.
+
+    Returns
+    -------
+    bool
+        True when a tracked client reports connected for the address.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return False
+    with _LIVE_BLE_CLIENTS_LOCK:
+        clients = list(_LIVE_BLE_CLIENTS)
+    for client in clients:
+        try:
+            is_connected = getattr(client, "isConnected", None)
+            if not callable(is_connected) or not is_connected():
+                continue
+            if _addr_key(getattr(client, "address", None)) == key:
+                return True
+        except Exception:  # noqa: BLE001 - a broken probe must not block clearance
+            logger.debug("Failed to probe a live BLE client for %s", key, exc_info=True)
+    return False
+
 
 def _clear_all_registries() -> None:
     """Reset all internal BLE gating registries to their empty initial state.
@@ -112,6 +167,8 @@ def _clear_all_registries() -> None:
     Intended for tests and full process-level reset paths.
     """
     _DEFAULT_REGISTRY.clear()
+    with _LIVE_BLE_CLIENTS_LOCK:
+        _LIVE_BLE_CLIENTS.clear()
 
 
 def _addr_key(addr: str | None) -> str | None:

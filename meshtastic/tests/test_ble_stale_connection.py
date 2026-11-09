@@ -28,6 +28,7 @@ from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_all_registries,
     _is_currently_connected_elsewhere,
+    _live_ble_client_owns_address,
 )
 from meshtastic.interfaces.ble.interface import BLEInterface
 from meshtastic.interfaces.ble.state import BLEStateManager, ConnectionState
@@ -639,6 +640,43 @@ def test_connect_skips_clearance_when_connected_elsewhere_in_process(
     client = interface.connect(_TARGET)
     assert client is not None
     assert order == ["establish"]
+
+
+def test_connect_skips_clearance_for_live_direct_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live direct BLEClient's link is never disconnected by clearance."""
+    interface, order = _ordering_interface(monkeypatch)
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_is_currently_connected_elsewhere",
+        lambda _addr, owner=None: False,
+    )
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_live_ble_client_owns_address",
+        lambda _addr: True,
+    )
+    client = interface.connect(_TARGET)
+    assert client is not None
+    assert order == ["establish"]
+
+
+def test_live_client_registry_recognizes_connected_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connected BLEClient protects its normalized address."""
+    _clear_all_registries()
+    client = BLEClient(_TARGET)
+    monkeypatch.setattr(client, "isConnected", lambda: True)
+    try:
+        assert _live_ble_client_owns_address(_TARGET)
+        assert _live_ble_client_owns_address(_TARGET.lower())
+        assert not _live_ble_client_owns_address("11:22:33:44:55:66")
+        monkeypatch.setattr(client, "isConnected", lambda: False)
+        assert not _live_ble_client_owns_address(_TARGET)
+    finally:
+        _clear_all_registries()
 
 
 def test_connect_skips_clearance_while_suppressed(
