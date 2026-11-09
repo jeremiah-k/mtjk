@@ -566,3 +566,122 @@ def test_power_logger_close_reports_deferred_worker_cleanup_error_once() -> None
 
     meter.close.assert_called_once_with()
     writer.close.assert_called_once_with()
+
+
+def _make_shutdown_race_logger(*, exited_loop: bool) -> PowerLogger:
+    """Construct a logger with controllable worker state and real close behavior."""
+    logger_obj = object.__new__(PowerLogger)
+    logger_obj._p_meter = MagicMock()
+    logger_obj.writer = MagicMock()
+    logger_obj._stop_event = threading.Event()
+    logger_obj._dependency_close_lock = threading.Lock()
+    logger_obj._dependencies_closed = False
+    logger_obj._deferred_dependency_close = False
+    logger_obj._worker_exited_loop = exited_loop
+    logger_obj._worker_should_close_dependencies = False
+    logger_obj._background_close_error = None
+    logger_obj.is_logging = True
+    logger_obj.thread = MagicMock()
+    return logger_obj
+
+
+@pytest.mark.unit
+def test_power_logger_interrupted_join_transfers_cleanup_to_running_worker() -> None:
+    """Interrupted close cannot abandon the meter and writer while sampling exits."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=False)
+    logger_obj.thread.join.side_effect = KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        logger_obj.close()
+
+    assert logger_obj._stop_event.is_set()
+    assert logger_obj._worker_should_close_dependencies is True
+    logger_obj._p_meter.close.assert_not_called()
+    logger_obj.writer.close.assert_not_called()
+
+    # Once the worker reaches its finally block it honors the ownership grant.
+    logger_obj._logging_thread()
+    logger_obj._p_meter.close.assert_called_once_with()
+    logger_obj.writer.close.assert_called_once_with()
+    logger_obj.close()
+    logger_obj.writer.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_power_logger_interrupted_join_finalizes_after_loop_exit() -> None:
+    """A worker past its ownership decision cannot be handed an orphaned close."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=True)
+    logger_obj.thread.join.side_effect = KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        logger_obj.close()
+
+    assert logger_obj._worker_should_close_dependencies is False
+    logger_obj._p_meter.close.assert_called_once_with()
+    logger_obj.writer.close.assert_called_once_with()
+    logger_obj.close()
+    logger_obj.writer.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_power_logger_alive_after_sampling_exit_is_not_a_stale_timeout() -> None:
+    """Join completion must be judged by sampling exit, not teardown liveness."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=True)
+    logger_obj.thread.is_alive.return_value = True
+
+    logger_obj.close()
+
+    logger_obj._p_meter.close.assert_called_once_with()
+    logger_obj.writer.close.assert_called_once_with()
+    assert not logger_obj.getHealth().degraded
+
+
+@pytest.mark.unit
+def test_power_logger_sampling_timeout_hands_off_and_recovers_health() -> None:
+    """A genuinely live sampler stays protected until its finally block runs."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=False)
+    logger_obj.thread.is_alive.return_value = True
+
+    with pytest.raises(slog_module._PowerLoggerShutdownError):
+        logger_obj.close()
+
+    assert logger_obj._worker_should_close_dependencies is True
+    assert logger_obj.getHealth().degraded
+    logger_obj._p_meter.close.assert_not_called()
+    logger_obj.writer.close.assert_not_called()
+
+    logger_obj._logging_thread()
+    logger_obj._p_meter.close.assert_called_once_with()
+    logger_obj.writer.close.assert_called_once_with()
+    assert not logger_obj.getHealth().degraded
+    logger_obj.close()
+
+
+@pytest.mark.unit
+def test_power_logger_late_join_recovery_reports_dependency_error() -> None:
+    """After sampler exit, the actual dependency error has priority."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=True)
+    logger_obj.thread.is_alive.return_value = True
+    logger_obj._p_meter.close.side_effect = OSError("meter close failed")
+
+    with pytest.raises(OSError, match="meter close failed"):
+        logger_obj.close()
+
+    logger_obj.writer.close.assert_called_once_with()
+    assert logger_obj.getHealth().degraded
+
+
+@pytest.mark.unit
+def test_power_logger_interrupted_stop_signal_keeps_worker_cleanup_owned() -> None:
+    """Interruption before join must still grant deferred dependency ownership."""
+    logger_obj = _make_shutdown_race_logger(exited_loop=False)
+    logger_obj._stop_event = MagicMock()
+    logger_obj._stop_event.set.side_effect = [KeyboardInterrupt(), None]
+
+    with pytest.raises(KeyboardInterrupt):
+        logger_obj.close()
+
+    assert logger_obj._worker_should_close_dependencies is True
+    assert logger_obj._stop_event.set.call_count == 2
+    logger_obj.thread.join.assert_not_called()
+    logger_obj.writer.close.assert_not_called()

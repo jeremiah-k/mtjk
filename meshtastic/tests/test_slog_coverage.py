@@ -640,6 +640,7 @@ def test_power_logger_dependency_close_runs_on_caller_thread(
     under load.
     """
     close_callers: list[threading.Thread] = []
+    worker_exited_at_close: list[bool] = []
 
     class _RecordingCloseWriter:
         """Writer stub that records which thread invokes close()."""
@@ -659,6 +660,7 @@ def test_power_logger_dependency_close_runs_on_caller_thread(
         def close(self) -> None:
             """Record the calling thread."""
             close_callers.append(threading.current_thread())
+            worker_exited_at_close.append(not worker.is_alive())
 
     monkeypatch.setattr(slog_module, "FeatherWriter", _RecordingCloseWriter)
 
@@ -667,11 +669,9 @@ def test_power_logger_dependency_close_runs_on_caller_thread(
     worker = logger.thread
     logger.close()
 
-    assert close_callers, "writer.close() must be called exactly once on shutdown"
-    for caller in close_callers:
-        assert (
-            caller is not worker
-        ), "writer.close() ran on the logging thread inside the join window"
+    assert len(close_callers) == 1, "writer.close() must be called exactly once"
+    assert close_callers[0] is not worker
+    assert worker_exited_at_close == [True]
     assert not worker.is_alive()
     meter.close.assert_called_once_with()
 

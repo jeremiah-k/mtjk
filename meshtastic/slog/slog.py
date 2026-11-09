@@ -477,8 +477,11 @@ class PowerLogger:
             # bounded join window.
             with self._dependency_close_lock:
                 self._worker_exited_loop = True
-                worker_owns_cleanup = self._worker_should_close_dependencies
-            if self._deferred_dependency_close and worker_owns_cleanup:
+                worker_owns_cleanup = (
+                    self._deferred_dependency_close
+                    and self._worker_should_close_dependencies
+                )
+            if worker_owns_cleanup:
                 self._close_dependencies_after_worker_exit()
 
     def _close_dependencies_locked(self) -> None:
@@ -567,7 +570,8 @@ class PowerLogger:
             return
 
         self.is_logging = False
-        self._deferred_dependency_close = True
+        with self._dependency_close_lock:
+            self._deferred_dependency_close = True
         if threading.current_thread() is self.thread:
             logger.debug(
                 "PowerLogger.close() called from logging thread; deferring dependency cleanup until thread exit."
@@ -580,38 +584,60 @@ class PowerLogger:
             self._stop_event.set()
             return
 
-        self._stop_event.set()
-        self.thread.join(timeout=POWER_LOGGER_JOIN_TIMEOUT)
+        try:
+            self._stop_event.set()
+            self.thread.join(timeout=POWER_LOGGER_JOIN_TIMEOUT)
+        except BaseException:
+            # An interrupt can arrive during stop signalling, before the join.
+            # Retry the stop request without replacing the original exception.
+            try:
+                self._stop_event.set()
+            except Exception:  # noqa: BLE001 - preserve original interruption
+                logger.warning(
+                    "PowerLogger stop signal could not be retried", exc_info=True
+                )
+            # An interrupted caller must not abandon dependencies. Hand cleanup
+            # to the worker if it is still sampling; if it has already made its
+            # teardown decision, finish cleanup here without masking the
+            # caller's original interruption.
+            with self._dependency_close_lock:
+                worker_exited_loop = self._worker_exited_loop
+                if not worker_exited_loop:
+                    self._worker_should_close_dependencies = True
+            if worker_exited_loop:
+                try:
+                    self._close_dependencies()
+                except Exception:  # noqa: BLE001 - preserve original interruption
+                    logger.warning(
+                        "PowerLogger cleanup failed after interrupted join",
+                        exc_info=True,
+                    )
+            raise
+
         if self.thread.is_alive():
             with self._dependency_close_lock:
-                self._worker_should_close_dependencies = True
                 worker_exited_loop = self._worker_exited_loop
-            shutdown_error = _PowerLoggerShutdownError(
-                "PowerLogger background thread did not stop within "
-                f"{POWER_LOGGER_JOIN_TIMEOUT:.1f}s; meter and writer remain open "
-                "until the worker exits."
-            )
-            _get_health_tracker(self)._record_failure(
-                POWER_SHUTDOWN_HEALTH_COMPONENT, shutdown_error
-            )
+                if not worker_exited_loop:
+                    self._worker_should_close_dependencies = True
             if not worker_exited_loop:
+                shutdown_error = _PowerLoggerShutdownError(
+                    "PowerLogger background sampling loop did not stop within "
+                    f"{POWER_LOGGER_JOIN_TIMEOUT:.1f}s; meter and writer remain open "
+                    "until the worker exits."
+                )
+                _get_health_tracker(self)._record_failure(
+                    POWER_SHUTDOWN_HEALTH_COMPONENT, shutdown_error
+                )
                 raise shutdown_error
-            # The worker already left its sampling loop, so cleanup cannot race
-            # a live sampler. It may have passed its own cleanup decision point
-            # before ownership was assigned above; close here so dependencies
-            # are not leaked, then still surface the late shutdown.
-            self._close_dependencies()
-            _dependencies_closed, background_error = (
-                self._take_closed_dependency_error()
-            )
-            if background_error is not None:
-                raise background_error
-            raise shutdown_error
+            # A thread can remain alive after leaving the sampling loop (for
+            # example during worker-owned teardown). The sampling timeout is
+            # not a shutdown failure: finalize exactly once and report actual
+            # dependency errors, if any.
 
         # The worker leaves dependency cleanup to the caller so slow teardown
         # never runs inside the join window; fake/test threads may not execute
         # _logging_thread's finally block at all. Either way the caller
-        # finalizes once the thread is confirmed stopped.
+        # finalizes once the sampling loop has stopped.
         self._close_dependencies()
         _dependencies_closed, background_error = self._take_closed_dependency_error()
         if background_error is not None:
