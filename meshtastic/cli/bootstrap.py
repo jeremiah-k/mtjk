@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import logging
 import os
 import platform
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import ExitStack
+from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import IO, TYPE_CHECKING, Any, NoReturn
+from typing import IO, TYPE_CHECKING, Any, NoReturn, TypeVar
 
 from bleak.exc import BleakError
 
@@ -37,6 +38,34 @@ from meshtastic.cli.session_resources import CliSessionResources
 from meshtastic.mesh_interface import MeshInterface
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+def _enter_transport(
+    session: CliSessionResources,
+    factory: Callable[[], AbstractContextManager[_T]],
+) -> _T:
+    """Enter a transport context while keeping an interrupted handoff safe.
+
+    A signal can raise SystemExit after the interface constructor returns but
+    before ExitStack records its exit callback. Closing the constructed
+    interface in that gap keeps the radio link from outliving the invocation;
+    a close that follows a completed registration is idempotent.
+    """
+    resource: AbstractContextManager[_T] | None = None
+    try:
+        resource = factory()
+        return session.enter_context(resource)
+    except BaseException:
+        close = getattr(resource, "close", None)
+        if callable(close):
+            with contextlib.suppress(Exception):
+                # callable() above proves the handoff close exists; pylint cannot
+                # narrow through getattr, so silence its not-callable inference.
+                close()  # pylint: disable=not-callable
+        raise
+
 
 if TYPE_CHECKING:
     pass
@@ -420,14 +449,15 @@ def _open_serial_transport(
 ) -> MeshInterface:
     """Open serial transport, preserving localhost TCP fallback semantics."""
     try:
-        client: MeshInterface = session.enter_context(
-            hooks.serial_interface(
+        client: MeshInterface = _enter_transport(
+            session,
+            lambda: hooks.serial_interface(
                 args.port,
                 debugOut=logfile,
                 noProto=args.noproto,
                 noNodes=args.no_nodes,
                 timeout=args.timeout,
-            )
+            ),
         )
     except FileNotFoundError:
         message = (
@@ -472,14 +502,15 @@ def _open_serial_transport(
         "Serial device unavailable after initialization; falling back to localhost TCP interface."
     )
     try:
-        fallback: MeshInterface = session.enter_context(
-            hooks.tcp_interface(
+        fallback: MeshInterface = _enter_transport(
+            session,
+            lambda: hooks.tcp_interface(
                 "localhost",
                 debugOut=logfile,
                 noProto=args.noproto,
                 noNodes=args.no_nodes,
                 timeout=args.timeout,
-            )
+            ),
         )
         return fallback
     except hooks.mesh_interface_error as exc:
@@ -501,8 +532,9 @@ def _open_transport(
     """Open the selected BLE, TCP, or serial transport under invocation ownership."""
     if args.ble:
         try:
-            ble: MeshInterface = session.enter_context(
-                hooks.ble_interface(
+            ble: MeshInterface = _enter_transport(
+                session,
+                lambda: hooks.ble_interface(
                     args.ble if args.ble != "any" else None,
                     debugOut=logfile,
                     noProto=args.noproto,
@@ -514,7 +546,7 @@ def _open_transport(
                         if getattr(args, "ble_adapter", None) is not None
                         else {}
                     ),
-                )
+                ),
             )
             return ble
         except hooks.ble_interface.BLEError as exc:
@@ -527,8 +559,9 @@ def _open_transport(
             args.host, hooks.default_tcp_port
         )
         try:
-            tcp: MeshInterface = session.enter_context(
-                hooks.tcp_interface(
+            tcp: MeshInterface = _enter_transport(
+                session,
+                lambda: hooks.tcp_interface(
                     tcp_hostname,
                     portNumber=tcp_port,
                     debugOut=logfile,
@@ -540,7 +573,7 @@ def _open_transport(
                         if getattr(args, "tcp_interface", None) is not None
                         else {}
                     ),
-                )
+                ),
             )
             return tcp
         except (hooks.mesh_interface_error, OSError) as exc:
@@ -632,6 +665,9 @@ def _run_connected_session(
                 hooks.listen_loop_poll_once(client)
         except KeyboardInterrupt:
             logger.info("Exiting due to keyboard interrupt")
+            # Re-raise so the session ExitStack unwinds and the entrypoint
+            # reports "Interrupted." with exit status 130.
+            raise
 
 
 def run_common(
@@ -701,6 +737,9 @@ def run_common(
             asyncio.run(serve(options))
         except KeyboardInterrupt:
             logger.info("Exiting interface proxy due to keyboard interrupt")
+            # Re-raise so the entrypoint reports "Interrupted." with exit
+            # status 130, matching the long-running CLI modes.
+            raise
         except (
             OSError,
             asyncio.TimeoutError,

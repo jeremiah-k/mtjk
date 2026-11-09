@@ -62,6 +62,17 @@ class BLEConfig:
     # Connection timeouts
     DIRECT_CONNECT_TIMEOUT_SECONDS = 12.0
     AWAIT_TIMEOUT_BUFFER_SECONDS = 5.0
+    # Stale-connection clearance before central connects: when True, an
+    # explicit central connect to a specific device first asks BlueZ to
+    # disconnect that device if BlueZ still reports it connected. BlueZ
+    # Device1.Disconnect is device-global: it cannot tell a dead process's
+    # link from another local application's, so clearance also disconnects
+    # another local program using that radio. Auto-reconnect never clears.
+    # Embedders disable the behavior with CLEAR_STALE_CONNECTIONS = False.
+    # STALE_CONNECTION_DISCONNECT_TIMEOUT bounds each clearance attempt; see
+    # meshtastic/interfaces/ble/stale_connection.py.
+    CLEAR_STALE_CONNECTIONS = True
+    STALE_CONNECTION_DISCONNECT_TIMEOUT = 3.0
     # Receive recovery configuration
     MAX_DRAIN_ITERATIONS = 10_000
     RECEIVE_RECOVERY_RAPID_FAILURE_THRESHOLD = 3
@@ -98,6 +109,9 @@ CONNECTION_GATE_UNOWNED_STALE_SECONDS = BLEConfig.CONNECTION_GATE_UNOWNED_STALE_
 # Connection timeouts
 DIRECT_CONNECT_TIMEOUT_SECONDS = BLEConfig.DIRECT_CONNECT_TIMEOUT_SECONDS
 AWAIT_TIMEOUT_BUFFER_SECONDS = BLEConfig.AWAIT_TIMEOUT_BUFFER_SECONDS
+# Stale-connection clearance before central connects
+CLEAR_STALE_CONNECTIONS = BLEConfig.CLEAR_STALE_CONNECTIONS
+STALE_CONNECTION_DISCONNECT_TIMEOUT = BLEConfig.STALE_CONNECTION_DISCONNECT_TIMEOUT
 # Receive recovery configuration
 MAX_DRAIN_ITERATIONS = BLEConfig.MAX_DRAIN_ITERATIONS
 RECEIVE_RECOVERY_RAPID_FAILURE_THRESHOLD = (
@@ -132,6 +146,10 @@ ERROR_DISCOVERY_MANAGER_UNAVAILABLE: str = "Discovery manager not available"
 ERROR_ADDRESS_RESOLUTION_FAILED: str = "Address resolution failed, cannot create device"
 ERROR_INTERFACE_CLOSING: str = "Cannot connect while interface is closing"
 ERROR_CONNECTION_SUPPRESSED: str = "Connection suppressed: recently connected elsewhere"
+ERROR_STALE_CLEARANCE_ABANDONED: str = (
+    "Stale connection clearance did not finish; not starting a new connection "
+    "while a late disconnect could tear it down."
+)
 ERROR_NO_CLIENT_ESTABLISHED: str = "Connection failed: no BLE client established"
 ERROR_MANAGEMENT_ADDRESS_EMPTY: str = (
     "Management operations require a non-empty address."

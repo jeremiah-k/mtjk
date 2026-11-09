@@ -118,6 +118,25 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   `BLECoroutineRunner`: N clients share 1 background thread, which lowers
   resource usage and simplifies teardown.
 
+- **Stale BlueZ link clearance on explicit connects (Linux).** An explicit
+  connect first asks BlueZ to disconnect a link that is still reported
+  connected to that one radio. Clearance is best effort: a rejected or timed
+  out disconnect can leave the link in place and the connection can fail.
+  BlueZ cannot tell a dead process's link from another
+  local application's, so this also disconnects another local program using
+  that radio. Auto-reconnect never clears, but BlueZ may reuse a link held by
+  another process; skipping clearance does not provide exclusive access.
+  `BLEConfig.CLEAR_STALE_CONNECTIONS = False` disables the behavior.
+  `--ble-scan` never clears. Clearance needs the radio's address, because a
+  name target must first be found by scanning, and a radio held by a
+  stranded link isn't advertising. If clearance cannot be confirmed retired
+  before the connect deadline, the connect is refused rather than started
+  while a late disconnect could tear down the new link.
+  Process-local gates protect registered owners, and live direct `BLEClient`
+  connections are tracked so clearance leaves their link alone. Raw Bleak
+  connections do not participate in either protocol and can be disconnected
+  by clearance from another caller.
+
 - **Optional pairing and Linux trust helper.** `BLEInterface` can request pairing
   during connect (`pair_on_connect=True` or `connect(pair=True)`), and also
   exposes an explicit Linux trust helper (`trust(address=None)`) that calls

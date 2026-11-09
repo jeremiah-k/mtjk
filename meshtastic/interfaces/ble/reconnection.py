@@ -21,6 +21,7 @@ from meshtastic.interfaces.ble.gating import (
     _is_currently_connected_elsewhere,
 )
 from meshtastic.interfaces.ble.policies import ReconnectPolicy
+from meshtastic.interfaces.ble.stale_connection import _suppress_stale_clearance
 from meshtastic.interfaces.ble.state import BLEStateManager
 from meshtastic.interfaces.ble.utils import (
     _thread_start_probe,
@@ -536,7 +537,14 @@ class ReconnectWorker:
                             "Cannot attempt auto-reconnect: interface address is not set."
                         )
                         return
-                    interface.connect(interface.address)
+                    # Device1.Disconnect is device-global: BlueZ cannot tell a
+                    # dead process's link from a live local application's, so
+                    # the reconnect loop must never clear. Two long-lived
+                    # processes on the same radio would otherwise keep
+                    # disconnecting each other. Skipping clearance does not
+                    # enforce exclusive access to the BlueZ link.
+                    with _suppress_stale_clearance():
+                        interface.connect(interface.address)
                 except ReconnectPolicyMissingMethodError as err:
                     logger.exception(
                         "Reconnect policy missing required method '%s'",

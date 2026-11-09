@@ -9,6 +9,9 @@ import pytest
 
 from meshtastic.interfaces.ble import gating
 
+# Registers the autouse _no_real_self_signals fixture for this test root.
+from meshtastic.tests._self_signal_fixture import _no_real_self_signals  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:

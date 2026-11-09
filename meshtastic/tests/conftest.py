@@ -24,6 +24,9 @@ import meshtastic.util as util_module
 from meshtastic import mt_config, publishingThread
 from meshtastic._branding import PRIMARY_CLI_NAME
 from meshtastic.powermon import power_supply as power_supply_module
+
+# Registers the autouse _no_real_self_signals fixture for this test root.
+from meshtastic.tests._self_signal_fixture import _no_real_self_signals  # noqa: F401
 from meshtastic.util import DeferredExecution
 
 from ..mesh_interface import MeshInterface

@@ -8,12 +8,15 @@ import contextlib
 import getpass  # noqa: F401  # pylint: disable=unused-import  # compatibility seam
 import importlib
 import logging
+import os
 import platform
+import signal
 import sys
 import textwrap
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
-from types import ModuleType
+from types import FrameType, ModuleType
 from typing import IO, Any, NoReturn, Protocol
 
 from google.protobuf.descriptor import FieldDescriptor
@@ -39,7 +42,7 @@ import meshtastic.ota
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
 import meshtastic.util
-from meshtastic import _topics, mt_config, remote_hardware
+from meshtastic import _self_signal, _topics, mt_config, remote_hardware
 from meshtastic._branding import (
     PRIMARY_CLI_NAME,
     PROJECT_ISSUE_URL,
@@ -2413,6 +2416,202 @@ def common() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# CLI signal handling
+# ---------------------------------------------------------------------------
+
+# Signals the CLI converts into a graceful SystemExit so the normal teardown
+# paths (interface close, finally blocks) run. ``atexit`` does not run when a
+# supervised stop sends SIGTERM, and a BLE link left open at the OS level keeps
+# the radio from advertising until something disconnects it. SIGKILL is
+# deliberately not covered: by design it cannot be caught, and it remains the
+# supervisor's fallback for wedged cleanup.
+_CLI_HANDLED_SIGNALS: tuple[Any, ...] = tuple(
+    sig
+    for sig in (
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+    )
+    if sig is not None
+)
+_cli_signal_shutdown_started = False
+# Signal number recorded by the first delivery of the graceful handler, read
+# by the entrypoint's finally to re-deliver the signal after teardown.
+_cli_signal_received: int | None = None
+# Lock acquire is a single atomic operation: nested signal handlers cannot
+# both enter the graceful path between a flag read and a flag assignment.
+_cli_signal_shutdown_lock = threading.Lock()
+_cli_signal_defer_exit = False
+_cli_signal_invocation_active = False
+_CLI_OUTPUT_FLUSH_TIMEOUT_SECONDS = 0.2
+_cli_signal_flush_lock = threading.Lock()
+_cli_signal_flush_worker: threading.Thread | None = None
+
+
+def _flush_cli_output_streams() -> None:
+    """Flush stdout/stderr before a re-delivered fatal signal ends the process.
+
+    The re-delivery path terminates the process by the signal itself, so
+    interpreter finalization never flushes buffered output afterwards. Replaced
+    streams may lack ``flush()`` (AttributeError) or reject it (OSError on a
+    dead terminal, ValueError on a closed stream); the CLI's diagnostics are
+    best-effort at this point and must never block the re-delivery.
+    """
+    streams = (sys.stdout, sys.stderr)
+
+    def _flush() -> None:
+        for stream in streams:
+            with contextlib.suppress(OSError, ValueError, AttributeError):
+                stream.flush()
+
+    global _cli_signal_flush_worker  # pylint: disable=global-statement
+    with _cli_signal_flush_lock:
+        # A blocked flush survives an embedded caller that handles SystemExit.
+        # Reusing the live worker bounds accumulation across repeated shutdowns
+        # instead of retaining one thread and stream pair per attempt.
+        if _cli_signal_flush_worker is not None and _cli_signal_flush_worker.is_alive():
+            return
+        worker = threading.Thread(target=_flush, daemon=True, name="mtjk-signal-flush")
+        _cli_signal_flush_worker = worker
+    try:
+        worker.start()
+        worker.join(timeout=_CLI_OUTPUT_FLUSH_TIMEOUT_SECONDS)
+    except RuntimeError:
+        # A fatal-signal fallback must also work when threads cannot start.
+        pass
+
+
+def _die_by_signal(signum: int) -> NoReturn:
+    """Terminate the process immediately by dying to the received signal.
+
+    Second-delivery path: graceful cleanup may be wedged, so no unwinding is
+    attempted. Delivery resets the disposition and re-raises the signal at
+    the process level through the shared self-signal seam, keeping
+    supervisors reporting a clean stop; if the platform cannot re-deliver,
+    the immediate ``os._exit`` fallback still ends the process without
+    running any further Python cleanup.
+    """
+    _self_signal._signal_self(signum, reset_to_default=True)  # noqa: SLF001
+    os._exit(128 + signum)
+
+
+def _cli_signal_handler(signum: int, _frame: FrameType | None) -> None:
+    """Convert SIGTERM/SIGHUP into a SystemExit so existing cleanup runs.
+
+    The first delivery records the signal number and raises
+    ``SystemExit(128 + signum)``, unwinding the CLI's normal finally/close
+    paths instead of reimplementing teardown; the entrypoint's finally
+    re-delivers the recorded signal once teardown completed. A second delivery
+    must not be swallowed and must not wait on wedged cleanup: it dies by the
+    signal immediately. Admission to the graceful path is one non-blocking
+    lock acquire, so nested deliveries cannot both enter cleanup between a
+    flag read and a flag assignment.
+    """
+    global _cli_signal_shutdown_started  # pylint: disable=global-statement
+    global _cli_signal_received  # pylint: disable=global-statement
+    if (
+        _cli_signal_shutdown_started
+        or not _cli_signal_shutdown_lock.acquire(  # pylint: disable=consider-using-with
+            blocking=False
+        )
+    ):
+        _die_by_signal(signum)
+    _cli_signal_shutdown_started = True
+    _cli_signal_received = signum
+    # Logging can acquire a non-reentrant queue lock interrupted by this very
+    # signal. Keep delivery free of logging and output. During installation or
+    # restoration, record the first signal and let the owning invocation finish
+    # restoring dispositions before it exits.
+    if not _cli_signal_defer_exit:
+        raise SystemExit(128 + signum)
+
+
+def _install_cli_signal_handlers(
+    previous: dict[int, Any] | None = None,
+) -> dict[int, Any]:
+    """Install SIGTERM/SIGHUP handlers from the CLI entry path.
+
+    Library imports never install handlers; only the CLI entrypoint does, so
+    embedders keep full control of their own signal policy. Registration is
+    skipped off the main thread and where the platform forbids it. An
+    inherited ``SIG_IGN`` disposition is preserved (a supervisor or ``nohup``
+    expressed a policy we must not override), and so is a non-Python handler
+    (``signal.getsignal()`` returning None): we could never restore it.
+    """
+    global _cli_signal_shutdown_started  # pylint: disable=global-statement
+    global _cli_signal_shutdown_lock  # pylint: disable=global-statement
+    global _cli_signal_received  # pylint: disable=global-statement
+    if threading.current_thread() is not threading.main_thread():
+        logger.debug("CLI signal handlers not installed off the main thread")
+        return {}
+    # Scope the forced-exit guard and the recorded signal to this CLI
+    # invocation, not the process.
+    _cli_signal_shutdown_started = False
+    _cli_signal_received = None
+    _cli_signal_shutdown_lock = threading.Lock()
+    if previous is None:
+        previous = {}
+    for handled_signal in _CLI_HANDLED_SIGNALS:
+        try:
+            inherited = signal.getsignal(handled_signal)
+            if inherited is signal.SIG_IGN:
+                logger.debug(
+                    "Preserving inherited SIG_IGN for %s",
+                    getattr(handled_signal, "name", handled_signal),
+                )
+                continue
+            if inherited is None:
+                logger.debug(
+                    "Preserving non-Python handler for %s",
+                    getattr(handled_signal, "name", handled_signal),
+                )
+                continue
+            previous[handled_signal] = inherited
+            signal.signal(handled_signal, _cli_signal_handler)
+        except (ValueError, OSError):
+            logger.debug(
+                "Could not install CLI handler for %s",
+                getattr(handled_signal, "name", handled_signal),
+            )
+    return previous
+
+
+def _restore_cli_signal_handlers(
+    previous: dict[int, Any] | None, *, reset_state: bool = True
+) -> None:
+    """Restore host dispositions only where our handler is still installed.
+
+    A disposition we did not replace (inherited ``SIG_IGN`` or a non-Python
+    handler) is never written back, and a disposition someone else has since
+    replaced is left alone: restoration must not clobber an owner that
+    installed its own handler while the CLI ran.
+    """
+    global _cli_signal_shutdown_started  # pylint: disable=global-statement
+    global _cli_signal_shutdown_lock  # pylint: disable=global-statement
+    global _cli_signal_received  # pylint: disable=global-statement
+    if threading.current_thread() is not threading.main_thread():
+        return
+    if previous:
+        for handled_signal, inherited in previous.items():
+            try:
+                if signal.getsignal(handled_signal) is _cli_signal_handler:
+                    signal.signal(handled_signal, inherited)
+            except (ValueError, OSError):
+                logger.debug(
+                    "Could not restore CLI handler for %s",
+                    getattr(handled_signal, "name", handled_signal),
+                )
+    if reset_state:
+        _cli_signal_shutdown_started = False
+        _cli_signal_received = None
+        _cli_signal_shutdown_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# End of CLI signal handling
+# ---------------------------------------------------------------------------
+
+
 def initParser() -> None:
     """Parse CLI arguments and update the legacy global ``mt_config`` state."""
     parser = mt_config.parser
@@ -2428,27 +2627,195 @@ def initParser() -> None:
     mt_config.parser = parser
 
 
-def main() -> None:
-    """
-    Run the Meshtastic-compatible command-line entry point.
+def _re_deliver_recorded_signal(signum: int) -> NoReturn:
+    """End a signal-driven shutdown by dying to the received signal.
 
-    This function initializes the global parser via ``initParser()``,
-    executes the shared CLI flow in ``common()``, and closes resources through
-    the normal CLI session lifecycle.
+    An exit status of 143 is reported by supervisors such as systemd as a
+    failed stop, while death by SIGTERM is a clean stop. The dispositions the
+    CLI replaced are restored by now, so the default disposition terminates
+    the process and an embedder's restored Python handler receives the signal
+    instead. Interpreter finalization and atexit handlers do not run after
+    the re-delivered signal: session teardown releases the interface, the
+    slog LogSet, the tunnel, and the session log file through the ExitStack,
+    while the BLE runner's daemon loop — normally stopped by an atexit
+    handler — dies with the process holding no BLE link after interface
+    close.
     """
+    _flush_cli_output_streams()
+    # reset_to_default stays off: the dispositions the CLI replaced were just
+    # restored, so an embedder's restored handler receives the signal instead.
+    _self_signal._signal_self(signum, reset_to_default=False)  # noqa: SLF001
+    raise SystemExit(128 + signum)
+
+
+def _sigint_re_delivery_eligible() -> bool:
+    """Return whether a Ctrl+C teardown may end by re-delivering SIGINT.
+
+    Every condition must hold: a POSIX platform, a non-interactive
+    interpreter on the main thread, and the interpreter's own
+    ``default_int_handler`` still installed for SIGINT. An interactive session
+    (``python -i`` or a REPL) owns SIGINT itself — killing it would take down
+    the interpreter's read-eval loop instead of handing back the prompt. A
+    custom handler means an embedder owns Ctrl+C and receives the interrupt
+    itself; ``SIG_IGN`` and ``SIG_DFL`` mean a KeyboardInterrupt cannot have
+    come from a real SIGINT, and a missing handler could never be restored.
+    In those cases the CLI keeps the plain ``SystemExit(130)``.
+    """
+    if os.name != "posix":
+        return False
+    if getattr(sys.flags, "interactive", False) or hasattr(sys, "ps1"):
+        return False
+    if threading.current_thread() is not threading.main_thread():
+        return False
+    try:
+        current_handler = signal.getsignal(signal.SIGINT)
+    except (ValueError, OSError):
+        return False
+    return current_handler is signal.default_int_handler
+
+
+def _run_cli_entrypoint(
+    body: Callable[[], None], *, owns_process: bool = False
+) -> None:
+    """Install CLI signal handlers, run ``body``, and map exit exceptions.
+
+    Both CLI entrypoints (``main()`` and ``tunnelMain()``) share this helper so
+    a Ctrl+C reports "Interrupted." with exit status 130 and an interface
+    failure reports ``ERROR: ...`` with exit status 1 no matter which
+    entrypoint launched the session. Signal dispositions are installed before
+    ``body`` runs and restored in a ``finally`` afterward, whether ``body``
+    returned, raised SystemExit from an exit mapping, or propagated another
+    exception. A signal recorded during ``body`` is re-delivered after
+    restoration so the process ends by the same signal it received; the signal
+    then rides the host's restored disposition, so this re-delivery is
+    universal for every caller. A Ctrl+C whose teardown produced the
+    ``SystemExit(130)`` mapping is ended by re-delivering SIGINT only when
+    ``owns_process`` is true — the interpreter's own behavior for an unhandled
+    Ctrl+C, and the only death a shell's cooperative-exit logic treats as an
+    abort. Only the process-owning entrypoints (the console scripts and
+    ``python -m meshtastic``) may forge that fatal SIGINT; an application
+    calling ``main()`` or ``tunnelMain()`` in-process keeps the plain
+    catchable ``SystemExit(130)`` without a self-signal. When ``_cli_exit``
+    raised anything else, or the recorded TERM/HUP path already terminated
+    the process, the SIGINT re-delivery does not run.
+    """
+    redeliver_sigint = False
+    global _cli_signal_defer_exit  # pylint: disable=global-statement
+    global _cli_signal_invocation_active  # pylint: disable=global-statement
+    global _cli_signal_received  # pylint: disable=global-statement
+    global _cli_signal_shutdown_started  # pylint: disable=global-statement
+    global _cli_signal_shutdown_lock  # pylint: disable=global-statement
+    owns_handlers = (
+        threading.current_thread() is threading.main_thread()
+        and not _cli_signal_invocation_active
+    )
+    previous: dict[int, Any] = {}
+    try:
+        if owns_handlers:
+            _cli_signal_invocation_active = True
+            _cli_signal_defer_exit = True
+        try:
+            if owns_handlers:
+                # Installation runs inside the interrupt mapping: Ctrl+C
+                # during disposition setup still reports "Interrupted." and
+                # the outer finally restores whatever was replaced.
+                _install_cli_signal_handlers(previous)
+                _cli_signal_defer_exit = False
+                if _cli_signal_received is not None:
+                    raise SystemExit(128 + _cli_signal_received)
+            body()
+        except KeyboardInterrupt:
+            try:
+                _cli_exit("Interrupted.", 130)
+            except SystemExit as exc:
+                if exc.code == 130:
+                    redeliver_sigint = True
+                raise
+        except MeshInterface.MeshInterfaceError as exc:
+            _cli_exit(f"ERROR: {exc}", 1)
+        finally:
+            if owns_handlers:
+                _cli_signal_defer_exit = True
+    finally:
+        signum = None
+        try:
+            if owns_handlers:
+                try:
+                    _restore_cli_signal_handlers(previous, reset_state=False)
+                    signum = _cli_signal_received
+                finally:
+                    _cli_signal_received = None
+            if signum is not None:
+                # A recorded TERM/HUP is fatal here (NoReturn), so it takes
+                # precedence over the SIGINT re-delivery below. This re-delivery
+                # is universal: the signal rides the host's restored disposition,
+                # so a host handler runs and a host with SIG_DFL dies.
+                _re_deliver_recorded_signal(signum)
+            if owns_process and redeliver_sigint and _sigint_re_delivery_eligible():
+                _flush_cli_output_streams()
+                # Die by SIGINT like CPython does for an unhandled Ctrl+C; when
+                # the delivery returns, the in-flight SystemExit(130) stands.
+                _self_signal._signal_self(  # noqa: SLF001
+                    signal.SIGINT, reset_to_default=True
+                )
+        finally:
+            if owns_handlers:
+                # The ownership reset must run even when restoration or the
+                # re-delivery itself is interrupted: a KeyboardInterrupt
+                # escaping either boundary would otherwise leave the
+                # invocation-ownership flags set, and a later embedded
+                # entrypoint would silently lose handler ownership for the
+                # rest of the process.
+                _cli_signal_shutdown_started = False
+                _cli_signal_shutdown_lock = threading.Lock()
+                _cli_signal_defer_exit = False
+                _cli_signal_invocation_active = False
+
+
+def _main_impl(*, owns_process: bool) -> None:
+    """Run the shared CLI flow with the caller's process-ownership policy."""
     parser = argparse.ArgumentParser(
         add_help=False,
         epilog="If no connection arguments are specified, we search for a compatible serial device, "
         "and if none is found, then attempt a TCP connection to localhost.",
     )
     mt_config.parser = parser
-    try:
+
+    def body() -> None:
         initParser()
         common()
-    except KeyboardInterrupt:
-        _cli_exit("Interrupted.", 130)
-    except MeshInterface.MeshInterfaceError as exc:
-        _cli_exit(f"ERROR: {exc}", 1)
+
+    _run_cli_entrypoint(body, owns_process=owns_process)
+
+
+def main() -> None:
+    """
+    Run the Meshtastic-compatible command-line entry point.
+
+    This function initializes the global parser via ``initParser()``,
+    executes the shared CLI flow in ``common()``, and closes resources through
+    the normal CLI session lifecycle. An application calling this in-process
+    keeps the catchable ``SystemExit(130)`` after Ctrl+C; only the
+    console-script entrypoints end a Ctrl+C by re-delivering SIGINT.
+    """
+    _main_impl(owns_process=False)
+
+
+def _tunnel_main_impl(*, owns_process: bool) -> None:
+    """Run the tunnel CLI flow with the caller's process-ownership policy."""
+    parser = argparse.ArgumentParser(add_help=False)
+    mt_config.parser = parser
+
+    def body() -> None:
+        initParser()
+        args = mt_config.args
+        if args is None:
+            raise RuntimeError("initParser() did not set mt_config.args")
+        args.tunnel = True
+        mt_config.args = args
+        common()
+
+    _run_cli_entrypoint(body, owns_process=owns_process)
 
 
 def tunnelMain() -> None:
@@ -2456,21 +2823,33 @@ def tunnelMain() -> None:
 
     Set tunnel mode on the parsed CLI arguments and run the shared CLI initialization and execution flow.
 
+    An application calling this in-process keeps the catchable
+    ``SystemExit(130)`` after Ctrl+C; only the console-script entrypoints end
+    a Ctrl+C by re-delivering SIGINT.
+
     Raises
     ------
     RuntimeError
         If CLI arguments could not be parsed or initialization failed.
     """
-    parser = argparse.ArgumentParser(add_help=False)
-    mt_config.parser = parser
-    initParser()
-    args = mt_config.args
-    if args is None:
-        raise RuntimeError("initParser() did not set mt_config.args")
-    args.tunnel = True
-    mt_config.args = args
-    common()
+    _tunnel_main_impl(owns_process=False)
+
+
+# The process-owning entrypoints are private and reserved for the console
+# scripts and ``python -m meshtastic``: only an entrypoint that owns the
+# process may forge a fatal SIGINT after a Ctrl+C teardown, while an
+# application calling ``main()`` or ``tunnelMain()`` in-process keeps the
+# plain catchable ``SystemExit(130)`` instead of being killed by a
+# self-signal it never opted into.
+def _console_main() -> None:
+    """Process-owning entrypoint for the ``mtjk``/``meshtastic`` scripts."""
+    _main_impl(owns_process=True)
+
+
+def _console_tunnel_main() -> None:
+    """Process-owning entrypoint for the ``mesh-tunnel`` script."""
+    _tunnel_main_impl(owns_process=True)
 
 
 if __name__ == "__main__":
-    main()
+    _console_main()

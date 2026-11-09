@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
+import threading
 import types
+from collections.abc import Iterator
 from enum import IntFlag
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from meshtastic.cli import bootstrap
 from meshtastic.cli import parser as cli_parser
+from meshtastic.interface_proxy import channels as channels_mod
 from meshtastic.interface_proxy.channels import BLECentralChannel
 from meshtastic.interface_proxy.endpoints import (
     BLEMailbox,
@@ -22,12 +26,24 @@ from meshtastic.interface_proxy.endpoints import (
 )
 from meshtastic.interface_proxy.server import ProxyOptions, bridge, run_tcp_proxy
 from meshtastic.interface_proxy.wire import FrameDecoder, ProxyProtocolError, frame
+from meshtastic.interfaces.ble import gating
+from meshtastic.interfaces.ble import interface as ble_interface_mod
 from meshtastic.interfaces.ble.constants import (
     FROMNUM_UUID,
     FROMRADIO_UUID,
     SERVICE_UUID,
     TORADIO_UUID,
 )
+from meshtastic.interfaces.ble.interface import BLEInterface
+from meshtastic.interfaces.ble.state import BLEStateManager
+
+
+@pytest.fixture(autouse=True)
+def _no_host_ble_clearance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BLE transport doubles must never query or disconnect a host radio."""
+    monkeypatch.setattr(
+        channels_mod, "_clear_stale_connection", AsyncMock(return_value=False)
+    )
 
 
 def test_fragmented_and_multiple_frames() -> None:
@@ -732,10 +748,10 @@ def test_stream_close_suppresses_asyncio_timeout() -> None:
     asyncio.run(scenario())
 
 
-def test_proxy_ctrl_c_exits_without_traceback(
+def test_proxy_ctrl_c_logs_and_reraises(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Ctrl+C behaves like the ordinary CLI listen-loop shutdown path."""
+    """Ctrl+C logs the proxy shutdown, then unwinds for the entrypoint's 130 exit."""
     import argparse
 
     parser = argparse.ArgumentParser(add_help=False)
@@ -757,16 +773,17 @@ def test_proxy_ctrl_c_exits_without_traceback(
 
     monkeypatch.setattr(asyncio, "run", interrupt_proxy)
     with caplog.at_level("INFO", logger=bootstrap.logger.name):
-        bootstrap.run_common(
-            args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
-        )
+        with pytest.raises(KeyboardInterrupt):
+            bootstrap.run_common(
+                args, parser, MagicMock(), argv=["mtjk", "--interface-proxy-in"]
+            )
     assert "Exiting interface proxy due to keyboard interrupt" in caplog.text
 
 
 def test_ble_central_disconnect_callback_during_connect_is_thread_safe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A backend callback during connect wakes the new link, even off-loop."""
+    """A backend callback during connect makes open refuse the link, off-loop."""
     from threading import Thread
     from unittest.mock import AsyncMock
 
@@ -789,12 +806,8 @@ def test_ble_central_disconnect_callback_during_connect_is_thread_safe(
         monkeypatch.setitem(
             sys.modules, "bleak", types.SimpleNamespace(BleakClient=FakeBleakClient)
         )
-        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
-        try:
-            assert await asyncio.wait_for(channel.recv(), 1) is None
-            assert channel._disconnected.is_set()
-        finally:
-            await channel.close()
+        with pytest.raises(RuntimeError, match="disconnected during connection setup"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
 
     asyncio.run(scenario())
 
@@ -817,6 +830,381 @@ def test_ble_central_failed_connect_disconnects_client(
         with pytest.raises(OSError, match="failed to pair"):
             await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
         client.disconnect.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_open_refuses_when_clearance_cannot_retire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unconfirmed stale-link clearance makes open refuse and still clean up."""
+    from meshtastic.interfaces.ble import stale_connection as stale_connection_mod
+
+    async def _abandoned(address: str, *, adapter: str | None = None) -> bool:
+        raise stale_connection_mod._ClearanceAbandonedError(
+            "stale-connection clearance did not retire within the D-Bus budget"
+        )
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+        )
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _abandoned)
+        with pytest.raises(RuntimeError, match="did not retire"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        # The refusal still cleans up: the native disconnect runs and the
+        # process-local claim retires so a successor can own the address.
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere(
+            "AA:BB:CC:DD:EE:FF", owner=object()
+        )
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_open_refuses_when_owned_elsewhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The proxy channel refuses an address another in-process owner holds."""
+    from unittest.mock import AsyncMock
+
+    cleared: list[str] = []
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        cleared.append(address)
+        return False
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.start_notify = AsyncMock()
+        client.read_gatt_char = AsyncMock(return_value=b"")
+        client.disconnect = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules,
+            "bleak",
+            types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+        )
+        monkeypatch.setattr(
+            channels_mod,
+            "_is_currently_connected_elsewhere",
+            lambda _addr, owner=None: True,
+        )
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        with pytest.raises(RuntimeError, match="AA:BB:CC:DD:EE:FF"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+    assert cleared == []
+
+
+@pytest.fixture
+def clear_ble_registry() -> Iterator[None]:
+    """Reset the shared BLE ownership registry around registry-gated tests."""
+    gating._clear_all_registries()
+    yield
+    gating._clear_all_registries()
+
+
+def _central_bleak_client(connect: Any = None) -> MagicMock:
+    """Build a fake connected BleakClient for BLECentralChannel scenarios."""
+    client = MagicMock()
+    client.is_connected = True
+    client.connect = connect if connect is not None else AsyncMock()
+    client.start_notify = AsyncMock()
+    client.read_gatt_char = AsyncMock(return_value=b"")
+    client.disconnect = AsyncMock()
+    return client
+
+
+def _patch_bleak_client(monkeypatch: pytest.MonkeyPatch, client: Any) -> None:
+    """Route BLECentralChannel.open to a fake BleakClient."""
+    monkeypatch.setitem(
+        sys.modules,
+        "bleak",
+        types.SimpleNamespace(BleakClient=lambda *a, **kw: client),
+    )
+
+
+def _gate_interface() -> Any:
+    """Build a minimal BLEInterface that exercises the real registry gates."""
+    interface = BLEInterface.__new__(BLEInterface)
+    state_manager = BLEStateManager()
+    interface._state_manager = state_manager
+    interface._state_lock = state_manager.lock
+    interface.client = None
+    interface._adapter = None
+    return interface
+
+
+def test_ble_central_open_skips_clearance_for_live_direct_client(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The proxy never clears an address a live direct BLEClient still holds."""
+    proxy_clears: list[str] = []
+
+    async def _record_clear(address: str, *, adapter: str | None = None) -> bool:
+        proxy_clears.append(address)
+        return False
+
+    async def scenario() -> None:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _record_clear)
+        monkeypatch.setattr(
+            channels_mod,
+            "_live_ble_client_owns_address",
+            lambda _addr: True,
+        )
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            assert proxy_clears == []
+        finally:
+            await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_open_registers_owner_and_blocks_interface_clearance(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A live proxy link is a registry claim the interface never clears."""
+    proxy_clears: list[str] = []
+
+    async def _record_proxy_clear(address: str, *, adapter: str | None = None) -> bool:
+        proxy_clears.append(address)
+        return False
+
+    interface_clears: list[str] = []
+
+    def _record_interface_clear(
+        address: str | None, *, adapter: str | None = None
+    ) -> bool:
+        interface_clears.append(address or "")
+        return False
+
+    async def scenario() -> None:
+        connect_entered = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        async def slow_connect(*, timeout: float) -> None:
+            connect_entered.set()
+            await release_connect.wait()
+
+        _patch_bleak_client(monkeypatch, _central_bleak_client(connect=slow_connect))
+        monkeypatch.setattr(
+            channels_mod, "_clear_stale_connection", _record_proxy_clear
+        )
+        monkeypatch.setattr(
+            ble_interface_mod,
+            "_clear_stale_connection_before_central_connect",
+            _record_interface_clear,
+        )
+        open_task = asyncio.create_task(BLECentralChannel.open("AA:BB:CC:DD:EE:FF"))
+        await connect_entered.wait()
+        # The connecting claim is already live while the proxy's connect is
+        # in flight, before any connected claim exists.
+        assert gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+        # The interface's duplicate gate refuses this address, and its
+        # stale-link clearance is never attempted while the proxy lives.
+        interface = _gate_interface()
+        assert interface._should_suppress_duplicate_connect("AA:BB:CC:DD:EE:FF")
+        interface._clear_stale_link_before_establish("AA:BB:CC:DD:EE:FF")
+        assert interface_clears == []
+
+        release_connect.set()
+        channel = await open_task
+        try:
+            # The registry reports the live proxy link as owned, excluding
+            # the owner itself.
+            assert gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+            assert not gating._is_currently_connected_elsewhere(
+                "AA:BB:CC:DD:EE:FF", owner=channel
+            )
+        finally:
+            await channel.close()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_open_fails_when_backend_disconnects_during_setup(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A disconnect during setup fails the open and retains cleanup ownership."""
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+
+        def create_client(_address: str, *, disconnected_callback: Any) -> Any:
+            client.disconnected_callback = disconnected_callback
+            return client
+
+        monkeypatch.setitem(
+            sys.modules, "bleak", types.SimpleNamespace(BleakClient=create_client)
+        )
+
+        async def disconnect_during_notify(*_args: Any, **_kwargs: Any) -> None:
+            await asyncio.to_thread(client.disconnected_callback, client)
+
+        client.start_notify = disconnect_during_notify
+
+        with pytest.raises(RuntimeError, match="disconnected during connection setup"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_close_releases_claim_for_new_owner(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """close() hands the address back so a fresh owner can claim it."""
+
+    async def scenario() -> None:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        assert gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+        await channel.close()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+        successor = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, successor)
+        fresh = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            assert not gating._is_currently_connected_elsewhere(
+                "AA:BB:CC:DD:EE:FF", owner=fresh
+            )
+        finally:
+            await fresh.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_close_bounds_stalled_receive_task(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A read that ignores cancellation cannot keep disconnect from running."""
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+
+        if channel._receive_task is not None:
+            channel._receive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await channel._receive_task
+
+        async def stalled_receive() -> None:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+
+        channel._receive_task = asyncio.create_task(stalled_receive())
+        monkeypatch.setattr(channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01)
+
+        await channel.close()
+
+        client.disconnect.assert_awaited_once()
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_failed_connect_releases_claim(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """A failed connect clears its claim; a fresh owner can claim again."""
+
+    async def scenario() -> None:
+        client = MagicMock()
+        client.is_connected = False
+        client.connect = AsyncMock(side_effect=OSError("failed to pair"))
+        client.disconnect = AsyncMock()
+        _patch_bleak_client(monkeypatch, client)
+        with pytest.raises(OSError, match="failed to pair"):
+            await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        successor = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await successor.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_cancelled_connect_releases_claim(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """Cancelling during connect releases the claim for a fresh owner."""
+
+    async def scenario() -> None:
+        connect_entered = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        async def slow_connect(*, timeout: float) -> None:
+            connect_entered.set()
+            await release_connect.wait()
+
+        client = MagicMock()
+        client.is_connected = False
+        client.connect = slow_connect
+        client.disconnect = AsyncMock()
+        _patch_bleak_client(monkeypatch, client)
+
+        task = asyncio.create_task(BLECentralChannel.open("AA:BB:CC:DD:EE:FF"))
+        await connect_entered.wait()
+        # The connecting claim is live while the connect is in flight.
+        assert gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        successor = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await successor.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_backend_disconnect_releases_claim(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The backend disconnect callback releases the claim off-loop."""
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+
+        def create_client(_address: str, *, disconnected_callback: Any) -> Any:
+            client.disconnected_callback = disconnected_callback
+            return client
+
+        monkeypatch.setitem(
+            sys.modules, "bleak", types.SimpleNamespace(BleakClient=create_client)
+        )
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        try:
+            assert gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+            # Backend callbacks arrive on a foreign thread; the release is a
+            # synchronous registry update, so no sleep is needed to observe it.
+            await asyncio.to_thread(client.disconnected_callback, client)
+            assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+        finally:
+            await channel.close()
+
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        fresh = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await fresh.close()
 
     asyncio.run(scenario())
 
@@ -868,6 +1256,81 @@ def test_ble_disconnect_drains_packet_waiting_for_queue_space(
             ]
         finally:
             await channel.close()
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_close_disconnects_when_receive_suppresses_cancellation(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The receive stop deadline cannot wait for cancellation acknowledgement."""
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        return False
+
+    async def scenario() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def stubborn_receive(self: BLECentralChannel) -> None:
+            started.set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    pass
+
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        monkeypatch.setattr(BLECentralChannel, "_poll_radio", stubborn_receive)
+        monkeypatch.setattr(channels_mod, "_BLE_RECEIVE_STOP_TIMEOUT_SECONDS", 0.01)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        await asyncio.wait_for(started.wait(), 1)
+        closing = asyncio.create_task(channel.close())
+        try:
+            done, _ = await asyncio.wait({closing}, timeout=0.25)
+            assert closing in done, "receive cancellation blocked native disconnect"
+            await closing
+            client.disconnect.assert_awaited_once()
+            assert not gating._is_currently_connected_elsewhere("AA:BB:CC:DD:EE:FF")
+        finally:
+            release.set()
+            assert channel._receive_task is not None
+            await asyncio.gather(closing, channel._receive_task)
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_close_stops_poll_loop_woken_as_close_starts(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """close() ends the poll loop even when a wake lands as it cancels.
+
+    A FROMNUM notification, or the wake open() sets itself, can finish the
+    poll loop's wait in the same loop step that close() cancels it. Python
+    3.11's asyncio.wait_for returned the wait's result there instead of
+    raising the cancel, so the loop kept polling and close() never returned.
+    """
+
+    async def _no_clear(address: str, *, adapter: str | None = None) -> bool:
+        return False
+
+    async def scenario() -> None:
+        client = _central_bleak_client()
+        _patch_bleak_client(monkeypatch, client)
+        monkeypatch.setattr(channels_mod, "_clear_stale_connection", _no_clear)
+        channel = await BLECentralChannel.open("AA:BB:CC:DD:EE:FF")
+        receive_task = channel._receive_task
+        assert receive_task is not None
+        # Let the loop drain open()'s wake and park on its next wait.
+        await asyncio.sleep(0.05)
+        channel._wake.set()  # A notification arrives as close() starts.
+        close_task = asyncio.create_task(channel.close())
+        done, _ = await asyncio.wait({close_task}, timeout=5)
+        assert close_task in done, "close() hung on a poll loop that kept polling"
+        assert receive_task.cancelled()
+        client.disconnect.assert_awaited_once()
 
     asyncio.run(scenario())
 
@@ -1137,3 +1600,139 @@ def test_ble_peripheral_releases_bus_when_unregistering_fails() -> None:
         server.bus.disconnect.assert_called_once()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("claim_raises", [False, True])
+def test_ble_central_double_cancel_during_worker_claim_releases_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    clear_ble_registry: None,
+    claim_raises: bool,
+) -> None:
+    """Two cancellations cannot strand a claim or mask the original cancellation."""
+    address = "AA:BB:CC:DD:EE:FF"
+    claimed = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    retired = threading.Event()
+    real_claim = channels_mod._try_claim_ble_address
+    real_clear = gating._clear_connecting
+
+    def clear(target: str | None, *, owner: object | None = None) -> None:
+        real_clear(target, owner=owner)
+        retired.set()
+
+    monkeypatch.setattr(channels_mod, "_clear_connecting", clear)
+
+    def gated_claim(
+        target: str, owner: object, aborted: threading.Event | None = None
+    ) -> bool:
+        try:
+            result = False if claim_raises else real_claim(target, owner, aborted)
+            claimed.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("test never released the claim worker")
+            if claim_raises:
+                raise OSError("claim worker failed")
+            return result
+        finally:
+            completed.set()
+
+    async def scenario() -> None:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_try_claim_ble_address", gated_claim)
+        opening = asyncio.create_task(BLECentralChannel.open(address))
+        try:
+            assert await asyncio.to_thread(claimed.wait, 2)
+            assert gating._is_currently_connected_elsewhere(address) is (
+                not claim_raises
+            )
+            opening.cancel()
+            await asyncio.sleep(0)
+            opening.cancel()
+            with pytest.raises(asyncio.CancelledError) as cancel_info:
+                await opening
+        finally:
+            release.set()
+        assert await asyncio.to_thread(completed.wait, 2)
+        if not claim_raises:
+            assert await asyncio.to_thread(retired.wait, 2)
+        # The raised cancellation keeps the aborted link's frames alive, so a
+        # stranded claim cannot hide behind dead-owner weakref pruning before
+        # this check; an embedder that logs the error holds the same
+        # reference for far longer.
+        assert isinstance(cancel_info.value, asyncio.CancelledError)
+        assert not gating._is_currently_connected_elsewhere(address)
+
+    asyncio.run(scenario())
+
+
+def test_ble_central_cancelled_claim_release_survives_loop_teardown(
+    monkeypatch: pytest.MonkeyPatch, clear_ble_registry: None
+) -> None:
+    """The claim release cannot depend on the caller's event loop surviving.
+
+    An embedder that closes its loop without joining background claim threads can have the loop
+    gone before the claim worker finishes, so the release must run on the
+    worker side. The surfaced CancelledError stays referenced because
+    embedders log it, keeping the aborted link alive.
+    """
+    address = "AA:BB:CC:DD:EE:FF"
+    claimed = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    retired = threading.Event()
+    real_claim = channels_mod._try_claim_ble_address
+    real_clear = gating._clear_connecting
+
+    def clear(target: str | None, *, owner: object | None = None) -> None:
+        real_clear(target, owner=owner)
+        retired.set()
+
+    monkeypatch.setattr(channels_mod, "_clear_connecting", clear)
+
+    def gated_claim(
+        target: str, owner: object, aborted: threading.Event | None = None
+    ) -> bool:
+        try:
+            result = real_claim(target, owner, aborted)
+            claimed.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("test never released the claim worker")
+            return result
+        finally:
+            completed.set()
+
+    def scenario() -> list[BaseException]:
+        _patch_bleak_client(monkeypatch, _central_bleak_client())
+        monkeypatch.setattr(channels_mod, "_try_claim_ble_address", gated_claim)
+
+        async def run() -> list[BaseException]:
+            opening = asyncio.create_task(BLECentralChannel.open(address))
+            assert await asyncio.to_thread(claimed.wait, 2)
+            assert gating._is_currently_connected_elsewhere(address)
+            opening.cancel()
+            await asyncio.sleep(0)
+            opening.cancel()
+            surfaced: list[BaseException] = []
+            try:
+                await opening
+            except asyncio.CancelledError as exc:
+                surfaced.append(exc)
+            return surfaced
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(run())
+        finally:
+            loop.close()
+
+    try:
+        surfaced = scenario()
+    finally:
+        release.set()
+    assert completed.wait(2)
+    assert retired.wait(2)
+    # surfaced pins the aborted link exactly like an embedder's error log;
+    # the registry must still be clear with no loop running anywhere.
+    assert surfaced
+    assert not gating._is_currently_connected_elsewhere(address)

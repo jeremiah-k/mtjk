@@ -29,6 +29,7 @@ from meshtastic.interfaces.ble.reconnection import (
     ReconnectWorker,
     ThreadCoordinatorMissingMethodError,
 )
+from meshtastic.interfaces.ble.stale_connection import _stale_clearance_suppressed
 from meshtastic.interfaces.ble.state import BLEStateManager
 
 if TYPE_CHECKING:
@@ -813,6 +814,37 @@ class TestReconnectWorkerAttemptReconnectLoop:
         # Just verify reset is called at start (policy counter will be reset)
         worker._attempt_reconnect_loop(shutdown_event)
         # After loop, policy should be reset (0 or more based on loop execution)
+
+    @pytest.mark.unit
+    def test_loop_connects_with_stale_clearance_suppressed(self) -> None:
+        """The reconnect worker connects with stale-link clearance suppressed.
+
+        Device1.Disconnect is device-global, so the auto-reconnect loop must
+        never clear: suppression is active for the connect call and inactive
+        again once the loop returns.
+        """
+        shutdown_event = Event()
+        observed: list[bool] = []
+
+        interface = SimpleNamespace(
+            _is_connection_closing=False,
+            auto_reconnect=True,
+            _is_connection_connected=False,
+            address="AA:BB:CC:DD:EE:FF",
+        )
+
+        def recording_connect(_addr: str) -> None:
+            observed.append(_stale_clearance_suppressed())
+
+        interface.connect = recording_connect
+
+        worker = ReconnectWorker(
+            interface=interface,  # type: ignore[arg-type]
+            reconnect_policy=ReconnectPolicy(max_retries=1, initial_delay=0.01),
+        )
+        worker._attempt_reconnect_loop(shutdown_event)
+        assert observed == [True]
+        assert _stale_clearance_suppressed() is False
 
     @pytest.mark.unit
     def test_loop_on_exit_callback_called(self) -> None:
