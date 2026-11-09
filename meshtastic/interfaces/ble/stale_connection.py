@@ -9,7 +9,11 @@ disconnect the one target device before a central connection is opened.
 
 Clearance is strictly best-effort: transport failures are logged at debug
 level and do not fail the connection attempt. Construction cancellation and
-fatal-signal exceptions propagate so the caller can unwind promptly.
+fatal-signal exceptions propagate so the caller can unwind promptly. If the
+synchronous bridge cannot confirm that a queued attempt retired within its
+wait budget, it raises :class:`_ClearanceAbandonedError` instead of returning:
+the caller must not establish a replacement link while a late ``Disconnect``
+could still tear it down.
 
 Embedders can disable the behavior entirely by setting
 ``BLEConfig.CLEAR_STALE_CONNECTIONS = False``; the D-Bus bus is then never
@@ -50,6 +54,16 @@ _OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
 _DEVICE_INTERFACE = "org.bluez.Device1"
 _GET_MANAGED_OBJECTS = "GetManagedObjects"
 _DISCONNECT_METHOD = "Disconnect"
+
+
+class _ClearanceAbandonedError(RuntimeError):
+    """A queued clearance could not be confirmed retired before abandonment.
+
+    Raised when the synchronous bridge's wait budget expires with the runner
+    job still outstanding. The job may have submitted ``Device1.Disconnect``
+    already or may do so after the caller resumes, so the caller must not
+    establish a replacement link that a late disconnect could tear down.
+    """
 
 
 class _ClearanceAbandonment(threading.Event):
@@ -376,7 +390,10 @@ def _clear_stale_connection_before_central_connect(
     cancelled, and the coroutine checks that fence before issuing
     ``Device1.Disconnect``. This protects work queued behind a busy runner;
     submission already in progress is not revoked by cancellation. The final
-    check and request submission are not atomic with the caller's abandonment.
+    check and request submission are not atomic with the caller's abandonment,
+    so a wait-budget expiry with the job still outstanding raises
+    :class:`_ClearanceAbandonedError` instead of returning: the caller must
+    not establish a replacement link while the late request can still land.
 
     Parameters
     ----------
@@ -388,7 +405,14 @@ def _clear_stale_connection_before_central_connect(
     Returns
     -------
     bool
-        True when a stale connection was cleared; False otherwise.
+        True when a stale connection was cleared; False otherwise (including
+        when the job was never submitted).
+
+    Raises
+    ------
+    _ClearanceAbandonedError
+        If the submitted job did not retire within the wait budget and can
+        still issue ``Device1.Disconnect`` after this call returns.
     """
     if not _clear_stale_connection_enabled():
         return False
@@ -432,6 +456,22 @@ def _clear_stale_connection_before_central_connect(
         return cleared
     except ConnectionCancelledError:
         raise
+    except TimeoutError as exc:
+        if future is not None:
+            # The coroutine was submitted but the runner did not retire it
+            # within the wait budget. It can still submit Device1.Disconnect
+            # after this caller resumes, so report an unconfirmed attempt and
+            # let the caller refuse to establish a link that could be torn
+            # down by the late request.
+            raise _ClearanceAbandonedError(
+                "stale-connection clearance did not retire before the caller's deadline"
+            ) from exc
+        logger.debug(
+            "Stale BLE connection clearance could not be scheduled for %s",
+            normalized,
+            exc_info=True,
+        )
+        return False
     except Exception:  # noqa: BLE001 - clearance is strictly best-effort
         logger.debug(
             "Stale BLE connection clearance could not run for %s",

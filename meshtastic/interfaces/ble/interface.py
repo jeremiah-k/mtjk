@@ -84,6 +84,7 @@ from meshtastic.interfaces.ble.constants import (
     ERROR_CONNECTION_SUPPRESSED,
     ERROR_INTERFACE_CLOSING,
     ERROR_MANAGEMENT_CONNECTING,
+    ERROR_STALE_CLEARANCE_ABANDONED,
     ERROR_MULTIPLE_DEVICES,
     ERROR_MULTIPLE_DEVICES_DISCOVERY,
     ERROR_NO_CLIENT_ESTABLISHED,
@@ -152,6 +153,7 @@ from meshtastic.interfaces.ble.session_state import (
     _BLESessionStateCompatMixin,
 )
 from meshtastic.interfaces.ble.stale_connection import (
+    _ClearanceAbandonedError,
     _clear_stale_connection_before_central_connect,
     _stale_clearance_suppressed,
 )
@@ -2811,8 +2813,9 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         connect attempt that follows. Auto-reconnect suppresses clearance (the
         radio is this process's own target; Device1.Disconnect is device-global
         and would fight another local process for it). Best-effort and never
-        raises for transport failures; construction cancellation propagates.
-        Only the single target address is ever touched. Skipped when
+        raises for transport failures; construction cancellation propagates,
+        and an unconfirmed clearance raises BLEError instead of starting the
+        connection. Only the single target address is ever touched. Skipped when
         the address is currently claimed by another owner in this process or
         held by this interface's own live client — those links are ours, not
         stale.
@@ -2862,6 +2865,10 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             _clear_stale_connection_before_central_connect(
                 target_identifier, adapter=self._adapter
             )
+        except _ClearanceAbandonedError as exc:
+            # The runner job may still submit a disconnect. Refuse the new
+            # link rather than race a late teardown of it.
+            raise self.BLEError(ERROR_STALE_CLEARANCE_ABANDONED) from exc
         except ConnectionCancelledError:
             raise
         except Exception:  # noqa: BLE001 - clearance must never break connect

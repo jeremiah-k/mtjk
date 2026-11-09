@@ -146,6 +146,10 @@ ERROR_DISCOVERY_MANAGER_UNAVAILABLE: str = "Discovery manager not available"
 ERROR_ADDRESS_RESOLUTION_FAILED: str = "Address resolution failed, cannot create device"
 ERROR_INTERFACE_CLOSING: str = "Cannot connect while interface is closing"
 ERROR_CONNECTION_SUPPRESSED: str = "Connection suppressed: recently connected elsewhere"
+ERROR_STALE_CLEARANCE_ABANDONED: str = (
+    "Stale connection clearance did not finish; not starting a new connection "
+    "while a late disconnect could tear it down."
+)
 ERROR_NO_CLIENT_ESTABLISHED: str = "Connection failed: no BLE client established"
 ERROR_MANAGEMENT_ADDRESS_EMPTY: str = (
     "Management operations require a non-empty address."

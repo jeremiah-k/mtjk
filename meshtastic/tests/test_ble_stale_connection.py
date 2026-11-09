@@ -286,10 +286,15 @@ def test_clear_stale_connection_sync_bridge_runs_on_shared_runner(
     )
 
 
-def test_timed_out_bridge_cannot_disconnect_a_later_link(
+def test_abandoned_bridge_reports_unconfirmed_attempt_and_fences_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Expired jobs cannot issue Device1.Disconnect when the runner unblocks."""
+    """An abandoned bridge reports the unconfirmed attempt and fences the job.
+
+    The caller must not proceed to a new link while the queued job could still
+    submit Device1.Disconnect. When the runner later services the fenced job,
+    it must return without issuing the request.
+    """
     import concurrent.futures
 
     import meshtastic.interfaces.ble.runner as runner_module
@@ -317,10 +322,8 @@ def test_timed_out_bridge_cannot_disconnect_a_later_link(
             return FakeFuture()
 
     monkeypatch.setattr(runner_module, "BLECoroutineRunner", FakeRunner)
-    assert (
+    with pytest.raises(stale_connection._ClearanceAbandonedError):
         stale_connection._clear_stale_connection_before_central_connect(_TARGET)
-        is False
-    )
     assert cancelled == [True]
     assert len(scheduled) == 1
     assert asyncio.run(scheduled[0]) is False
@@ -435,10 +438,10 @@ def test_runner_construction_failure_never_creates_or_leaks_coroutine(
     assert created == []
 
 
-def test_sync_bridge_reads_live_timeout_and_swallows_failed_cancellation(
+def test_sync_bridge_reads_live_timeout_and_reports_unconfirmed_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed cancellation cannot escape the best-effort bridge."""
+    """A failed cancellation cannot hide the unconfirmed-attempt report."""
     import concurrent.futures
 
     import meshtastic.interfaces.ble.runner as runner_module
@@ -465,10 +468,8 @@ def test_sync_bridge_reads_live_timeout_and_swallows_failed_cancellation(
 
     monkeypatch.setattr(runner_module, "BLECoroutineRunner", FakeRunner)
     monkeypatch.setattr(BLEConfig, "STALE_CONNECTION_DISCONNECT_TIMEOUT", 0.015)
-    assert (
+    with pytest.raises(stale_connection._ClearanceAbandonedError):
         stale_connection._clear_stale_connection_before_central_connect(_TARGET)
-        is False
-    )
     assert observed == [pytest.approx(0.015 + AWAIT_TIMEOUT_BUFFER_SECONDS)]
     # No real executor owns this fake; close the allocated coroutine explicitly.
     pending.pop().close()
@@ -586,6 +587,37 @@ def test_connect_clearance_failure_does_not_block_connect(
     client = interface.connect(_TARGET)
     assert client is not None
     assert order == ["establish"]
+
+
+def test_connect_refuses_when_clearance_cannot_retire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unconfirmed clearance refuses the connect instead of racing it."""
+    interface, order = _ordering_interface(monkeypatch)
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_is_currently_connected_elsewhere",
+        lambda _addr, owner=None: False,
+    )
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_live_ble_client_owns_address",
+        lambda _addr: False,
+    )
+
+    def _abandoned(_address: str | None, *, adapter: str | None = None) -> bool:
+        raise stale_connection._ClearanceAbandonedError("not retired")
+
+    monkeypatch.setattr(
+        ble_interface_mod,
+        "_clear_stale_connection_before_central_connect",
+        _abandoned,
+    )
+    with pytest.raises(
+        BLEInterface.BLEError, match="Stale connection clearance did not finish"
+    ):
+        interface.connect(_TARGET)
+    assert order == []
 
 
 def test_connect_skips_clearance_for_discovery_target(

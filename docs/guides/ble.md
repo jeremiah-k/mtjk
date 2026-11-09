@@ -129,7 +129,9 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   `BLEConfig.CLEAR_STALE_CONNECTIONS = False` disables the behavior.
   `--ble-scan` never clears. Clearance needs the radio's address, because a
   name target must first be found by scanning, and a radio held by a
-  stranded link isn't advertising.
+  stranded link isn't advertising. If clearance cannot be confirmed retired
+  before the connect deadline, the connect is refused rather than started
+  while a late disconnect could tear down the new link.
   Process-local gates protect registered owners, and live direct `BLEClient`
   connections are tracked so clearance leaves their link alone. Raw Bleak
   connections do not participate in either protocol and can be disconnected
