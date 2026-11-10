@@ -45,12 +45,19 @@ field_metadata_pb2: ModuleType = pytest.importorskip(
     "meshtastic.protobuf.field_metadata_pb2"
 )
 
-if "sensitive" not in field_metadata_pb2.FieldMetadata.DESCRIPTOR.fields_by_name:
-    pytest.skip(
-        "field_metadata_pb2 declares no 'sensitive' option (pre-#774 schema); "
-        "this canary self-activates once the markers land",
-        allow_module_level=True,
-    )
+# Self-disarm via a collection-time skipif instead of a module-level skip:
+# importing this module outside pytest (pdoc documents the whole package,
+# including meshtastic.tests) must not raise Skipped, which would fail the
+# docs build. A skipif marker is only evaluated when pytest collects.
+_SENSITIVE_MARKERS_PRESENT = (
+    "sensitive" in field_metadata_pb2.FieldMetadata.DESCRIPTOR.fields_by_name
+)
+
+_self_disarmed = pytest.mark.skipif(
+    not _SENSITIVE_MARKERS_PRESENT,
+    reason="field_metadata_pb2 declares no 'sensitive' option (pre-#774 schema); "
+    "this canary self-activates once the markers land",
+)
 
 
 # Schema roots that contain (or are) sensitive-marked fields. Each root is
@@ -261,6 +268,7 @@ def _resolve_root_qualified(
 
 
 @pytest.mark.unit
+@_self_disarmed
 def test_sensitive_marker_paths_are_covered_or_documented() -> None:
     """Every upstream-marked path is redacted by mtjk or explicitly allowlisted."""
     marked = _marked_pref_paths()
@@ -281,6 +289,7 @@ def test_sensitive_marker_paths_are_covered_or_documented() -> None:
 
 
 @pytest.mark.unit
+@_self_disarmed
 def test_mtjk_extra_redactions_stay_deliberate() -> None:
     """Paths mtjk redacts beyond upstream markers must be exactly the extras."""
     extras = _unmarked_redacted_schema_paths()
@@ -292,6 +301,7 @@ def test_mtjk_extra_redactions_stay_deliberate() -> None:
 
 
 @pytest.mark.unit
+@_self_disarmed
 def test_sensitive_markers_stay_leaf_only() -> None:
     """Upstream marks leaf fields only; a marked container must fail loudly."""
     containers = sorted(
@@ -306,6 +316,7 @@ def test_sensitive_markers_stay_leaf_only() -> None:
 
 
 @pytest.mark.unit
+@_self_disarmed
 def test_canary_allowlist_entries_resolve_to_schema_paths() -> None:
     """Allowlist and extras entries must resolve, with statuses still accurate."""
     root_types = _root_types()
