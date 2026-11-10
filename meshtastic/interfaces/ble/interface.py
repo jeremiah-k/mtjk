@@ -677,7 +677,10 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
             raise self.BLEError(ERROR_INFLIGHT_CONNECT_FENCED.format(connection_key))
 
     def _register_attempt_inflight_fences(
-        self, tokens: dict[str, float], *keys: str | None
+        self,
+        tokens: dict[str, float],
+        *keys: str | None,
+        minimum_seconds: float | None = None,
     ) -> None:
         """Register this attempt's in-flight fence for each address key.
 
@@ -695,12 +698,17 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         *keys : str | None
             Address registry keys to fence; None or empty values are
             ignored.
+        minimum_seconds : float | None
+            Lower bound for this attempt's fence lifetime, taking account
+            of any caller-selected connect timeout.
         """
         for key in self._sorted_address_keys(*keys):
             if key in tokens:
                 continue
             try:
-                token = _register_inflight_connect_fence(key, owner=self)
+                token = _register_inflight_connect_fence(
+                    key, owner=self, minimum_seconds=minimum_seconds
+                )
             except Exception:  # noqa: BLE001 - fencing must not mask connect
                 logger.debug(
                     "Failed to register in-flight connect fence for %s",
@@ -3249,8 +3257,27 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                         # consult above and the registration are atomic
                         # against the proxy claim path's fenced check under
                         # the same per-address lock.
+                        # A caller can request a longer native connect
+                        # timeout than the default fence backstop. Scale the
+                        # attempt's fence with the effective connect budget
+                        # so it cannot expire during a legitimate long connect.
+                        effective_timeout = (
+                            connect_timeout
+                            if connect_timeout is not None
+                            else BLEConfig.CONNECTION_TIMEOUT
+                        )
+                        minimum_fence_seconds = (
+                            float(effective_timeout) * 2.0
+                            if isinstance(effective_timeout, numbers.Real)
+                            and not isinstance(effective_timeout, bool)
+                            and math.isfinite(effective_timeout)
+                            and effective_timeout > 0
+                            else None
+                        )
                         self._register_attempt_inflight_fences(
-                            fence_tokens, *reservation_keys
+                            fence_tokens,
+                            *reservation_keys,
+                            minimum_seconds=minimum_fence_seconds,
                         )
                         with self._state_lock:
                             if self._client_publish_pending:

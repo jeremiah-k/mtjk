@@ -146,10 +146,13 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   when it exits, so concurrent interface and proxy connects from other
   in-process callers are refused (regardless of clearance policy) for the
   window where the attempt holds no connected or provisional claim yet. The
-  attempting caller is exempt from its own fence, and the fence expires on
-  retirement, or on the `BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS`
-  deadline if the attempt can never retire it. Raw Bleak connections do not
-  participate in either protocol and can be disconnected by clearance from
+  attempting caller is exempt only when all active fences at the address
+  belong to that same caller; an unrelated in-flight attempt still blocks
+  it. The fence expires on retirement, or on the
+  `BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS` deadline if the attempt
+  can never retire it. Explicitly longer connect timeouts extend that
+  deadline to protect the entire requested connection budget. Raw Bleak
+  connections do not participate in either protocol and can be disconnected by clearance from
   another caller.
 
 - **Optional pairing and Linux trust helper.** `BLEInterface` can request pairing

@@ -60,7 +60,7 @@ def _registration(owner: object) -> gating._InflightConnectFenceRegistration:
     """Build a fence registration carrying ``owner``'s identity."""
     return gating._InflightConnectFenceRegistration(
         owner_ref=weakref.ref(owner),
-        owner_id=id(owner),
+        owner_strong=None,
     )
 
 
@@ -152,6 +152,32 @@ class TestInflightConnectFenceRegistry:
         assert gating._inflight_connect_fenced(_TARGET, owner=object())
         assert gating._inflight_connect_fenced(_TARGET)
 
+    def test_one_owned_registration_cannot_exempt_another_owner(self) -> None:
+        """An owner's own token must not hide a concurrent outsider's token."""
+        first_owner = _Owner()
+        second_owner = _Owner()
+        first = gating._register_inflight_connect_fence(_TARGET, owner=first_owner)
+        second = gating._register_inflight_connect_fence(_TARGET, owner=second_owner)
+        assert gating._inflight_connect_fenced(_TARGET, owner=first_owner)
+        assert gating._inflight_connect_fenced(_TARGET, owner=second_owner)
+        assert gating._inflight_connect_fenced(_TARGET, owner=_Owner())
+        gating._retire_inflight_connect_fence(_TARGET, expected_deadline=second)
+        assert not gating._inflight_connect_fenced(_TARGET, owner=first_owner)
+        assert gating._inflight_connect_fenced(_TARGET, owner=second_owner)
+        gating._retire_inflight_connect_fence(_TARGET, expected_deadline=first)
+        assert not gating._inflight_connect_fenced(_TARGET)
+
+    def test_nonweakref_owner_identity_cannot_be_reused(self) -> None:
+        """An id-recycling object cannot impersonate an unretired owner."""
+        owner = object()
+        token = gating._register_inflight_connect_fence(_TARGET, owner=owner)
+        registration = next(iter(_INFLIGHT_CONNECT_FENCES["aabbccddeeff"].values()))
+        assert registration.owner_strong is owner
+        assert not gating._inflight_connect_fenced(_TARGET, owner=owner)
+        assert gating._inflight_connect_fenced(_TARGET, owner=object())
+        gating._retire_inflight_connect_fence(_TARGET, expected_deadline=token)
+        assert not gating._inflight_connect_fenced(_TARGET)
+
     def test_unowned_consult_is_refused_while_fenced(self) -> None:
         """A consult without an owner identity is refused like any outsider."""
         gating._register_inflight_connect_fence(_TARGET, owner=_Owner())
@@ -198,6 +224,18 @@ class TestInflightConnectFenceRegistry:
         monkeypatch.setattr(BLEConfig, "INFLIGHT_CONNECT_FENCE_MAX_SECONDS", None)
         token = gating._register_inflight_connect_fence(_TARGET, owner=_Owner())
         assert token > time.monotonic()
+        assert gating._inflight_connect_fenced(_TARGET)
+
+    def test_extended_connect_budget_extends_fence_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit longer connection budget cannot outlive the fence."""
+        monkeypatch.setattr(BLEConfig, "INFLIGHT_CONNECT_FENCE_MAX_SECONDS", 10.0)
+        now = time.monotonic()
+        token = gating._register_inflight_connect_fence(
+            _TARGET, owner=_Owner(), minimum_seconds=600.0
+        )
+        assert token - now >= 600.0
         assert gating._inflight_connect_fenced(_TARGET)
 
     def test_deadline_backstop_releases_never_retired_fence(
@@ -332,6 +370,31 @@ class TestConnectAttemptFenceLifecycle:
         assert observed["fenced_for_others"] is True
         assert observed["self_exempt"] is True
 
+    def test_explicit_connect_timeout_extends_attempt_fence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A connect_timeout override survives past the normal fence budget."""
+        interface = _stub_interface(monkeypatch)
+        captured: list[float] = []
+        # Read the real function from the defining module: interface re-exports
+        # the name, and reading an explicitly non-exported attribute from a
+        # re-exporting module is a strict-mypy attr-defined error.
+        real_register = gating._register_inflight_connect_fence
+
+        def _record_register(
+            key: str, *, owner: object, minimum_seconds: float | None = None
+        ) -> float:
+            """Capture the requested minimum lifetime, then register for real."""
+            assert minimum_seconds is not None
+            captured.append(minimum_seconds)
+            return real_register(key, owner=owner, minimum_seconds=minimum_seconds)
+
+        monkeypatch.setattr(
+            ble_interface_mod, "_register_inflight_connect_fence", _record_register
+        )
+        interface.connect(_TARGET, connect_timeout=300.0)
+        assert captured == [600.0]
+
     def test_success_path_retires_fence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A succeeded connect retires its fence at exit."""
         interface = _stub_interface(monkeypatch)
@@ -423,6 +486,16 @@ class TestInterfacePathRefusal:
         with pytest.raises(BLEInterface.BLEError, match="already in flight"):
             interface.connect(_TARGET)
 
+    def test_connect_refuses_other_registration_despite_own_fence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Own registration does not bypass another interface's live fence."""
+        interface = _stub_interface(monkeypatch)
+        gating._register_inflight_connect_fence(_TARGET, owner=interface)
+        gating._register_inflight_connect_fence(_TARGET, owner=_Owner())
+        with pytest.raises(BLEInterface.BLEError, match="already in flight"):
+            interface.connect(_TARGET)
+
     def test_connect_allowed_after_fence_retires(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -470,6 +543,13 @@ class TestProxyClaimPathRefusal:
             gating._clear_connecting(_TARGET, owner=owner)
             gating._retire_inflight_connect_fence(_TARGET, expected_deadline=token)
 
+    def test_claim_refuses_even_if_owner_holds_another_fence(self) -> None:
+        """A proxy caller cannot bypass a different direct attempt's fence."""
+        owner = object()
+        gating._register_inflight_connect_fence(_TARGET, owner=owner)
+        gating._register_inflight_connect_fence(_TARGET, owner=_Owner())
+        assert channels._try_claim_ble_address(_TARGET, owner) is False
+
     def test_claim_allowed_after_fence_retires(self) -> None:
         """The proxy claim succeeds once the fence retires."""
         token = gating._register_inflight_connect_fence(_TARGET, owner=_Owner())
@@ -513,18 +593,20 @@ class TestRacingSecondCaller:
             name="in-flight-connect-attempt",
         )
         attempt.start()
-        assert entered_finalize.wait(timeout=5)
-
-        # In flight: the fence refuses a proxy claim from another caller...
-        assert gating._inflight_connect_fenced(_TARGET)
-        assert channels._try_claim_ble_address(_TARGET, object()) is False
-        # ...and a second interface connect racing the same address.
-        racer = _stub_interface(monkeypatch)
-        with pytest.raises(BLEInterface.BLEError, match="already in flight"):
-            racer.connect(_TARGET)
-
-        release_finalize.set()
-        attempt.join(timeout=5)
+        try:
+            assert entered_finalize.wait(timeout=5)
+            # In flight: the fence refuses a proxy claim from another caller...
+            assert gating._inflight_connect_fenced(_TARGET)
+            assert channels._try_claim_ble_address(_TARGET, object()) is False
+            # ...and a second interface connect racing the same address.
+            racer = _stub_interface(monkeypatch)
+            with pytest.raises(BLEInterface.BLEError, match="already in flight"):
+                racer.connect(_TARGET)
+        finally:
+            # Release the worker even if a race assertion fails, so this test
+            # cannot leak a blocked non-daemon thread into later tests.
+            release_finalize.set()
+            attempt.join(timeout=5)
         assert not attempt.is_alive()
         assert result["client"] is not None
 

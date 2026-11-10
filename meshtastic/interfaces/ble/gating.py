@@ -49,14 +49,14 @@ logger = logging.getLogger("meshtastic.ble")
 class _InflightConnectFenceRegistration:
     """Owner identity attached to one in-flight direct connect's fence.
 
-    ``owner_ref``/``owner_id`` mirror the gate registry's owner identity
-    mechanism (weak reference when possible, ``id()`` fallback otherwise) so
-    the caller performing the in-flight connect stays exempt from its own
-    fence while every other caller is refused.
+    ``owner_ref`` tracks weak-referenceable owners without extending their
+    lifetime. ``owner_strong`` retains a non-weak-referenceable owner until
+    retirement or expiry, so a recycled ``id()`` can never grant a different
+    caller an exemption. Only the identical live owner is exempt.
     """
 
     owner_ref: weakref.ReferenceType[Any] | None
-    owner_id: int | None
+    owner_strong: object | None
 
 
 class _BLEAddressRegistry:
@@ -328,7 +328,10 @@ def _interrupted_cleanup_fenced(addr: str | None) -> bool:
 
 
 def _register_inflight_connect_fence(
-    addr: str | None, owner: object | None = None
+    addr: str | None,
+    owner: object | None = None,
+    *,
+    minimum_seconds: float | None = None,
 ) -> float:
     """Fence an address while a direct connect attempt to it is in flight.
 
@@ -346,10 +349,10 @@ def _register_inflight_connect_fence(
     The deadline backstop is a safety net for paths that never reach the
     ``try/finally`` retirement, such as the owning thread dying mid-connect.
     It reads :data:`BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS` at call
-    time: twice the ``CONNECTION_TIMEOUT`` client-connect budget, which
-    comfortably covers a normal attempt (clearance, connect, notification
-    setup, gate finalization are all bounded well below it) while still
-    releasing an address whose owner can never retire its fence.
+    time and extends the bound when the caller has a larger effective
+    connection budget. The usual default is twice ``CONNECTION_TIMEOUT``;
+    an explicit longer connection timeout must not leave a live attempt
+    unprotected merely because the default deadline expired.
 
     Parameters
     ----------
@@ -359,6 +362,10 @@ def _register_inflight_connect_fence(
     owner : object | None
         Caller performing the in-flight connect; identity is matched by the
         consult for the per-caller exemption. (Default value = None)
+    minimum_seconds : float | None
+        Optional lower bound on the fence lifetime. The caller uses twice
+        its effective connect timeout so an extended connect budget cannot
+        outlive the default fence and admit another connection.
 
     Returns
     -------
@@ -381,6 +388,13 @@ def _register_inflight_connect_fence(
             max_seconds,
         )
         max_seconds = CONNECTION_TIMEOUT * 2.0
+    if minimum_seconds is not None and (
+        isinstance(minimum_seconds, (int, float))
+        and not isinstance(minimum_seconds, bool)
+        and math.isfinite(minimum_seconds)
+        and minimum_seconds > 0
+    ):
+        max_seconds = max(max_seconds, minimum_seconds)
     deadline = time.monotonic() + max_seconds
     with _REGISTRY_LOCK:
         pending = _INFLIGHT_CONNECT_FENCES.setdefault(key, {})
@@ -388,9 +402,10 @@ def _register_inflight_connect_fence(
         # coarse clock, successive registrations must have distinct tokens.
         if pending:
             deadline = max(deadline, math.nextafter(max(pending), math.inf))
+        owner_ref = _owner_ref(owner)
         pending[deadline] = _InflightConnectFenceRegistration(
-            owner_ref=_owner_ref(owner),
-            owner_id=id(owner) if owner is not None else None,
+            owner_ref=owner_ref,
+            owner_strong=owner if owner_ref is None else None,
         )
     logger.debug(
         "Fenced %s while a direct connect attempt is in flight (deadline %.1fs)",
@@ -440,8 +455,8 @@ def _inflight_connect_fenced(addr: str | None, owner: object | None = None) -> b
     stay fenced permanently even if its attempt never retired (the deadline
     backstop). The caller that registered the fence — matched by the same
     owner-identity mechanism as the connecting/connected claims (object
-    identity, or recorded ``id()`` when no weak reference exists) — is
-    exempt from its own fence.
+    identity, retaining non-weak-referenceable owners until retirement) —
+    is exempt only when it owns every active registration.
 
     Parameters
     ----------
@@ -471,20 +486,20 @@ def _inflight_connect_fenced(addr: str | None, owner: object | None = None) -> b
         if not pending:
             _INFLIGHT_CONNECT_FENCES.pop(key, None)
             return False
-        if owner is not None:
-            for registration in pending.values():
-                current_owner = (
-                    registration.owner_ref()
-                    if registration.owner_ref is not None
-                    else None
-                )
-                if current_owner is owner or (
-                    registration.owner_ref is None
-                    and registration.owner_id is not None
-                    and registration.owner_id == id(owner)
-                ):
-                    return False
-        return True
+        if owner is None:
+            return True
+        # An owner is exempt only if it owns EVERY active registration.
+        # Another attempt must remain fenced even if this caller also has
+        # its own registration for the same address.
+        for registration in pending.values():
+            current_owner = (
+                registration.owner_ref()
+                if registration.owner_ref is not None
+                else registration.owner_strong
+            )
+            if current_owner is not owner:
+                return True
+        return False
 
 
 def _clear_all_registries() -> None:
