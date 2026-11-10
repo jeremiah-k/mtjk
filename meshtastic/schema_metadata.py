@@ -65,10 +65,12 @@ class FieldMetadata:
     max_value: float | None = None
     unit: str | None = None
     deprecated: bool | None = None
-    sensitive: bool | None = None
     label: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] = ()
+    # Declared last so established positional construction order (through
+    # keywords) is unchanged for existing callers.
+    sensitive: bool | None = None
 
     @property
     def hasBounds(self) -> bool:
@@ -108,6 +110,8 @@ def getFieldMetadata(path: str) -> FieldMetadata | None:
         (for example ``"lora.hop_limit"`` or ``"ambient_lighting.red"``).
         camelCase segments are accepted and normalized. The section is
         resolved against both the ``config`` and ``module_config`` roots.
+        Non-preference descriptors (for example the device profile) are
+        outside this surface by design.
 
     Returns
     -------
