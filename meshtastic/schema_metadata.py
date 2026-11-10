@@ -49,6 +49,8 @@ class FieldMetadata:
         Declared unit of measurement, when present.
     deprecated : bool | None
         Whether the field is marked deprecated in the schema.
+    sensitive : bool | None
+        Whether the schema marks the field as credential-bearing.
     label : str | None
         Human-readable short label, when present.
     description : str | None
@@ -66,6 +68,9 @@ class FieldMetadata:
     label: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] = ()
+    # Declared last so established positional construction order (through
+    # keywords) is unchanged for existing callers.
+    sensitive: bool | None = None
 
     @property
     def hasBounds(self) -> bool:
@@ -105,6 +110,8 @@ def getFieldMetadata(path: str) -> FieldMetadata | None:
         (for example ``"lora.hop_limit"`` or ``"ambient_lighting.red"``).
         camelCase segments are accepted and normalized. The section is
         resolved against both the ``config`` and ``module_config`` roots.
+        Non-preference descriptors (for example the device profile) are
+        outside this surface by design.
 
     Returns
     -------
@@ -293,6 +300,7 @@ def _normalize_metadata(
             if standard_deprecated
             else (metadata.deprecated if metadata.HasField("deprecated") else None)
         ),
+        sensitive=metadata.sensitive if metadata.HasField("sensitive") else None,
         label=metadata.label if metadata.HasField("label") else None,
         description=(
             metadata.description if metadata.HasField("description") else None

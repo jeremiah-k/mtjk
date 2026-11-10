@@ -51,6 +51,66 @@ def test_describe_field_prints_diy_flag(capsys: pytest.CaptureFixture[str]) -> N
 
 
 @pytest.mark.unit
+def test_describe_field_prints_sensitive_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Credential-bearing fields expose the sensitive flag; public material does not."""
+    assert config_io._describe_config_field(
+        "security.private_key",
+        normalize_pref_name=preference_runtime.normalize_pref_name,
+        display_pref_name=lambda value: value,
+        type_label=preference_runtime.protobuf_field_type_label,
+        bitfield_enums=preference_runtime.BITFIELD_ENUMS,
+    )
+
+    out, _ = capsys.readouterr()
+    assert "Flags: sensitive" in out
+
+    assert config_io._describe_config_field(
+        "security.public_key",
+        normalize_pref_name=preference_runtime.normalize_pref_name,
+        display_pref_name=lambda value: value,
+        type_label=preference_runtime.protobuf_field_type_label,
+        bitfield_enums=preference_runtime.BITFIELD_ENUMS,
+    )
+
+    out, _ = capsys.readouterr()
+    assert "sensitive" not in out
+
+
+@pytest.mark.unit
+def test_describe_field_json_marks_sensitive_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON documents carry the sensitive flag only for marked fields."""
+    import json
+
+    assert config_io._describe_config_field(
+        "security.private_key",
+        normalize_pref_name=preference_runtime.normalize_pref_name,
+        display_pref_name=lambda value: value,
+        type_label=preference_runtime.protobuf_field_type_label,
+        bitfield_enums=preference_runtime.BITFIELD_ENUMS,
+        as_json=True,
+    )
+
+    document = json.loads(capsys.readouterr().out)
+    assert document["sensitive"] is True
+
+    assert config_io._describe_config_field(
+        "security.public_key",
+        normalize_pref_name=preference_runtime.normalize_pref_name,
+        display_pref_name=lambda value: value,
+        type_label=preference_runtime.protobuf_field_type_label,
+        bitfield_enums=preference_runtime.BITFIELD_ENUMS,
+        as_json=True,
+    )
+
+    document = json.loads(capsys.readouterr().out)
+    assert "sensitive" not in document
+
+
+@pytest.mark.unit
 def test_describe_field_prints_enum_value_labels_and_keywords(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -71,7 +71,7 @@ def _limits_text(document: dict[str, Any], field: FieldDescriptor) -> str:
 
 
 def _flags_text(document: dict[str, Any]) -> str:
-    """Render access and deprecation flags as table text."""
+    """Render access, deprecation, and sensitivity flags as table text."""
     parts = []
     if document.get("diy_only"):
         parts.append("DIY")
@@ -79,6 +79,8 @@ def _flags_text(document: dict[str, Any]) -> str:
         parts.append("admin")
     if document.get("deprecated"):
         parts.append("deprecated")
+    if document.get("sensitive"):
+        parts.append("sensitive")
     return ", ".join(parts)
 
 

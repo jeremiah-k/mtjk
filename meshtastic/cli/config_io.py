@@ -223,6 +223,8 @@ def _metadata_flags(metadata: Any) -> tuple[str, ...]:
         flags.append("admin only")
     if metadata.deprecated:
         flags.append("deprecated")
+    if metadata.sensitive:
+        flags.append("sensitive")
     return tuple(flags)
 
 
@@ -276,7 +278,14 @@ def _field_json_document(
             value = getattr(metadata, key)
             if value is not None:
                 document[key] = value
-        for key in ("min_value", "max_value", "diy_only", "admin_only", "deprecated"):
+        for key in (
+            "min_value",
+            "max_value",
+            "diy_only",
+            "admin_only",
+            "deprecated",
+            "sensitive",
+        ):
             value = getattr(metadata, key)
             if value is not None:
                 document[key] = value

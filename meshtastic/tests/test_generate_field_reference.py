@@ -54,6 +54,8 @@ def test_reference_renders_bounds_limits_and_flags() -> None:
         line for line in reference.splitlines() if "serial_enabled" in line
     ][0]
     assert "deprecated" in deprecated_row
+    sensitive_row = [line for line in reference.splitlines() if "wifi_psk" in line][0]
+    assert "sensitive" in sensitive_row
     ignore_row = [line for line in reference.splitlines() if "ignore_incoming" in line][
         0
     ]
