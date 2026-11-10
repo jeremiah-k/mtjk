@@ -334,10 +334,46 @@ def test_set_pref_redacts_network_mqtt_and_pin_credentials(
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_set_pref_redacts_device_ui_pin_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Set echoes must not disclose the device UI PIN on roots carrying the section."""
+    config = config_pb2.Config()
+
+    assert setPref(config, "device_ui.pin_code", "654321") is True
+
+    out, err = capsys.readouterr()
+    assert "Set device_ui.pin_code to <redacted>" in out
+    assert "654321" not in out
+    assert config.device_ui.pin_code == 654321
+    assert err == ""
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("reset_mt_config")
+def test_set_pref_redacts_device_ui_pin_code_in_validation_rejections(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validation rejections for the device UI PIN stay redacted."""
+    config = config_pb2.Config()
+
+    assert setPref(config, "device_ui.pin_code", "x" * 64) is False
+
+    out, err = capsys.readouterr()
+    assert "<redacted>" in out
+    assert "x" * 64 not in out
+    assert err == ""
+
+
+@pytest.mark.unit
 def test_secret_redaction_is_scoped_to_sensitive_preference_paths() -> None:
     assert main_module._redact_pref_value("mqtt.username", "alice") == "<redacted>"
     assert main_module._redact_pref_value("unrelated.username", "alice") == "alice"
     assert main_module._redact_pref_value("unrelated.password", "visible") == "visible"
+    assert (
+        main_module._redact_pref_value("device_ui.pin_code", "654321") == "<redacted>"
+    )
 
 
 @pytest.mark.unit

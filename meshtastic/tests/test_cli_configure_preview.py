@@ -737,6 +737,15 @@ def test_preview_configure_redacts_secret_section_values(
 
 
 @pytest.mark.unit
+def test_preview_render_redacts_device_ui_pin_code() -> None:
+    """Preview rendering redacts the device UI PIN through the shared classifier."""
+    assert (
+        config_preview.render_preview_value("device_ui.pin_code", None, 654321)
+        == "<redacted>"
+    )
+
+
+@pytest.mark.unit
 def test_preview_configure_validates_against_chained_snapshot_with_live_current(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
