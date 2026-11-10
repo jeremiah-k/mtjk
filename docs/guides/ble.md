@@ -140,9 +140,20 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   cleanup wait expires, an address-level fence refuses new interface and
   proxy connects to that address until the pending disconnect retires or a
   bounded deadline (`BLEConfig.INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS`)
-  passes, so the new link cannot race the straggler disconnect. Raw Bleak
-  connections do not participate in either protocol and can be disconnected
-  by clearance from another caller.
+  passes, so the new link cannot race the straggler disconnect. The same
+  fencing covers the whole window of an in-flight direct connect: the
+  attempt registers an address-level fence when it starts and retires it
+  when it exits, so concurrent interface and proxy connects from other
+  in-process callers are refused (regardless of clearance policy) for the
+  window where the attempt holds no connected or provisional claim yet. The
+  attempting caller is exempt only when all active fences at the address
+  belong to that same caller; an unrelated in-flight attempt still blocks
+  it. The fence expires on retirement, or on the
+  `BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS` deadline if the attempt
+  can never retire it. Explicitly longer connect timeouts extend that
+  deadline to protect the entire requested connection budget. Raw Bleak
+  connections do not participate in either protocol and can be disconnected by clearance from
+  another caller.
 
 - **Optional pairing and Linux trust helper.** `BLEInterface` can request pairing
   during connect (`pair_on_connect=True` or `connect(pair=True)`), and also

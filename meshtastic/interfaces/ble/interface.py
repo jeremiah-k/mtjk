@@ -86,6 +86,7 @@ from meshtastic.interfaces.ble.constants import (
     ERROR_ADDRESS_RESOLUTION_FAILED,
     ERROR_CONNECTION_FAILED,
     ERROR_CONNECTION_SUPPRESSED,
+    ERROR_INFLIGHT_CONNECT_FENCED,
     ERROR_INTERFACE_CLOSING,
     ERROR_INTERRUPTED_CLEANUP_FENCED,
     ERROR_MANAGEMENT_CONNECTING,
@@ -128,12 +129,15 @@ from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_connecting,
     _clear_connecting_for_owner,
+    _inflight_connect_fenced,
     _interrupted_cleanup_fenced,
     _is_currently_connected_elsewhere,
     _live_ble_client_owns_address,
     _mark_connected,
     _mark_connecting,
     _mark_disconnected,
+    _register_inflight_connect_fence,
+    _retire_inflight_connect_fence,
 )
 from meshtastic.interfaces.ble.lifecycle_primitives import _LifecycleStateAccess
 from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleController
@@ -643,6 +647,102 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         """Clear provisional address claims for an in-flight connect result."""
         for key in self._sorted_address_keys(*keys):
             _clear_connecting(key, owner=self)
+
+    def _raise_if_inflight_connect_fenced(self, connection_key: str | None) -> None:
+        """Raise BLEError when another caller's in-flight fence covers this address.
+
+        While a direct connect attempt is in flight it registers an
+        address-level fence so concurrent connects from other in-process
+        callers cannot race a link that holds no connected or provisional
+        claim yet. This interface's own fence is exempt (per-caller
+        exemption), so retries and auto-reconnect attempts by the same
+        interface are never refused by the fence it registered itself. Like
+        the interrupted-cleanup fence check this runs regardless of
+        clearance policy: the in-flight attempt is this process's own work.
+
+        Parameters
+        ----------
+        connection_key : str | None
+            Address registry key to check; None (discovery mode) is a no-op.
+
+        Raises
+        ------
+        BLEInterface.BLEError
+            If the address is fenced by a different caller's in-flight
+            direct connect.
+        """
+        if connection_key is None:
+            return
+        if _inflight_connect_fenced(connection_key, owner=self):
+            raise self.BLEError(ERROR_INFLIGHT_CONNECT_FENCED.format(connection_key))
+
+    def _register_attempt_inflight_fences(
+        self,
+        tokens: dict[str, float],
+        *keys: str | None,
+        minimum_seconds: float | None = None,
+    ) -> None:
+        """Register this attempt's in-flight fence for each address key.
+
+        Registration is best-effort and must never mask the connect it
+        guards, so any registration failure is logged and skipped. Keys that
+        already carry this attempt's token are skipped, keeping repeated
+        registrations idempotent; callers retire every recorded token via
+        :meth:`_retire_attempt_inflight_fences` when the attempt exits.
+
+        Parameters
+        ----------
+        tokens : dict[str, float]
+            Attempt-local retirement tokens keyed by address registry key;
+            updated in place.
+        *keys : str | None
+            Address registry keys to fence; None or empty values are
+            ignored.
+        minimum_seconds : float | None
+            Lower bound for this attempt's fence lifetime, taking account
+            of any caller-selected connect timeout.
+        """
+        for key in self._sorted_address_keys(*keys):
+            if key in tokens:
+                continue
+            try:
+                token = _register_inflight_connect_fence(
+                    key, owner=self, minimum_seconds=minimum_seconds
+                )
+            except Exception:  # noqa: BLE001 - fencing must not mask connect
+                logger.debug(
+                    "Failed to register in-flight connect fence for %s",
+                    key,
+                    exc_info=True,
+                )
+                continue
+            if token:
+                tokens[key] = token
+
+    def _retire_attempt_inflight_fences(self, tokens: dict[str, float]) -> None:
+        """Retire every in-flight fence this connect attempt registered.
+
+        Best-effort like registration: a retirement failure is logged and
+        the token dropped, so the deadline backstop remains the safety net
+        and the connect's exit path never raises through this helper.
+
+        Parameters
+        ----------
+        tokens : dict[str, float]
+            Attempt-local retirement tokens keyed by address registry key;
+            cleared as each token is retired.
+        """
+        for key, token in list(tokens.items()):
+            try:
+                _retire_inflight_connect_fence(key, expected_deadline=token)
+            except Exception:  # noqa: BLE001 - retirement is best effort
+                logger.debug(
+                    "Failed to retire in-flight connect fence for %s",
+                    key,
+                    exc_info=True,
+                )
+            finally:
+                tokens.pop(key, None)
 
     def _mark_address_keys_disconnected(self, *keys: str | None) -> None:
         """Mark one or more address registry keys as disconnected.
@@ -3026,6 +3126,10 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
         connected_device_key: str | None = None
         connection_alias_key: str | None = None
         provisional_keys: list[str] = []
+        # Attempt-local in-flight fence retirement tokens keyed by address
+        # registry key. Kept local (not instance state) so overlapping
+        # connect calls can never retire each other's fences.
+        fence_tokens: dict[str, float] = {}
 
         try:
             management_lock = self._management_lock
@@ -3143,6 +3247,38 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                             # still be pending; refuse while fenced, whatever
                             # the clearance policy says.
                             self._raise_if_interrupted_cleanup_fenced(reservation_key)
+                        for reservation_key in reservation_keys:
+                            # Another caller's in-flight direct connect to
+                            # this address refuses this attempt; this
+                            # attempt's own fence (if any) does not.
+                            self._raise_if_inflight_connect_fenced(reservation_key)
+                        # Register this attempt's own in-flight fence while
+                        # the per-address locks are still held, so the
+                        # consult above and the registration are atomic
+                        # against the proxy claim path's fenced check under
+                        # the same per-address lock.
+                        # A caller can request a longer native connect
+                        # timeout than the default fence backstop. Scale the
+                        # attempt's fence with the effective connect budget
+                        # so it cannot expire during a legitimate long connect.
+                        effective_timeout = (
+                            connect_timeout
+                            if connect_timeout is not None
+                            else BLEConfig.CONNECTION_TIMEOUT
+                        )
+                        minimum_fence_seconds = (
+                            float(effective_timeout) * 2.0
+                            if isinstance(effective_timeout, numbers.Real)
+                            and not isinstance(effective_timeout, bool)
+                            and math.isfinite(effective_timeout)
+                            and effective_timeout > 0
+                            else None
+                        )
+                        self._register_attempt_inflight_fences(
+                            fence_tokens,
+                            *reservation_keys,
+                            minimum_seconds=minimum_fence_seconds,
+                        )
                         with self._state_lock:
                             if self._client_publish_pending:
                                 raise self.BLEError(ERROR_MANAGEMENT_CONNECTING)
@@ -3195,6 +3331,10 @@ class BLEInterface(  # pylint: disable=too-many-instance-attributes
                 return connected_client
         finally:
             self._clear_address_keys_connecting(*provisional_keys)
+            # Retire this attempt's in-flight fences on every exit path
+            # (success, failure, exception). Retirement is by token, so a
+            # newer attempt's fence can never be released here.
+            self._retire_attempt_inflight_fences(fence_tokens)
 
     def _handle_read_loop_disconnect(
         self, error_message: str, previous_client: BLEClient

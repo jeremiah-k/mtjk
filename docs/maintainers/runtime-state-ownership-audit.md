@@ -363,5 +363,30 @@ re-raises the caller's original exception. A worker that outlives the join
 keeps the meter and writer open and the caller receives
 `_PowerLoggerShutdownError`.
 
+Follow-up (2026-11-09): in-flight direct-connect fence (the documented
+deferred follow-up to #772). A direct `BLEInterface.connect()` attempt now
+registers an address-level fence in the shared gate registry when its
+checks pass and retires it in a `finally` on every exit (success, failure,
+exception), closing the window where an in-flight attempt holds neither a
+connected nor a provisional claim and a concurrent connect could race it.
+The registration carries the attempt's caller identity using the same
+owner mechanism as the connecting/connected claims (weak reference with an
+`id()` fallback), so the attempting caller is exempt from its own fence —
+retries and auto-reconnect (which re-enters `connect()` on the same
+interface) never self-fence. Registration is best-effort and idempotent,
+and every registration keeps its own retirement token (a distinct
+monotonic deadline), so a newer attempt refreshing the fence is not
+released by an older attempt's exit. Both #772 consult sites refuse other
+callers while the fence is active regardless of clearance policy:
+`BLEInterface.connect()` raises `BLEError` next to its duplicate-connect
+checks, and the proxy claim path refuses under the per-address lock with a
+fence-specific error. The deadline backstop
+(`BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS`, twice the
+`CONNECTION_TIMEOUT` client-connect budget, read at call time) is a safety
+net for paths that never reach the `finally`, such as owning-thread death;
+expired registrations are pruned lazily on consult. The fence is distinct
+from the provisional connecting claims (`_mark_connecting`), which remain
+positive per-address ownership records.
+
 The follow-up regressions are subject to the same CI gates as the fixes
 above and to the integration gaps listed in **Not covered by unit tests**.

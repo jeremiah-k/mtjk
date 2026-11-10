@@ -25,6 +25,7 @@ Context Manager Usage:
     acquire it; callers must explicitly acquire it with `with lock:`.
 """
 
+import dataclasses
 import logging
 import math
 import time
@@ -34,10 +35,28 @@ from contextlib import contextmanager
 from threading import Lock, RLock
 from typing import Any
 
-from meshtastic.interfaces.ble.constants import DISCONNECT_TIMEOUT_SECONDS, BLEConfig
+from meshtastic.interfaces.ble.constants import (
+    CONNECTION_TIMEOUT,
+    DISCONNECT_TIMEOUT_SECONDS,
+    BLEConfig,
+)
 from meshtastic.interfaces.ble.utils import sanitize_address
 
 logger = logging.getLogger("meshtastic.ble")
+
+
+@dataclasses.dataclass(frozen=True)
+class _InflightConnectFenceRegistration:
+    """Owner identity attached to one in-flight direct connect's fence.
+
+    ``owner_ref`` tracks weak-referenceable owners without extending their
+    lifetime. ``owner_strong`` retains a non-weak-referenceable owner until
+    retirement or expiry, so a recycled ``id()`` can never grant a different
+    caller an exemption. Only the identical live owner is exempt.
+    """
+
+    owner_ref: weakref.ReferenceType[Any] | None
+    owner_strong: object | None
 
 
 class _BLEAddressRegistry:
@@ -73,6 +92,14 @@ class _BLEAddressRegistry:
         # Every overrunning cleanup has an independent retirement. A newer
         # cleanup finishing must not release an older still-running disconnect.
         self.interrupted_cleanup_pending: dict[str, set[float]] = {}
+        # Addresses fenced while a direct connect attempt is in flight in
+        # this process. Maps normalized address key to that attempt's
+        # registrations keyed by retirement token (a distinct monotonic
+        # deadline); each registration carries its caller's owner identity
+        # for the per-caller exemption.
+        self.inflight_connect_fences: dict[
+            str, dict[float, _InflightConnectFenceRegistration]
+        ] = {}
 
     def clear(self) -> None:
         """Clear every registry collection while holding the owner lock."""
@@ -89,6 +116,7 @@ class _BLEAddressRegistry:
             self.lock_holders.clear()
             self.interrupted_cleanup_fences.clear()
             self.interrupted_cleanup_pending.clear()
+            self.inflight_connect_fences.clear()
 
 
 _DEFAULT_REGISTRY = _BLEAddressRegistry()
@@ -108,6 +136,7 @@ _CONNECTING_MARKED_AT = _DEFAULT_REGISTRY.connecting_marked_at
 _LOCK_HOLDERS = _DEFAULT_REGISTRY.lock_holders
 _INTERRUPTED_CLEANUP_FENCES = _DEFAULT_REGISTRY.interrupted_cleanup_fences
 _INTERRUPTED_CLEANUP_PENDING = _DEFAULT_REGISTRY.interrupted_cleanup_pending
+_INFLIGHT_CONNECT_FENCES = _DEFAULT_REGISTRY.inflight_connect_fences
 
 # BLEClient instances register themselves here so stale-link clearance can
 # recognize a direct client's live link. Entries are weak: a client that goes
@@ -296,6 +325,181 @@ def _interrupted_cleanup_fenced(addr: str | None) -> bool:
             logger.debug("Interrupted-cleanup fence for %s expired by deadline", key)
             return False
         return True
+
+
+def _register_inflight_connect_fence(
+    addr: str | None,
+    owner: object | None = None,
+    *,
+    minimum_seconds: float | None = None,
+) -> float:
+    """Fence an address while a direct connect attempt to it is in flight.
+
+    A direct connect attempt registers this fence when it starts and retires
+    it when it exits, so concurrent connects to the same address from other
+    in-process callers are refused for the whole window where the in-flight
+    attempt holds no connected or provisional claim yet (before
+    ``_mark_connecting`` and after the per-address lock is released). The
+    registering caller records its owner identity so its own later consults
+    are exempt (per-caller exemption); every other caller is refused.
+    Registration is idempotent per address and refreshes the deadline, and
+    every registration keeps its own retirement token, so a newer attempt
+    refreshing the fence is never released by an older attempt's exit.
+
+    The deadline backstop is a safety net for paths that never reach the
+    ``try/finally`` retirement, such as the owning thread dying mid-connect.
+    It reads :data:`BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS` at call
+    time and extends the bound when the caller has a larger effective
+    connection budget. The usual default is twice ``CONNECTION_TIMEOUT``;
+    an explicit longer connection timeout must not leave a live attempt
+    unprotected merely because the default deadline expired.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address to fence; normalized via :func:`_addr_key`. None or empty
+        is a no-op that returns ``0.0``.
+    owner : object | None
+        Caller performing the in-flight connect; identity is matched by the
+        consult for the per-caller exemption. (Default value = None)
+    minimum_seconds : float | None
+        Optional lower bound on the fence lifetime. The caller uses twice
+        its effective connect timeout so an extended connect budget cannot
+        outlive the default fence and admit another connection.
+
+    Returns
+    -------
+    float
+        The retirement token: the monotonic deadline until which the fence
+        refuses other callers, or ``0.0`` when the address is unusable.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return 0.0
+    max_seconds = BLEConfig.INFLIGHT_CONNECT_FENCE_MAX_SECONDS
+    if (
+        not isinstance(max_seconds, (int, float))
+        or isinstance(max_seconds, bool)
+        or not math.isfinite(max_seconds)
+        or max_seconds <= 0
+    ):
+        logger.warning(
+            "Invalid in-flight connect fence timeout %r; using the safe default",
+            max_seconds,
+        )
+        max_seconds = CONNECTION_TIMEOUT * 2.0
+    if minimum_seconds is not None and (
+        isinstance(minimum_seconds, (int, float))
+        and not isinstance(minimum_seconds, bool)
+        and math.isfinite(minimum_seconds)
+        and minimum_seconds > 0
+    ):
+        max_seconds = max(max_seconds, minimum_seconds)
+    deadline = time.monotonic() + max_seconds
+    with _REGISTRY_LOCK:
+        pending = _INFLIGHT_CONNECT_FENCES.setdefault(key, {})
+        # Treat the deadline as this attempt's retirement token. Even on a
+        # coarse clock, successive registrations must have distinct tokens.
+        if pending:
+            deadline = max(deadline, math.nextafter(max(pending), math.inf))
+        owner_ref = _owner_ref(owner)
+        pending[deadline] = _InflightConnectFenceRegistration(
+            owner_ref=owner_ref,
+            owner_strong=owner if owner_ref is None else None,
+        )
+    logger.debug(
+        "Fenced %s while a direct connect attempt is in flight (deadline %.1fs)",
+        key,
+        deadline,
+    )
+    return deadline
+
+
+def _retire_inflight_connect_fence(addr: str | None, expected_deadline: float) -> None:
+    """Release one in-flight direct connect registration by its token.
+
+    Only the registration carrying ``expected_deadline`` is retired; a newer
+    attempt's registration keeps the address fenced. This mirrors the
+    per-caller retirement-token pattern of the interrupted-cleanup fence.
+    Unlike that fence there is deliberately no retire-all form: an in-flight
+    attempt must never be able to release another attempt's fence.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address whose fence should be released; normalized via
+        :func:`_addr_key`. None or empty is a no-op.
+    expected_deadline : float
+        Retirement token returned by the attempt's own registration.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return
+    with _REGISTRY_LOCK:
+        pending = _INFLIGHT_CONNECT_FENCES.get(key)
+        if not pending or expected_deadline not in pending:
+            return
+        pending.pop(expected_deadline)
+        if not pending:
+            _INFLIGHT_CONNECT_FENCES.pop(key, None)
+    logger.debug(
+        "Released in-flight connect fence for %s (connect attempt exited)",
+        key,
+    )
+
+
+def _inflight_connect_fenced(addr: str | None, owner: object | None = None) -> bool:
+    """Return whether an in-flight direct connect fence refuses ``owner``.
+
+    An expired registration is pruned lazily here, so an address can never
+    stay fenced permanently even if its attempt never retired (the deadline
+    backstop). The caller that registered the fence — matched by the same
+    owner-identity mechanism as the connecting/connected claims (object
+    identity, retaining non-weak-referenceable owners until retirement) —
+    is exempt only when it owns every active registration.
+
+    Parameters
+    ----------
+    addr : str | None
+        Address to check; normalized via :func:`_addr_key`.
+    owner : object | None
+        Caller requesting the check; exempt when it matches any pending
+        registration's owner. (Default value = None)
+
+    Returns
+    -------
+    bool
+        True when a non-expired fence from a different caller refuses a new
+        connect to the address.
+    """
+    key = _addr_key(addr)
+    if key is None:
+        return False
+    with _REGISTRY_LOCK:
+        pending = _INFLIGHT_CONNECT_FENCES.get(key)
+        if not pending:
+            return False
+        now = time.monotonic()
+        for token in [t for t in pending if now >= t]:
+            pending.pop(token)
+            logger.debug("In-flight connect fence for %s expired by deadline", key)
+        if not pending:
+            _INFLIGHT_CONNECT_FENCES.pop(key, None)
+            return False
+        if owner is None:
+            return True
+        # An owner is exempt only if it owns EVERY active registration.
+        # Another attempt must remain fenced even if this caller also has
+        # its own registration for the same address.
+        for registration in pending.values():
+            current_owner = (
+                registration.owner_ref()
+                if registration.owner_ref is not None
+                else registration.owner_strong
+            )
+            if current_owner is not owner:
+                return True
+        return False
 
 
 def _clear_all_registries() -> None:
