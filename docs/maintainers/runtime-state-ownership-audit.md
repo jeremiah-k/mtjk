@@ -347,5 +347,21 @@ offset-read review finding; neither branch received modifications in this
 follow-up. Both still require backend and hardware integration validation
 before any merge decision.
 
+Follow-up (2026-11-09): #690 and #708 merged on 2026-11-07 (commits
+7790c314b and b1cc29004). Their behavior is documented in the
+[interface proxy](../guides/interface-proxy.md) and
+[transport selection](../guides/transport-selection.md) guides.
+
+Follow-up (2026-11-09): #773 (PowerLogger join window and teardown
+ownership) merged 2026-11-09 (commit ff0c1e312). PowerLogger.close() joins
+the sampler with a bounded window that covers only the sampling loop's exit;
+dependency teardown (meter close, Arrow flush, Feather conversion) runs on
+the caller thread after the worker is reaped. An interrupted join hands
+cleanup ownership to the worker when it is still sampling, or finishes the
+cleanup on the caller thread when the loop has already exited, and
+re-raises the caller's original exception. A worker that outlives the join
+keeps the meter and writer open and the caller receives
+`_PowerLoggerShutdownError`.
+
 The follow-up regressions are subject to the same CI gates as the fixes
 above and to the integration gaps listed in **Not covered by unit tests**.

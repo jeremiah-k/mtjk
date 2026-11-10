@@ -121,7 +121,9 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 - **Stale BlueZ link clearance on explicit connects (Linux).** An explicit
   connect first asks BlueZ to disconnect a link that is still reported
   connected to that one radio. Clearance is best effort: a rejected or timed
-  out disconnect can leave the link in place and the connection can fail.
+  out disconnect (each attempt is bounded by
+  `BLEConfig.STALE_CONNECTION_DISCONNECT_TIMEOUT`, 3.0 s) can leave the link
+  in place and the connection can fail.
   BlueZ cannot tell a dead process's link from another
   local application's, so this also disconnects another local program using
   that radio. Auto-reconnect never clears, but BlueZ may reuse a link held by
@@ -408,8 +410,8 @@ iface = BLEInterface(address="AA:BB:CC:DD:EE:FF", auto_reconnect=False)
 ```
 
 Do not layer both simultaneously — duplicate reconnect loops produce
-`suppressed duplicate connect` log entries and can interfere with the built-in
-recovery logic.
+`Suppressing duplicate connect to <address>: recently connected elsewhere.`
+log entries and can interfere with the built-in recovery logic.
 
 ### Pairing and trust workflows
 
@@ -479,12 +481,17 @@ Platform notes:
 - `unpair()` depends on backend/platform support (typically Linux/Windows).
 - `trust(address=None)` is Linux-only and requires `bluetoothctl` in `PATH`.
 - On macOS, pairing is OS-managed and explicit `pair()`/`unpair()` are not exposed by the backend.
+- On Linux, the BlueZ transport runs over D-Bus through `dbus-fast`, a declared
+  Linux runtime dependency (`sys_platform == "linux"` marker in `pyproject.toml`).
 
 CLI opt-in:
 
 ```bash
-meshtastic --ble any --ble-auto-reconnect --listen
+mtjk --ble any --ble-auto-reconnect --listen
 ```
+
+`--listen` keeps the CLI running for long periods; its signal and shutdown
+behavior is documented in [Signals and shutdown](getting-started.md#signals-and-shutdown).
 
 **When to call `connect()` manually:** the constructor calls it for you. Only
 call it again after `close()` or when you are managing reconnects yourself with

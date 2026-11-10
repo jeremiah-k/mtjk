@@ -86,7 +86,7 @@ check-artifacts:
 # in protobuf 6) and spews per-module stub-parsing errors; excluding the
 # generated modules keeps the run clean.
 docs:
-	$(UV_RUN) pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
+	$(UV_RUN) --all-extras --group powermon pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
 
 # lint the codebase (same command as CI)
 lint:

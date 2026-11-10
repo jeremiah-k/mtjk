@@ -50,7 +50,7 @@ package are not historical compatibility surface by default and should not get
 - **No deprecation warnings** for historical BLE public methods listed above.
 - `find_device` is a historical compatibility shim to `findDevice` and should remain silent.
 - Do not add deprecation warnings to other BLE compatibility entrypoints unless explicitly approved.
-- Current approved BLE deprecation: `BLECoroutineRunner.run_coroutine_threadsafe(timeout=...)` as alias for `startup_timeout=...` (semantic API migration, not naming-only).
+- Current approved BLE deprecation: `BLECoroutineRunner._run_coroutine_threadsafe(timeout=...)` as alias for `startup_timeout=...` (semantic API migration, not naming-only).
 
 ### BLE internal orchestration naming
 
@@ -108,7 +108,7 @@ Current `COMPAT_DEPRECATE` methods:
 - util: `dotdict` (class alias to `DotDict`, warn-once)
 - Slog: `root_dir`, `PowerLogger.store_current_reading` (warn-once)
 - Powermon: `PowerMeter.getAverageCurrentmA`, `PowerMeter.getMinCurrentmA`, `PowerMeter.getMaxCurrentmA`
-- BLE runner: `BLECoroutineRunner.run_coroutine_threadsafe(timeout=...)` alias for `startup_timeout=...` (warn-once, old internal alias: `_run_coroutine_threadsafe`)
+- BLE runner: `BLECoroutineRunner._run_coroutine_threadsafe(timeout=...)` alias for `startup_timeout=...` (warn-once)
 
 ## Powermon API Refactoring Decisions
 
@@ -193,16 +193,17 @@ Current `COMPAT_DEPRECATE` methods:
 
 ## Release Workflow Modernization Policy
 
-- Release workflow behavior should stay functionally aligned with the historical
-  manual release flow on `master`/`2.7.7`:
-  - manual dispatch,
-  - patch-version bump and commit,
-  - draft prerelease creation,
-  - packaged artifacts upload,
-  - PyPI publish.
+- docs/maintainers/releases.md is the detailed release document. The current
+  release flow:
+  - publishing a GitHub release triggers `.github/workflows/pypi-publish.yml`,
+  - the workflow checks out the release tag and validates that the tag matches
+    the version in `pyproject.toml`,
+  - the sdist and wheel are built and published to PyPI via Trusted Publishing.
+- Version bumps are maintainer commits; no workflow edits version files.
+- Release workflows run Python 3.15, and the package floor is `>=3.11`.
 - Modernization is allowed and encouraged when tooling is unmaintained or EOL:
-  - upgrade deprecated GitHub actions to maintained pinned versions,
-  - move Python runtime from 3.9 (EOL) to supported 3.10+.
+  upgrade deprecated GitHub actions to maintained pinned versions and keep
+  release workflows on supported Python runtimes.
 - Keep release semantics stable while modernizing implementation details.
 
 ## Constant Extraction Policy

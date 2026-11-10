@@ -35,6 +35,12 @@ At interpreter exit, the library attempts to close connected serial and TCP inte
 
 A tool installation with `pipx` or `uv tool` does not provide the package to a separate Python application's environment. An application with an existing Meshtastic installation should deliberately replace it rather than attempting to load both distributions.
 
+## Signals and shutdown
+
+The CLI entrypoint installs handlers for `SIGTERM` and `SIGHUP`: the first delivery raises `SystemExit(128 + signum)` so the normal session teardown runs (interface close and the regular `finally` paths), after which the recorded signal is re-delivered and the process dies by that signal (supervisors report exit status 143 for `SIGTERM`, 129 for `SIGHUP`). A second signal during teardown terminates the process immediately instead of waiting on cleanup. Ctrl+C prints `Interrupted.` and exits with status 130; the process-owning console entrypoints (`mtjk`, `meshtastic`, `mesh-tunnel`, and `python -m meshtastic`) then re-deliver `SIGINT` so the process ends the same way as for an unhandled interrupt.
+
+Embedder guarantees: importing the library installs no signal handlers, so applications keep full control of their signal policy; dispositions inherited as `SIG_IGN` (for example from `nohup` or a supervisor) and non-Python handlers are preserved. A forked child does not close the parent's tracked interfaces; an `os.register_at_fork` child hook resets the tracked-interface registry in `stream_interface`.
+
 ## Choosing an API
 
 - Use [`queryNodes`](node-queries.md) for detached **cached** node observations.
