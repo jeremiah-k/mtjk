@@ -63,6 +63,18 @@ class BLEConfig:
     # as the straggler cleanup coroutine finishes. Read at call time so
     # embedders can tune it.
     INTERRUPTED_CLEANUP_FENCE_MAX_SECONDS = DISCONNECT_TIMEOUT_SECONDS * 6.0
+    # Address-level fence for a direct connect attempt that is currently in
+    # flight. The attempt registers the fence when it starts and retires it
+    # in a finally block when it exits, so concurrent in-process connects to
+    # the same address are refused for the whole window where the in-flight
+    # attempt holds no connected or provisional claim yet. The backstop
+    # deadline is a safety net for paths that never reach that finally (for
+    # example the owning thread dying mid-connect): a normal attempt is
+    # bounded by the CONNECTION_TIMEOUT client-connect budget plus bounded
+    # clearance/notification/finalization steps, so twice that budget only
+    # expires while an owner can no longer retire its own fence. Read at
+    # call time so embedders can tune it.
+    INFLIGHT_CONNECT_FENCE_MAX_SECONDS = CONNECTION_TIMEOUT * 2.0
     BLECLIENT_EVENT_THREAD_JOIN_TIMEOUT = 2.0
     # Runner configuration
     RUNNER_LOOP_READY_TIMEOUT_SECONDS = 5.0
@@ -168,6 +180,11 @@ ERROR_INTERRUPTED_CLEANUP_FENCED: str = (
     "Interrupted connection cleanup did not finish; not starting a new "
     "connection to {0} while a late disconnect could tear it down. "
     "Retry after the cleanup retires or the fence expires."
+)
+ERROR_INFLIGHT_CONNECT_FENCED: str = (
+    "A direct connection to {0} is already in flight; not starting a "
+    "concurrent connect that could race it. Retry after the in-flight "
+    "attempt finishes."
 )
 ERROR_NO_CLIENT_ESTABLISHED: str = "Connection failed: no BLE client established"
 ERROR_MANAGEMENT_ADDRESS_EMPTY: str = (
