@@ -21,6 +21,7 @@ from meshtastic.interfaces.ble.constants import (
 from meshtastic.interfaces.ble.gating import (
     _addr_lock_context,
     _clear_connecting,
+    _inflight_connect_fenced,
     _interrupted_cleanup_fenced,
     _is_currently_connected_elsewhere,
     _live_ble_client_owns_address,
@@ -201,7 +202,8 @@ def _try_claim_ble_address(
     same per-address lock an in-flight ``BLEInterface.connect()`` holds,
     refuses when another in-process owner already holds a connected or
     connecting claim, refuses while an interrupted connect's disconnect
-    cleanup is still fenced for the address, and otherwise records a
+    cleanup is still fenced for the address or while a direct connect
+    attempt to the address is in flight, and otherwise records a
     provisional connecting claim.
     Because the check and the claim happen under one lock acquisition, a
     concurrent interface connect either wins first (and this refuses) or sees
@@ -221,6 +223,11 @@ def _try_claim_ble_address(
             # An interrupted direct client's BlueZ disconnect may still be
             # pending for this address; a new link here could race it.
             if _interrupted_cleanup_fenced(address):
+                return False
+            # A direct connect attempt is in flight for this address and
+            # holds no connected or provisional claim yet; a new link here
+            # could race it. The in-flight attempt's own owner is exempt.
+            if _inflight_connect_fenced(address, owner=owner):
                 return False
             if _is_currently_connected_elsewhere(address, owner=owner):
                 return False
@@ -358,6 +365,12 @@ class BLECentralChannel:
                     f"BLE address {address} is fenced: an interrupted "
                     "connection's disconnect cleanup has not been confirmed "
                     "retired; retry after it finishes or the fence expires"
+                )
+            if _inflight_connect_fenced(address, owner=link):
+                raise RuntimeError(
+                    f"BLE address {address} is fenced: a direct connection "
+                    "attempt is already in flight; retry after it finishes "
+                    "or the fence expires"
                 )
             raise RuntimeError(
                 f"BLE address {address} is already claimed by another "
