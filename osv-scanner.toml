@@ -1,3 +1,22 @@
 # OSV-Scanner configuration file
 # Place in same directory as uv.lock to ignore specific vulnerabilities
 # Documentation: https://google.github.io/osv-scanner/configuration/
+
+# soupsieve 2.10 (uv.lock resolution for Python < 3.11.5 only; Python >= 3.11.5
+# resolves soupsieve 4.0.1, which is unaffected). Every fixed release
+# (3.0.2+) requires Python >= 3.11.5, so no fixed version is installable on
+# the 2.x line and uv must keep 2.10 to cover the declared floor of >=3.11.
+# Transitive via the analysis extra (nbconvert -> beautifulsoup4);
+# availability-only DoS in CSS selector compilation, not reachable from
+# untrusted input in this project.
+[[IgnoredVulns]]
+id = "GHSA-6655-6qjp-jx7x"
+reason = "soupsieve 2.10: no fixed release installable for Python < 3.11.5 under the >=3.11 floor; analysis-extra-only, DoS in CSS selector parsing"
+
+[[IgnoredVulns]]
+id = "GHSA-7g44-g9rc-x53w"
+reason = "soupsieve 2.10: no fixed release installable for Python < 3.11.5 under the >=3.11 floor; analysis-extra-only, recursion DoS in CSS parser"
+
+[[IgnoredVulns]]
+id = "GHSA-mmhr-3c5m-f64f"
+reason = "soupsieve 2.10: no fixed release installable for Python < 3.11.5 under the >=3.11 floor; analysis-extra-only, DoS in descendant combinator"
