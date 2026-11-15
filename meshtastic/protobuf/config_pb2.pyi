@@ -1391,7 +1391,7 @@ class Config(_message.Message):
             """
             ANZ: Config.LoRaConfig._RegionCode.ValueType  # 6
             """
-            Australia / New Zealand
+            Australia / Brazil / New Zealand (915-928MHz)
             """
             KR: Config.LoRaConfig._RegionCode.ValueType  # 7
             """
@@ -1549,7 +1549,7 @@ class Config(_message.Message):
         """
         ANZ: Config.LoRaConfig.RegionCode.ValueType  # 6
         """
-        Australia / New Zealand
+        Australia / Brazil / New Zealand (915-928MHz)
         """
         KR: Config.LoRaConfig.RegionCode.ValueType  # 7
         """
@@ -1902,6 +1902,10 @@ class Config(_message.Message):
             """
             FEM_LNA is not present on the device
             """
+            AUTO: Config.LoRaConfig._FEM_LNA_Mode.ValueType  # 3
+            """
+            FEM_LNA is present; the firmware switches it in or bypasses it from the measured noise floor
+            """
 
         class FEM_LNA_Mode(_FEM_LNA_Mode, metaclass=_FEM_LNA_ModeEnumTypeWrapper): ...
         DISABLED: Config.LoRaConfig.FEM_LNA_Mode.ValueType  # 0
@@ -1915,6 +1919,10 @@ class Config(_message.Message):
         NOT_PRESENT: Config.LoRaConfig.FEM_LNA_Mode.ValueType  # 2
         """
         FEM_LNA is not present on the device
+        """
+        AUTO: Config.LoRaConfig.FEM_LNA_Mode.ValueType  # 3
+        """
+        FEM_LNA is present; the firmware switches it in or bypasses it from the measured noise floor
         """
 
         USE_PRESET_FIELD_NUMBER: _builtins.int
@@ -2056,7 +2064,7 @@ class Config(_message.Message):
         """
         fem_lna_mode: Global___Config.LoRaConfig.FEM_LNA_Mode.ValueType
         """
-        Set where LORA FEM is enabled, disabled, or not present
+        Set whether the LoRa FEM LNA is enabled, disabled, automatic, or not present
         """
         serial_hal_only: _builtins.bool
         """
