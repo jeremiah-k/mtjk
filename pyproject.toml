@@ -78,7 +78,7 @@ dev = [
   "pytest-cov==7.1.0",
   "pytest-timeout==2.4.0",
   "pdoc==16.0.0",
-  "pylint==4.1.3",
+  "pylint==4.1.4",
   "pyinstaller==6.22.3",
   "mypy==2.4.1",
   "mypy-protobuf==5.1.0",
