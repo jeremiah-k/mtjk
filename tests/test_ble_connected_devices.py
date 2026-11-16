@@ -273,9 +273,16 @@ def test_connected_meshtastic_devices_isolates_stalled_controller(
 
     original_query: Any = connected_module._query_connected_devices
     seen_cancel = asyncio.Event()
+    # The lookup derives every budget from `loop.time()`, so the stall is
+    # simulated in loop time: the clock starts past zero and the stalled
+    # controller's query jumps it beyond the lookup deadline. `wait_for`
+    # timers read the same patched clock, so the stall is cancelled
+    # deterministically without any wall-clock dependence.
+    clock = {"now": 100.0}
 
     async def query(adapter: _FakeConnectedAdapter) -> list[BLEDevice]:
         if adapter._adapter_name == "hci1":
+            clock["now"] = 1000.0
             try:
                 await asyncio.sleep(3600)
             finally:
@@ -286,7 +293,12 @@ def test_connected_meshtastic_devices_isolates_stalled_controller(
 
     monkeypatch.setattr(connected_module, "_query_connected_devices", query)
     monkeypatch.setattr(BLEConfig, "BLE_CONNECTED_DEVICES_TIMEOUT", 0.12)
-    devices = asyncio.run(_connected_meshtastic_devices())
+    loop = asyncio.new_event_loop()
+    try:
+        loop.time = lambda: clock["now"]  # type: ignore[method-assign]
+        devices = loop.run_until_complete(_connected_meshtastic_devices())
+    finally:
+        loop.close()
     assert devices == [device]
     assert seen_cancel.is_set()
 
