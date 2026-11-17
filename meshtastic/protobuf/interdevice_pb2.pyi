@@ -60,6 +60,10 @@ class _FileOperationEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_FileOpe
     POST: _FileOperation.ValueType  # 1
     PUT: _FileOperation.ValueType  # 2
     DELETE: _FileOperation.ValueType  # 3
+    MKDIR: _FileOperation.ValueType  # 4
+    """Create a directory, parents included; OK when it already exists"""
+    RMDIR: _FileOperation.ValueType  # 5
+    """Remove an empty directory; OK when it is already gone"""
 
 class FileOperation(_FileOperation, metaclass=_FileOperationEnumTypeWrapper):
     """Defines the supported file operations"""
@@ -68,6 +72,10 @@ GET: FileOperation.ValueType  # 0
 POST: FileOperation.ValueType  # 1
 PUT: FileOperation.ValueType  # 2
 DELETE: FileOperation.ValueType  # 3
+MKDIR: FileOperation.ValueType  # 4
+"""Create a directory, parents included; OK when it already exists"""
+RMDIR: FileOperation.ValueType  # 5
+"""Remove an empty directory; OK when it is already gone"""
 Global___FileOperation: _TypeAlias = FileOperation  # noqa: Y015
 
 class _FileStatus:
@@ -91,7 +99,9 @@ class _FileStatusEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_FileStatus
     """
     FILE_IO_ERROR: _FileStatus.ValueType  # 6
     FILE_NOT_A_FILE: _FileStatus.ValueType  # 7
-    """path is a directory (GET) or not one (listing)"""
+    """path is a directory (GET) or not one (listing, MKDIR, RMDIR)"""
+    FILE_NOT_EMPTY: _FileStatus.ValueType  # 8
+    """RMDIR: the directory still has entries"""
 
 class FileStatus(_FileStatus, metaclass=_FileStatusEnumTypeWrapper):
     """Outcome of a file or directory operation. The requester must be able to
@@ -114,7 +124,9 @@ recognize its own chunk as already written after a lost response).
 """
 FILE_IO_ERROR: FileStatus.ValueType  # 6
 FILE_NOT_A_FILE: FileStatus.ValueType  # 7
-"""path is a directory (GET) or not one (listing)"""
+"""path is a directory (GET) or not one (listing, MKDIR, RMDIR)"""
+FILE_NOT_EMPTY: FileStatus.ValueType  # 8
+"""RMDIR: the directory still has entries"""
 Global___FileStatus: _TypeAlias = FileStatus  # noqa: Y015
 
 class _SdCommand:
@@ -158,7 +170,7 @@ class FileTransfer(_message.Message):
     LENGTH_FIELD_NUMBER: _builtins.int
     FILE_SIZE_FIELD_NUMBER: _builtins.int
     operation: Global___FileOperation.ValueType
-    """File operation (GET, POST, PUT, DELETE)"""
+    """File operation (GET, POST, PUT, DELETE, MKDIR, RMDIR)"""
     filepath: _builtins.str
     """Path of the file on the SD card"""
     filedata: _builtins.bytes
