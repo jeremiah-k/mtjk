@@ -161,7 +161,7 @@ def test_get_field_metadata_returns_none_for_unknown_paths() -> None:
 @pytest.mark.unit
 def test_get_field_metadata_returns_none_for_unannotated_field() -> None:
     """Fields that declare no metadata resolve to None on the public path."""
-    assert getFieldMetadata("power.sds_secs") is None
+    assert getFieldMetadata("power.ls_secs") is None
 
 
 @pytest.mark.unit
