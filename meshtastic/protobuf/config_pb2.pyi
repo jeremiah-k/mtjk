@@ -1700,7 +1700,7 @@ class Config(_message.Message):
             def VERY_LONG_SLOW(self) -> Config.LoRaConfig._ModemPreset.ValueType:   # 2
                 """
                 Very Long Range - Slow
-                Deprecated in 2.5: Works only with txco and is unusably slow
+                Deprecated: works only with a TCXO and is unusably slow.
                 """
             MEDIUM_SLOW: Config.LoRaConfig._ModemPreset.ValueType  # 3
             """
@@ -1801,7 +1801,7 @@ class Config(_message.Message):
         VERY_LONG_SLOW: Config.LoRaConfig.ModemPreset.ValueType  # 2
         """
         Very Long Range - Slow
-        Deprecated in 2.5: Works only with txco and is unusably slow
+        Deprecated: works only with a TCXO and is unusably slow.
         """
         MEDIUM_SLOW: Config.LoRaConfig.ModemPreset.ValueType  # 3
         """
