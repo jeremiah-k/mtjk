@@ -11,8 +11,10 @@
   ],
   "timezone": "America/Chicago",
   "updateNotScheduled": true,
-  "dependencyDashboard": true,
-  "dependencyDashboardTitle": "Dependency Updates (mtjk)",
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "Dependency Updates (mtjk)"
+  },
   "automerge": false,
   "automergeType": "pr",
   "platformAutomerge": false,
