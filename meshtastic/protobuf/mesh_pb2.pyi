@@ -663,6 +663,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Heltec Magnetic Power Bank V2
     """
+    VIRTUAL_NODE: _HardwareModel.ValueType  # 254
+    """
+    A virtual node: a phone or desktop app acting as a mesh node of its own, with no radio hardware of its own
+    """
     PRIVATE_HW: _HardwareModel.ValueType  # 255
     """
     ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1303,6 +1307,10 @@ Radioddity Nodara
 HELTEC_MESH_POCKET_V2: HardwareModel.ValueType  # 152
 """
 Heltec Magnetic Power Bank V2
+"""
+VIRTUAL_NODE: HardwareModel.ValueType  # 254
+"""
+A virtual node: a phone or desktop app acting as a mesh node of its own, with no radio hardware of its own
 """
 PRIVATE_HW: HardwareModel.ValueType  # 255
 """
