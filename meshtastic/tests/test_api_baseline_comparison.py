@@ -720,9 +720,7 @@ class TestUpstreamBaselineRefreshWorkflow:
         ).read_text(encoding="utf-8")
 
         assert "id: compare" in workflow
-        assert (
-            "if: steps.compare.outputs.surface_changed == 'true'" in workflow
-        )
+        assert "if: steps.compare.outputs.surface_changed == 'true'" in workflow
         assert "not opening a PR" in workflow
 
 
