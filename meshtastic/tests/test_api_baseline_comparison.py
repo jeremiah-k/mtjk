@@ -710,7 +710,18 @@ class TestUpstreamBaselineRefreshWorkflow:
         assert "gh api --method PATCH" in workflow
         assert "pulls/${open_pr_number}" in workflow
         assert '-f title="${pr_title}"' in workflow
-        assert '-f body="${pr_body}"' in workflow
+        assert '-F body=@"${pr_body_file}"' in workflow
+
+    def test_refresh_pr_skipped_on_provenance_only_change(self) -> None:
+        """The refresh PR step must be gated on an API-surface-only comparison."""
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            project_root / ".github" / "workflows" / "sync-upstream-master.yml"
+        ).read_text(encoding="utf-8")
+
+        assert "id: compare" in workflow
+        assert "if: steps.compare.outputs.surface_changed == 'true'" in workflow
+        assert "not opening a PR" in workflow
 
 
 class TestBaselineGeneration:

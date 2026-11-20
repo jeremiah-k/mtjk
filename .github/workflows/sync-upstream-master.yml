@@ -1,8 +1,12 @@
 name: Sync Upstream Master
 # Daily: regenerate meshtastic/tests/api_baselines/api_baseline_master.json from
-# upstream/master and open a PR against develop whenever the snapshot file
-# changes — including provenance-only updates, since the embedded owning SHA
-# moves with every upstream commit even when the surface is byte-identical.
+# upstream/master and open a PR against develop whenever the API surface
+# (legacy_import_paths, mesh_interface_methods, node_methods,
+# top_level_exports) changes. The embedded provenance block moves with every
+# upstream commit even when the surface is byte-identical, so provenance-only
+# regenerations are detected and skipped: no commit, no push, no PR. The
+# committed provenance sha therefore goes stale between real surface changes;
+# the next real refresh PR carries the accumulated sha jump.
 # develop is protected (PRs required), so the refreshed snapshot lands
 # via an automated PR. The JSON is opt-in test data
 # (MESHTASTIC_API_BASELINE_SOURCE=master) and never gates CI.
@@ -57,22 +61,108 @@ jobs:
             --provenance-sha "${UPSTREAM_SHA}" \
             > "${BASELINE_FILE}"
           echo "UPSTREAM_SHORT_SHA=$(git rev-parse --short "${UPSTREAM_SHA}")" >> "$GITHUB_ENV"
-      - name: Open baseline refresh PR (if snapshot changed)
+      - name: Compare API surface against develop
+        id: compare
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          baseline = os.environ["BASELINE_FILE"]
+
+          shown = subprocess.run(
+              ["git", "show", f"HEAD:{baseline}"],
+              capture_output=True,
+              text=True,
+          )
+          if shown.returncode != 0:
+              # Baseline file absent from develop: every surface entry is new.
+              old = {}
+              old_provenance = None
+          else:
+              old = json.loads(shown.stdout)
+              old_provenance = old.pop("provenance", None)
+
+          with open(baseline, encoding="utf-8") as stream:
+              new = json.load(stream)
+          new_provenance = new.pop("provenance", None)
+
+          changes = []
+
+          def describe(section, old_value, new_value):
+              if isinstance(old_value, dict) and isinstance(new_value, dict):
+                  for name in sorted(set(new_value) - set(old_value)):
+                      changes.append(f"+ {section}.{name}{new_value[name]}")
+                  for name in sorted(set(old_value) - set(new_value)):
+                      changes.append(f"- {section}.{name}")
+                  for name in sorted(set(old_value) & set(new_value)):
+                      if old_value[name] != new_value[name]:
+                          changes.append(
+                              f"~ {section}.{name}: {old_value[name]}"
+                              f" -> {new_value[name]}"
+                          )
+                  return
+              old_items = set(old_value)
+              new_items = set(new_value)
+              for item in sorted(new_items - old_items, key=str):
+                  changes.append(f"+ {section}: {item}")
+              for item in sorted(old_items - new_items, key=str):
+                  changes.append(f"- {section}: {item}")
+
+          for section in sorted(set(new) | set(old)):
+              old_value = old.get(section)
+              new_value = new.get(section)
+              if old_value is None:
+                  changes.append(f"+ {section}: added ({len(new_value)} entries)")
+              elif new_value is None:
+                  changes.append(f"- {section}: removed")
+              else:
+                  describe(section, old_value, new_value)
+
+          if not changes:
+              old_sha = (old_provenance or {}).get("sha", "unknown")
+              new_sha = (new_provenance or {}).get("sha", "unknown")
+              print(
+                  f"API surface unchanged; provenance sha {old_sha} -> {new_sha};"
+                  " not opening a PR."
+              )
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+                  stream.write("surface_changed=false\n")
+              sys.exit(0)
+
+          max_lines = 50
+          lines = changes[:max_lines]
+          if len(changes) > max_lines:
+              lines.append(f"... and {len(changes) - max_lines} more surface changes")
+          summary = "\n".join(lines)
+          print(summary)
+          summary_path = os.path.join(os.environ["RUNNER_TEMP"], "surface-summary.txt")
+          with open(summary_path, "w", encoding="utf-8") as stream:
+              stream.write(summary + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("surface_changed=true\n")
+          PY
+      - name: Open baseline refresh PR (only when API surface changed)
+        if: steps.compare.outputs.surface_changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${BASELINE_FILE}"
-          if git diff --cached --quiet; then
-            echo "Baseline snapshot unchanged; nothing to do."
-            exit 0
-          fi
           git checkout -B bot/upstream-baseline
           git commit -m "Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
           git push origin bot/upstream-baseline --force
           pr_title="Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
           pr_body="Automated refresh of the upstream API baseline snapshot (mirror of upstream/master at \`${UPSTREAM_SHORT_SHA}\`). Merges with no checks expected: PRs opened by the workflow token do not trigger CI, and develop requires no approvals."
+          pr_body_file="$(mktemp)"
+          {
+            printf '%s\n\n## API surface changes\n\n```text\n' "${pr_body}"
+            cat "${RUNNER_TEMP}/surface-summary.txt"
+            printf '```\n'
+          } > "${pr_body_file}"
           open_pr_number="$(gh pr list \
             --base develop \
             --head bot/upstream-baseline \
@@ -83,11 +173,11 @@ jobs:
             gh api --method PATCH \
               "repos/${GITHUB_REPOSITORY}/pulls/${open_pr_number}" \
               -f title="${pr_title}" \
-              -f body="${pr_body}" \
+              -F body=@"${pr_body_file}" \
               >/dev/null
             echo "Updated open PR #${open_pr_number} after refreshing the branch."
           else
             gh pr create --base develop --head bot/upstream-baseline \
               --title "${pr_title}" \
-              --body "${pr_body}"
+              --body-file "${pr_body_file}"
           fi
