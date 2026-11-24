@@ -319,7 +319,7 @@ class TestBLELifecycleControllerHookResolution:
 
         mock_client = SimpleNamespace(address="test-addr")
         with patch(
-            "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_is_closing",
+            "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.is_closing",
             return_value=False,
         ) as state_manager_is_closing:
             # This should use fallback since no hook exists.
@@ -329,7 +329,7 @@ class TestBLELifecycleControllerHookResolution:
                 restore_last_connection_request=None,
             )
 
-        state_manager_is_closing.assert_called_once_with(mock_iface)
+        state_manager_is_closing.assert_called_once()
         assert resolved_is_closing == [False]
 
     def test_resolve_hook_with_non_callable_returns_fallback(self) -> None:
@@ -354,7 +354,7 @@ class TestBLELifecycleControllerHookResolution:
 
         mock_client = SimpleNamespace(address="test-addr")
         with patch(
-            "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_is_closing",
+            "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.is_closing",
             return_value=True,
         ) as state_manager_is_closing:
             # This should use fallback since hook is not callable.
@@ -364,11 +364,11 @@ class TestBLELifecycleControllerHookResolution:
                 restore_last_connection_request=None,
             )
 
-        state_manager_is_closing.assert_called_once_with(mock_iface)
+        state_manager_is_closing.assert_called_once()
         assert resolved_is_closing == [True]
 
-    def test_fallback_is_closing_calls_lifecycle_service(self) -> None:
-        """_fallback_is_closing should call BLELifecycleService._state_manager_is_closing."""
+    def test_fallback_is_closing_uses_state_access(self) -> None:
+        """Fallback closing probe should read the lifecycle state access."""
         mock_iface = SimpleNamespace()
         resolved_is_closing: list[bool] = []
 
@@ -388,7 +388,7 @@ class TestBLELifecycleControllerHookResolution:
         controller._connection_ownership = mock_ownership  # type: ignore[assignment]
 
         with patch(
-            "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_is_closing",
+            "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.is_closing",
             return_value=True,
         ) as state_manager_is_closing:
             mock_client = SimpleNamespace(address="test-addr")
@@ -398,14 +398,14 @@ class TestBLELifecycleControllerHookResolution:
                 restore_last_connection_request=None,
             )
 
-        state_manager_is_closing.assert_called_once_with(mock_iface)
+        state_manager_is_closing.assert_called_once()
         assert resolved_is_closing == [True]
 
-    def test_fallback_current_state_calls_lifecycle_service(
+    def test_fallback_current_state_uses_state_access(
         self,
         mock_ownership_with_capture: tuple[SimpleNamespace, dict[str, object]],
     ) -> None:
-        """_fallback_current_state should call BLELifecycleService._state_manager_current_state."""
+        """Fallback state hooks should read the lifecycle state access."""
         mock_iface = SimpleNamespace()
         mock_ownership, captured = mock_ownership_with_capture
 
@@ -414,24 +414,24 @@ class TestBLELifecycleControllerHookResolution:
 
         with (
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_current_state",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.current_state",
                 return_value=ConnectionState.DISCONNECTED,
             ) as state_manager_current_state,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_is_closing",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.is_closing",
                 return_value=False,
             ) as state_manager_is_closing,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_reset_to_disconnected",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.reset_to_disconnected",
                 return_value=True,
             ) as state_manager_reset_to_disconnected,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_transition_to",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.transition_to",
                 return_value=True,
             ) as state_manager_transition_to,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._error_handler_safe_cleanup",
-                side_effect=lambda _iface, cleanup, _name: cleanup() or None,
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleErrorAccess.safe_cleanup",
+                side_effect=lambda cleanup, _name: cleanup() or None,
             ) as safe_cleanup_handler,
         ):
             mock_client = SimpleNamespace(address="test-addr")
@@ -441,12 +441,11 @@ class TestBLELifecycleControllerHookResolution:
                 restore_last_connection_request=None,
             )
 
-        state_manager_current_state.assert_called_once_with(mock_iface)
-        state_manager_is_closing.assert_called_once_with(mock_iface)
-        state_manager_reset_to_disconnected.assert_called_once_with(mock_iface)
+        state_manager_current_state.assert_called_once()
+        state_manager_is_closing.assert_called_once()
+        state_manager_reset_to_disconnected.assert_called_once()
         state_manager_transition_to.assert_called_once_with(
-            mock_iface,
-            ConnectionState.DISCONNECTED,
+            ConnectionState.DISCONNECTED
         )
         safe_cleanup_handler.assert_called_once()
         assert captured["current_state"] == ConnectionState.DISCONNECTED
@@ -454,11 +453,11 @@ class TestBLELifecycleControllerHookResolution:
         assert captured["cleanup_called"] is True
         assert captured["safe_cleanup"] is None
 
-    def test_fallback_transition_to_state_calls_lifecycle_service(
+    def test_fallback_transition_to_state_uses_state_access(
         self,
         mock_ownership_with_capture: tuple[SimpleNamespace, dict[str, object]],
     ) -> None:
-        """_fallback_transition_to_state should call BLELifecycleService._state_manager_transition_to."""
+        """Fallback transition hook should read the lifecycle state access."""
         mock_iface = SimpleNamespace()
         mock_ownership, captured = mock_ownership_with_capture
 
@@ -467,24 +466,24 @@ class TestBLELifecycleControllerHookResolution:
 
         with (
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_transition_to",
-                side_effect=lambda _iface, state: state == ConnectionState.DISCONNECTED,
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.transition_to",
+                side_effect=lambda state: state == ConnectionState.DISCONNECTED,
             ) as state_manager_transition_to,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_is_closing",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.is_closing",
                 return_value=False,
             ) as state_manager_is_closing,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_reset_to_disconnected",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.reset_to_disconnected",
                 return_value=True,
             ) as state_manager_reset_to_disconnected,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._state_manager_current_state",
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleStateAccess.current_state",
                 return_value=ConnectionState.CONNECTED,
             ) as state_manager_current_state,
             patch(
-                "meshtastic.interfaces.ble.lifecycle_service.BLELifecycleService._error_handler_safe_cleanup",
-                side_effect=lambda _iface, cleanup, _name: cleanup() or None,
+                "meshtastic.interfaces.ble.lifecycle_primitives._LifecycleErrorAccess.safe_cleanup",
+                side_effect=lambda cleanup, _name: cleanup() or None,
             ) as safe_cleanup_handler,
         ):
             mock_client = SimpleNamespace(address="test-addr")
@@ -495,12 +494,11 @@ class TestBLELifecycleControllerHookResolution:
             )
 
         state_manager_transition_to.assert_called_once_with(
-            mock_iface,
-            ConnectionState.DISCONNECTED,
+            ConnectionState.DISCONNECTED
         )
-        state_manager_is_closing.assert_called_once_with(mock_iface)
-        state_manager_reset_to_disconnected.assert_called_once_with(mock_iface)
-        state_manager_current_state.assert_called_once_with(mock_iface)
+        state_manager_is_closing.assert_called_once()
+        state_manager_reset_to_disconnected.assert_called_once()
+        state_manager_current_state.assert_called_once()
         safe_cleanup_handler.assert_called_once()
         assert captured["transition_to_disconnected"] is True
         assert captured["cleanup_called"] is True

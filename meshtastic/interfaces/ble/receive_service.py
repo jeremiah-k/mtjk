@@ -35,6 +35,9 @@ from meshtastic.interfaces.ble.failure_policy import (
     _BLEFailureDisposition,
     _log_ble_failure,
 )
+from meshtastic.interfaces.ble.lifecycle_shutdown_runtime import (
+    BLEShutdownLifecycleCoordinator,
+)
 from meshtastic.interfaces.ble.ports import _BLESessionStatePort
 from meshtastic.interfaces.ble.session_state import _session_state_for
 from meshtastic.interfaces.ble.utils import (
@@ -458,6 +461,9 @@ class BLEReceiveRecoveryController:
         if callable(override_close):
             override_close()
             return
+        # Loaded by string: the interface module imports this module, so a
+        # module-level import would be circular.
+        interface_mod = _load_runtime_module(_INTERFACE_MODULE_NAME)
         lifecycle_controller = self._get_lifecycle_controller()
         if lifecycle_controller is not None:
             close_fn = self._resolve_private_public_callable(
@@ -466,9 +472,6 @@ class BLEReceiveRecoveryController:
                 public_name="close",
             )
             if close_fn is not None:
-                interface_mod = _load_runtime_module(
-                    "meshtastic.interfaces.ble.interface"
-                )
                 close_fn(
                     management_shutdown_wait_timeout=(
                         interface_mod._MANAGEMENT_SHUTDOWN_WAIT_TIMEOUT_SECONDS
@@ -476,12 +479,7 @@ class BLEReceiveRecoveryController:
                     management_wait_poll_seconds=interface_mod._MANAGEMENT_CONNECT_WAIT_POLL_SECONDS,
                 )
                 return
-        interface_mod = _load_runtime_module("meshtastic.interfaces.ble.interface")
-        lifecycle_service_mod = _load_runtime_module(
-            "meshtastic.interfaces.ble.lifecycle_service"
-        )
-        lifecycle_service_mod.BLELifecycleService._close(
-            iface,
+        BLEShutdownLifecycleCoordinator(iface).close(
             management_shutdown_wait_timeout=(
                 interface_mod._MANAGEMENT_SHUTDOWN_WAIT_TIMEOUT_SECONDS
             ),

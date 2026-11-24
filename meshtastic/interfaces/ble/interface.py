@@ -139,8 +139,10 @@ from meshtastic.interfaces.ble.gating import (
     _register_inflight_connect_fence,
     _retire_inflight_connect_fence,
 )
+from meshtastic.interfaces.ble.lifecycle_controller_runtime import (
+    BLELifecycleController,
+)
 from meshtastic.interfaces.ble.lifecycle_primitives import _LifecycleStateAccess
-from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleController
 from meshtastic.interfaces.ble.management_service import (
     BLUETOOTHCTL_TRUST_TIMEOUT_SECONDS as _BLUETOOTHCTL_TRUST_TIMEOUT_SECONDS,
 )
