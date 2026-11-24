@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.seturl.context import _SetUrlAdminContext
 from meshtastic.node_runtime.seturl.helpers import _channels_fingerprint
 from meshtastic.node_runtime.seturl.parser import _SetUrlParsedInput
@@ -54,12 +55,30 @@ class _SetUrlAddOnlyPlanner:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         parsed_input: _SetUrlParsedInput,
         admin_context: _SetUrlAdminContext,
         channel_state: _NodeChannelState,
     ) -> None:
+        """Initialize the planner with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the planner reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        parsed_input : _SetUrlParsedInput
+            Parsed setURL input the plan stages from.
+        admin_context : _SetUrlAdminContext
+            Admin-channel write context for the transaction.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._parsed_input = parsed_input
         self._admin_context = admin_context
@@ -74,9 +93,7 @@ class _SetUrlAddOnlyPlanner:
         with self._channel_state.lock:
             channels = self._channel_state.channels
             if channels is None:
-                self._node._raise_interface_error(  # noqa: SLF001
-                    _ERR_CONFIG_OR_CHANNELS_NOT_LOADED
-                )
+                self._port.raise_interface_error(_ERR_CONFIG_OR_CHANNELS_NOT_LOADED)
             original_channels_ref = channels
             original_channels_fingerprint = _channels_fingerprint(channels)
             existing_names_normalized = {
@@ -104,7 +121,7 @@ class _SetUrlAddOnlyPlanner:
                 existing_names_normalized.add(normalized_name)
 
             if len(pending_new_settings) > len(disabled_channels):
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     "No free channels were found for all additions "
                     f"(need {len(pending_new_settings)}, available {len(disabled_channels)})"
                 )
@@ -155,12 +172,30 @@ class _SetUrlReplacePlanner:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         parsed_input: _SetUrlParsedInput,
         admin_context: _SetUrlAdminContext,
         channel_state: _NodeChannelState,
     ) -> None:
+        """Initialize the planner with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the planner reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        parsed_input : _SetUrlParsedInput
+            Parsed setURL input the plan stages from.
+        admin_context : _SetUrlAdminContext
+            Admin-channel write context for the transaction.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._parsed_input = parsed_input
         self._admin_context = admin_context
@@ -172,9 +207,7 @@ class _SetUrlReplacePlanner:
             replace_original_channels_ref: list[channel_pb2.Channel] = []
             channels = self._channel_state.channels
             if channels is None:
-                self._node._raise_interface_error(  # noqa: SLF001
-                    _ERR_CONFIG_OR_CHANNELS_NOT_LOADED
-                )
+                self._port.raise_interface_error(_ERR_CONFIG_OR_CHANNELS_NOT_LOADED)
             replace_original_channels_ref = channels
             max_channels = len(channels)
             replace_original_channels_fingerprint = _channels_fingerprint(channels)
@@ -213,7 +246,7 @@ class _SetUrlReplacePlanner:
             and _is_named_admin_channel_name(staged_channel.settings.name)
         ]
         if len(staged_named_admin_channels) > 1:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 "URL contains multiple channels named 'admin'; only one is allowed"
             )
         deferred_new_named_admin_channel = (

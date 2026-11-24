@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.seturl.cache import _SetUrlCacheManager
 from meshtastic.node_runtime.seturl.context import _SetUrlAdminContext
 from meshtastic.node_runtime.seturl.helpers import _channels_fingerprint
@@ -75,11 +76,27 @@ class _SetUrlExecutionEngine:
     def __init__(
         self,
         node: Node,
+        port: _NodePort | None = None,
         *,
         channel_state: _NodeChannelState,
         cache_manager: _SetUrlCacheManager,
     ) -> None:
+        """Initialize the execution engine with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the engine reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        cache_manager : _SetUrlCacheManager
+            Local cache update owner for the transaction.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._cache_manager = cache_manager
 
@@ -102,14 +119,12 @@ class _SetUrlExecutionEngine:
         set_lora = admin_pb2.AdminMessage()
         set_lora.set_config.lora.CopyFrom(parsed_input.channel_set.lora_config)
         self._node.ensureSessionKey(adminIndex=admin_context.admin_index_for_write)
-        request = self._node._send_admin(  # noqa: SLF001
+        request = self._port.send_admin(
             set_lora,
-            adminIndex=admin_context.admin_index_for_write,
+            admin_index=admin_context.admin_index_for_write,
         )
         if request is None:
-            self._node._raise_interface_error(  # noqa: SLF001
-                "LoRa config update was not started"
-            )
+            self._port.raise_interface_error("LoRa config update was not started")
         state.lora_write_started = True
 
     def _validate_replace_cache(
@@ -130,7 +145,7 @@ class _SetUrlExecutionEngine:
             self._cache_manager.invalidate_channel_cache(
                 "Channel cache changed before replace-all write; invalidating local channel cache."
             )
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 "Channel cache changed before replace-all write; aborting transaction."
             )
 
@@ -142,9 +157,7 @@ class _SetUrlExecutionEngine:
             channels = self._channel_state.channels
             if channels is not None:
                 return channels, _channels_fingerprint(channels)
-        return self._node._raise_interface_error(  # noqa: SLF001
-            "Config or channels not loaded"
-        )
+        return self._port.raise_interface_error("Config or channels not loaded")
 
     def _write_replace_channel(
         self,
@@ -160,9 +173,9 @@ class _SetUrlExecutionEngine:
             expected_channels_ref,
             expected_channels_fingerprint,
         )
-        self._node._write_channel_snapshot(  # noqa: SLF001
+        self._port.write_channel_snapshot(
             staged_channel,
-            adminIndex=admin_index,
+            admin_index=admin_index,
         )
         state.written_channel_indices.append(staged_channel.index)
         return self._cache_manager.apply_replace_channel_write(
@@ -191,9 +204,9 @@ class _SetUrlExecutionEngine:
             if written_count > 0:
                 time.sleep(CHANNEL_WRITE_PACE_SECONDS)
             logger.info("Adding new channel '%s' to device", channel_name)
-            self._node._write_channel_snapshot(  # noqa: SLF001
+            self._port.write_channel_snapshot(
                 staged_channel,
-                adminIndex=admin_context.admin_index_for_write,
+                admin_index=admin_context.admin_index_for_write,
             )
             state.written_indices.append(staged_channel.index)
             written_count += 1
@@ -207,9 +220,9 @@ class _SetUrlExecutionEngine:
                 time.sleep(DEFERRED_ADMIN_PACE_SECONDS)
             staged_channel, channel_name = plan.deferred_add_only_admin_channel
             logger.info("Adding new channel '%s' to device", channel_name)
-            self._node._write_channel_snapshot(  # noqa: SLF001
+            self._port.write_channel_snapshot(
                 staged_channel,
-                adminIndex=admin_context.admin_index_for_write,
+                admin_index=admin_context.admin_index_for_write,
             )
             state.written_indices.append(staged_channel.index)
 

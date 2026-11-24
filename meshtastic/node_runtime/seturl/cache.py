@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.seturl.helpers import _channels_fingerprint
 from meshtastic.protobuf import channel_pb2, config_pb2
 
@@ -20,8 +21,27 @@ _ERR_CONFIG_OR_CHANNELS_NOT_LOADED = "Config or channels not loaded"
 class _SetUrlCacheManager:
     """Owns local cache updates, invalidation, and restoration for setURL transactions."""
 
-    def __init__(self, node: Node, *, channel_state: _NodeChannelState) -> None:
+    def __init__(
+        self,
+        node: Node,
+        port: _NodePort | None = None,
+        *,
+        channel_state: _NodeChannelState,
+    ) -> None:
+        """Initialize the cache manager with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the manager reads.
+            port : _NodePort | None
+                Narrow port over the facade's internals; derived from ``node``
+                when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
 
     def _invalidate_channel_cache_locked(self, warning_message: str) -> None:
@@ -75,9 +95,7 @@ class _SetUrlCacheManager:
         with self._channel_state.lock:
             channels = self._channel_state.channels
             if channels is None:
-                self._node._raise_interface_error(  # noqa: SLF001
-                    _ERR_CONFIG_OR_CHANNELS_NOT_LOADED
-                )
+                self._port.raise_interface_error(_ERR_CONFIG_OR_CHANNELS_NOT_LOADED)
             channels_changed = False
             if (
                 expected_channels_ref is not None
@@ -92,7 +110,7 @@ class _SetUrlCacheManager:
                 self._invalidate_channel_cache_locked(
                     "Channel cache changed during replace-all cache update; invalidating local channel cache."
                 )
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     "Channel cache changed during replace-all cache update; aborting transaction."
                 )
             if not 0 <= staged_channel.index < len(channels):
@@ -101,7 +119,7 @@ class _SetUrlCacheManager:
                     f"{staged_channel.index} out of range during replace-all cache "
                     "update; invalidating local channel cache."
                 )
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"Channel index {staged_channel.index} out of range during cache update"
                 )
             channels[staged_channel.index].CopyFrom(staged_channel)
@@ -119,7 +137,7 @@ class _SetUrlCacheManager:
         def _apply() -> None:
             self._node.localConfig.lora.CopyFrom(lora_config)
 
-        self._node._execute_with_node_db_lock(_apply)
+        self._port.execute_with_node_db_lock(_apply)
 
     def clear_lora_cache_with_warning(self, warning_message: str) -> None:
         """Clear the local LoRa config cache after a partial failure.
@@ -132,5 +150,5 @@ class _SetUrlCacheManager:
         def _clear() -> None:
             self._node.localConfig.ClearField("lora")
 
-        self._node._execute_with_node_db_lock(_clear)
+        self._port.execute_with_node_db_lock(_clear)
         logger.warning("%s", warning_message)
