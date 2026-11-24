@@ -17,6 +17,8 @@ from meshtastic._deadline import (
     _remaining_timeout,
     _validate_timeout,
 )
+from meshtastic.cli import dispatch as cli_dispatch
+from meshtastic.cli import preference_runtime as _cli_preference_runtime
 from meshtastic.cli.context import CliContext
 from meshtastic.cli.dispatch import _dispatch_connected
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
@@ -267,10 +269,7 @@ def _fresh_get_pref(
     cli_print: Callable[[str], None] = print,
 ) -> bool:
     """Reuse CLI formatting and redaction over a fresh, detached section."""
-    # Load the standalone action bindings only when an invocation needs them.
-    import meshtastic.__main__ as entrypoint  # pylint: disable=import-outside-toplevel
-
-    comp_name = entrypoint._normalize_pref_name(comp_name)
+    comp_name = _cli_preference_runtime.normalize_pref_name(comp_name)
     try:
         module, fields = _preference_path(comp_name)
     except ValueError as exc:
@@ -279,7 +278,7 @@ def _fresh_get_pref(
         value = node.readPreference(comp_name, timeout=_remaining_timeout(math.inf))
         rendered = meshtastic.util.toStr(value)
         if not allow_secrets:
-            rendered = entrypoint._redact_pref_value(
+            rendered = _cli_preference_runtime.redact_pref_value(
                 ".".join(field.name for field in fields), rendered
             )
         cli_print(f"{comp_name}: {rendered}")
@@ -292,7 +291,7 @@ def _fresh_get_pref(
     else:
         response_config = node.readConfig(section, timeout=_remaining_timeout(math.inf))
         getattr(copied.localConfig, section).CopyFrom(getattr(response_config, section))
-    return entrypoint.getPref(
+    return _cli_preference_runtime.get_pref(
         copied, comp_name, allow_secrets=allow_secrets, cli_print=cli_print
     )
 
@@ -304,12 +303,16 @@ def _execute(
     capture: _OutputCapture,
 ) -> None:
     """Bind the standalone action implementation to embedded ownership rules."""
-    # Load the standalone action bindings only when an invocation needs them.
-    import meshtastic.__main__ as entrypoint  # pylint: disable=import-outside-toplevel
 
     def report(message: str) -> None:
         if not args.quiet:
             capture._write(message)
+
+    def embedded_print(message: str, *, force: bool = False) -> None:
+        """Route the standalone CLI reporters into this invocation's capture."""
+        if not force and getattr(args, "quiet", False):
+            return
+        capture._write(message)
 
     def terminate(message: str, return_value: int = 1) -> NoReturn:
         raise _CommandExit(return_value, message)
@@ -318,7 +321,17 @@ def _execute(
         invocation.channel_index = value
 
     invocation.exit_handler = terminate
-    hooks = entrypoint._build_connected_dispatch_hooks()
+    # The embedded surface excludes the optional power-monitor and structured
+    # logging services, so their probes are supplied as neutral values.
+    hooks = cli_dispatch._build_connected_dispatch_hooks(
+        cli_exit=terminate,
+        cli_print=embedded_print,
+        powermon_available=lambda: False,
+        powermon_error=lambda: None,
+        get_meter=lambda: None,
+        log_set_factory=None,
+        power_stress_factory=None,
+    )
     hooks = replace(
         hooks,
         cli_print=capture._write,
