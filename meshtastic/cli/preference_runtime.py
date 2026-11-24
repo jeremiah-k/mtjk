@@ -1177,8 +1177,10 @@ def get_pref(
         logger.debug("%s.%s: %s", config_type, uni_name, log_value)
 
     comp_name = normalize_pref_name(comp_name)
+    parts = comp_name.split(".")
     name = split_compound_name(comp_name)
-    whole_field = name[0] == name[1]  # We want the whole field
+    whole_field = len(parts) == 1
+    valid_path = len(parts) <= 2 and all(parts)
 
     camel_name = meshtastic.util.snake_to_camel(name[1])
     # Note: protobufs has the keys in snake_case, so snake internally
@@ -1200,14 +1202,14 @@ def get_pref(
         pref = None
         if config_type:
             pref = config_type.message_type.fields_by_name.get(snake_name)
-            if pref is not None or whole_field:
+            if valid_path and (pref is not None or whole_field):
                 found = True
                 break
 
     if not found:
         cli_print(
             f"{local_config.__class__.__name__} and {module_config.__class__.__name__} "
-            f"do not have an attribute {uni_name}."
+            f"do not have an attribute {uni_name if valid_path else comp_name}."
         )
         cli_print("Choices are...")
         camel_case = current_camel_case()
@@ -1253,7 +1255,11 @@ def get_pref(
                 repeated = config_io.is_repeated_field(field[0])
                 _print_setting(
                     config_type.name,
-                    field[0].name,
+                    (
+                        meshtastic.util.snake_to_camel(field[0].name)
+                        if current_camel_case()
+                        else field[0].name
+                    ),
                     field[1],
                     repeated=repeated,
                     secret_name=f"{config_type.name}.{field[0].name}",

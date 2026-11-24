@@ -786,17 +786,17 @@ def _apply_configure_channel_url(
 
 
 def _close_failed_settings_transaction(
-    hooks: ConfigureHooks,
     target_node: Any,
     *,
     commit_attempted: bool,
+    cli_print: Callable[[str], None],
 ) -> None:
     """Best-effort close an open settings transaction after a configuration failure.
 
     Parameters
     ----------
-    hooks : ConfigureHooks
-        CLI reporting hooks used to surface partial-application risk.
+    cli_print : Callable[[str], None]
+        Reporter used to surface partial-application risk.
     target_node : Any
         Node whose settings transaction was opened.
     commit_attempted : bool
@@ -811,13 +811,24 @@ def _close_failed_settings_transaction(
     the normal commit itself failed, final device-side state is unknown and a
     second commit is intentionally not sent.
     """
+
+    def warn(message: str) -> None:
+        # An application output sink may itself be the reason for the failure.
+        # It must not prevent the best-effort device-side cleanup.
+        try:
+            cli_print(f"WARNING: {message}")
+        except Exception:
+            logger.warning(
+                "Could not report settings transaction failure", exc_info=True
+            )
+
     if commit_attempted:
         message = (
             "Settings transaction commit failed; device transaction state is unknown "
             "and configuration may be partially applied."
         )
         logger.warning(message)
-        hooks.cli_print(f"WARNING: {message}")
+        warn(message)
         return
 
     message = (
@@ -825,7 +836,7 @@ def _close_failed_settings_transaction(
         "to close it. Any writes already accepted may be committed."
     )
     logger.warning(message)
-    hooks.cli_print(f"WARNING: {message}")
+    warn(message)
     try:
         target_node.commitSettingsTransaction()
     except Exception:
@@ -834,8 +845,8 @@ def _close_failed_settings_transaction(
             "device transaction may remain open.",
             exc_info=True,
         )
-        hooks.cli_print(
-            "WARNING: Could not close the failed settings transaction; the device "
+        warn(
+            "Could not close the failed settings transaction; the device "
             "may still have an open transaction."
         )
 
@@ -1403,9 +1414,9 @@ def _apply_settings_transaction(
         target_node.commitSettingsTransaction()
     except BaseException:
         _close_failed_settings_transaction(
-            hooks,
             target_node,
             commit_attempted=commit_attempted,
+            cli_print=hooks.cli_print,
         )
         raise
 

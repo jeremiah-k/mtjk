@@ -226,10 +226,6 @@ def _execute(
 ) -> None:
     """Bind the standalone action implementation to embedded ownership rules."""
 
-    def report(message: str) -> None:
-        if not args.quiet:
-            capture._write(message)
-
     def embedded_print(message: str, *, force: bool = False) -> None:
         """Route the standalone CLI reporters into this invocation's capture."""
         if not force and getattr(args, "quiet", False):
@@ -262,20 +258,22 @@ def _execute(
             cli_print=(
                 capture._write
                 if args.get_ui_config or args.request_connection_status
-                else report
+                else embedded_print
             ),
             cli_exit=terminate,
         ),
         channel_contact=replace(
             hooks.channel_contact,
-            cli_print=report,
+            cli_print=embedded_print,
             cli_exit=terminate,
             set_channel_index=select_channel,
         ),
-        configure=replace(hooks.configure, cli_print=report, cli_exit=terminate),
+        configure=replace(
+            hooks.configure, cli_print=embedded_print, cli_exit=terminate
+        ),
         services=replace(
             hooks.services,
-            cli_print=report,
+            cli_print=embedded_print,
             preference_print=capture._write,
             cli_exit=terminate,
             newer_version=lambda: None,

@@ -824,15 +824,11 @@ def test_local_set_region_unavailable_readback_reports_unverified(
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("reset_mt_config")
-def test_local_set_region_in_batch_reports_unavailable_readback(
+def test_local_set_region_in_batch_rejects_unverified_other_sections(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A batch containing lora.region reports unavailable readback honestly.
-
-    The region write may make the node unavailable before the batch can be read
-    back, so unavailable readback does not claim verified success.
-    """
+    """A region change cannot waive readback of unrelated preferences."""
     device_local = localonly_pb2.LocalConfig()
     device_local.lora.hop_limit = 3
     device_local.power.ls_secs = 100
@@ -840,11 +836,13 @@ def test_local_set_region_in_batch_reports_unavailable_readback(
         device_local=device_local, deliver_on_request=False
     )
 
-    _run_main_set(
-        ["--set", "lora.region", "US", "--set", "power.ls_secs", "222"],
-        iface,
-        monkeypatch,
-    )
+    with pytest.raises(SystemExit) as error:
+        _run_main_set(
+            ["--set", "lora.region", "US", "--set", "power.ls_secs", "222"],
+            iface,
+            monkeypatch,
+        )
+    assert error.value.code == 1
 
     out, err = capsys.readouterr()
     captured = out + err
@@ -853,9 +851,9 @@ def test_local_set_region_in_batch_reports_unavailable_readback(
     assert calls.count("beginSettingsTransaction") == 1
     assert calls.count("commitSettingsTransaction") == 1
     assert any(call.startswith("readback:") for call in calls)
-    assert "Region write may interrupt node availability (lora.region)" in captured
-    assert "read-back verification was unavailable" in captured
-    assert "sent, not verified" in captured
+    assert "power" in captured
+    assert "could not be verified" in captured
+    assert "sent, not verified" not in captured
     assert "Verified:" not in captured
 
 

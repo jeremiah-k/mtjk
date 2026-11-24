@@ -224,6 +224,7 @@ def _build_connected_dispatch_hooks(
                 get_node_kwargs,
                 cli_exit=cli_exit,
                 cli_print=cli_print,
+                sleep=sleep,
             )
         ),
         handle_configure_command=handle_configure_command,
@@ -267,6 +268,7 @@ def _build_connected_dispatch_hooks(
         log_set_factory=log_set_factory,
         power_stress_factory=power_stress_factory,
         get_meter=get_meter,
+        sleep=sleep,
     )
     return DispatchHooks(
         cli_print=cli_print,

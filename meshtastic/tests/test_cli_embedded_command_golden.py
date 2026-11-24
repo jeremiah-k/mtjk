@@ -82,8 +82,11 @@ def test_capabilities_match_golden_surface() -> None:
 
 def test_help_output_matches_golden_rendering(
     offline_interface: MeshInterface,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Embedded --help renders the pinned usage text byte for byte."""
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setattr("meshtastic.cli.parser.platform.system", lambda: "Linux")
     golden = _golden()
     result = executeCommand(offline_interface, ["--help"])
     assert result.exitCode == golden["help"]["exitCode"]

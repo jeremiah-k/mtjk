@@ -443,8 +443,9 @@ def check_channel(interface: Any, channel_index: int) -> bool:
         channel = interface.localNode.getChannelCopyByChannelIndex(channel_index)
     else:
         channel = interface.localNode.getChannelByChannelIndex(channel_index)
-    logger.debug("ch:%s", channel)
-    return bool(channel and channel.role != channel_pb2.Channel.Role.DISABLED)
+    enabled = bool(channel and channel.role != channel_pb2.Channel.Role.DISABLED)
+    logger.debug("Channel %s enabled: %s", channel_index, enabled)
+    return enabled
 
 
 def _print_channel_field_choices(

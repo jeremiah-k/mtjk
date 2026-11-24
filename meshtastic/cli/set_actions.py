@@ -10,6 +10,7 @@ section loading, protobuf copies, verification) is owned here.
 from __future__ import annotations
 
 import binascii
+import logging
 import time
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -44,7 +45,10 @@ from meshtastic.cli.preference_runtime import (
     walk_config_path,
 )
 from meshtastic.configure_verify import LocalApplyStatus, verify_local_config_apply
+from meshtastic.errors import RequestRejectedError, ResponseDecodeError
 from meshtastic.mesh_interface import MeshInterface
+
+logger = logging.getLogger(__name__)
 
 LOCAL_SET_APPLY_VERIFY_SECONDS = 12.0
 """Shared verification budget for one local ``--set`` apply, across all sections.
@@ -159,12 +163,12 @@ def _format_set_preflight_exception(pref_name: str, exc: Exception) -> str:
     str
         Safe error detail suitable for the aggregated CLI failure message.
     """
-    if isinstance(exc, PreferenceValueError):
-        return str(exc)
     if is_secret_pref(pref_name):
         return (
             f"{pref_name}: invalid value {REDACTED_PREF_VALUE} ({type(exc).__name__})"
         )
+    if isinstance(exc, PreferenceValueError):
+        return str(exc)
     return f"{pref_name}: {exc}"
 
 
@@ -322,7 +326,9 @@ def _validate_set_entries_against_configs(
             detail_lines.append(f"  - {pref_name}: {SET_VALUE_REJECTED_MESSAGE}")
             detail_lines.extend(f"      {message}" for message in messages)
         details = "\n".join(detail_lines)
-        cli_exit(f"ERROR: --set batch rejected before applying changes:\n{details}")
+        _terminate_cli(
+            cli_exit, f"ERROR: --set batch rejected before applying changes:\n{details}"
+        )
 
     for pref_name, messages in value_rejections:
         if messages:
@@ -351,7 +357,7 @@ def _preflight_set_entries(
     *,
     cli_exit: CliExit,
     cli_print: Callable[..., None],
-) -> bool:
+) -> ConfigSnapshotCopies | None:
     """
     Validate all --set entries against configuration copies before applying changes.
 
@@ -368,18 +374,20 @@ def _preflight_set_entries(
 
     Returns
     -------
-    bool
-        ``True`` if every entry is valid; ``False`` if an unknown field or semantic
+    ConfigSnapshotCopies | None
+        Detached validated assignments, or None if an unknown field or semantic
         validation failure rejects the batch.
     """
     snapshot = ConfigSnapshotCopies.from_node(node)
-    return _validate_set_entries_against_configs(
+    if not _validate_set_entries_against_configs(
         node,
         (snapshot.local_config, snapshot.module_config),
         set_entries,
         cli_exit=cli_exit,
         cli_print=cli_print,
-    )
+    ):
+        return None
+    return snapshot
 
 
 def _handle_set_command(
@@ -389,9 +397,10 @@ def _handle_set_command(
     *,
     cli_exit: CliExit,
     cli_print: Callable[..., None],
+    sleep: Callable[[float], None] | None = None,
 ) -> None:
     """
-    Validate and apply a CLI ``--set`` batch without partial updates.
+    Validate an entire CLI ``--set`` batch before writing any updates.
 
     Parameters
     ----------
@@ -405,21 +414,25 @@ def _handle_set_command(
         Entrypoint-owned exit effect used for refusals and divergence failures.
     cli_print : Callable[..., None]
         Entrypoint-owned reporter for progress output.
+    sleep : Callable[[float], None] | None
+        Settlement delay effect; None uses the current time.sleep.
 
     Notes
     -----
     Invalid batches are rejected before modifying the device. Valid batches write
     all affected configuration sections and use a transaction when multiple
-    sections are changed.
+    sections are changed. Firmware has no rollback; failed writes or commits
+    can leave partial device-side changes.
     """
     node = interface.getNode(args.dest, False, **getNode_kwargs)
     set_entries = _normalize_set_entries(args.set)
     _ensure_set_sections_loaded(node, set_entries, cli_exit=cli_exit)
-    if not _preflight_set_entries(
+    snapshot = _preflight_set_entries(
         node, set_entries, cli_exit=cli_exit, cli_print=cli_print
-    ):
+    )
+    if not snapshot:
         if _get_command_scope(interface) is not None:
-            cli_exit("Invalid --set preference batch", 2)
+            _terminate_cli(cli_exit, "Invalid --set preference batch", 2)
         return
 
     pre_write_config_id = getattr(interface, "configId", None)
@@ -429,9 +442,10 @@ def _handle_set_command(
         normalized_pref_name = normalize_pref_name(raw_pref_name)
         resolved = _resolve_set_target(live_configs, normalized_pref_name)
         if resolved is None:
-            cli_exit(
+            _terminate_cli(
+                cli_exit,
                 "ERROR: --set field no longer resolves after successful preflight: "
-                f"{normalized_pref_name}."
+                f"{normalized_pref_name}.",
             )
         config, config_type = resolved
         try:
@@ -440,39 +454,63 @@ def _handle_set_command(
             )
         except (TypeError, ValueError, OverflowError, binascii.Error) as exc:
             detail = _format_set_preflight_exception(normalized_pref_name, exc)
-            cli_exit(
-                f"ERROR: --set apply diverged after successful preflight:\n  - {detail}"
+            _terminate_cli(
+                cli_exit,
+                f"ERROR: --set apply diverged after successful preflight:\n  - {detail}",
             )
         if not found:
-            cli_exit(
+            _terminate_cli(
+                cli_exit,
                 "ERROR: --set apply diverged after successful preflight for "
-                f"{normalized_pref_name}."
+                f"{normalized_pref_name}.",
             )
         fields.add(config_type.name)
 
+    local_node = getattr(interface, "localNode", None)
+    verify = bool(fields and node is local_node and not getattr(node, "noProto", False))
+    if verify:
+        # Freeze the validated detached copy: inbound responses may replace the
+        # live cache during assignment, a write, or the commit/settle wait.
+        config_fields, module_config_fields = _freeze_set_expected_values(
+            snapshot, set_entries
+        )
+
     if fields:
         cli_print("Writing modified preferences to device")
-        if len(fields) > 1:
+        transaction = len(fields) > 1
+        if transaction:
             cli_print("Using a configuration transaction")
             node.beginSettingsTransaction()
-        for field in fields:
-            cli_print(f"Writing {field} configuration to device")
-            node.writeConfig(field)
-        if len(fields) > 1:
-            node.commitSettingsTransaction()
-            # Mirror the --configure path: give the device time to settle
-            # (and, if it reboots, to drop the link) before verifying.
-            time.sleep(
+        commit_attempted = False
+        try:
+            for field in sorted(fields):
+                cli_print(f"Writing {field} configuration to device")
+                node.writeConfig(field)
+            if transaction:
+                commit_attempted = True
+                node.commitSettingsTransaction()
+        except BaseException:
+            if transaction:
+                # Firmware exposes no abort. Use the same best-effort closure
+                # policy as --configure and preserve the original failure.
+                try:
+                    cli_configure_actions._close_failed_settings_transaction(
+                        node,
+                        commit_attempted=commit_attempted,
+                        cli_print=_forced_reporter(cli_print),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to report or close --set transaction", exc_info=True
+                    )
+            raise
+        if transaction:
+            # Give the device time to settle or drop its link before verifying.
+            (sleep or time.sleep)(
                 _remaining_timeout(cli_configure_actions.CONFIG_COMMIT_SETTLE_SECONDS)
             )
 
-    local_node = getattr(interface, "localNode", None)
-    if fields and node is local_node and not getattr(node, "noProto", False):
-        # Freeze the staged requested values before verification clears and
-        # reloads the cached sections with fresh device state.
-        config_fields, module_config_fields = _freeze_set_expected_values(
-            node, set_entries
-        )
+    if verify:
         _verify_local_set_apply(
             interface,
             node,
@@ -486,14 +524,14 @@ def _handle_set_command(
 
 
 def _freeze_set_expected_values(
-    node: Any, set_entries: Sequence[tuple[str, Any]]
+    snapshot: ConfigSnapshotCopies, set_entries: Sequence[tuple[str, Any]]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Freeze the requested leaf values per section from the staged cache.
+    """Freeze requested leaf values per section from detached preflight copies.
 
     Parameters
     ----------
-    node : Any
-        Local node whose cached configuration holds the staged assignments.
+    snapshot : ConfigSnapshotCopies
+        Detached preflight configuration holding the validated assignments.
     set_entries : Sequence[tuple[str, Any]]
         Parsed ``--set`` name/value entries. Names are normalized before
         resolution, matching the apply loop.
@@ -509,7 +547,9 @@ def _freeze_set_expected_values(
     module_config_fields: dict[str, dict[str, Any]] = {}
     for raw_pref_name, _raw_value in set_entries:
         pref_name = normalize_pref_name(raw_pref_name)
-        resolved = _resolve_set_target((node.localConfig, node.moduleConfig), pref_name)
+        resolved = _resolve_set_target(
+            (snapshot.local_config, snapshot.module_config), pref_name
+        )
         if resolved is None:
             continue
         config, config_type = resolved
@@ -521,7 +561,7 @@ def _freeze_set_expected_values(
             continue
         target, leaf_field = resolved_leaf
         section_fields = (
-            config_fields if config is node.localConfig else module_config_fields
+            config_fields if config is snapshot.local_config else module_config_fields
         )
         section_values = section_fields.setdefault(config_type.name, {})
         cursor = section_values
@@ -608,8 +648,8 @@ def _verify_local_set_apply(
     CLI instead of reporting an unqualified success; verification is skipped
     entirely for ``noProto`` nodes by the caller. Send failures from the
     verification request propagate out of the seam and map to a CLI error
-    here. When the readback budget expires because the device dropped the
-    link (a commit-triggered reboot), one bounded reconnect-based
+    here unless link or generation state indicates a reboot. When the
+    readback fails because the device dropped the link (a commit-triggered reboot), one bounded reconnect-based
     re-verification using the existing ``--configure`` machinery gets the
     final word; a connection-alive reload failure still fails immediately.
 
@@ -629,6 +669,26 @@ def _verify_local_set_apply(
             timeout_sec=LOCAL_SET_APPLY_VERIFY_SECONDS,
         )
     except Exception as exc:
+        transport_failure = isinstance(
+            exc, (OSError, MeshInterface.MeshInterfaceError)
+        ) and not isinstance(exc, (RequestRejectedError, ResponseDecodeError))
+        reboot_shaped = _link_dropped(interface) or _config_generation_changed(
+            interface, pre_write_config_id
+        )
+        if (
+            transport_failure
+            and reboot_shaped
+            and (config_fields or module_config_fields)
+        ):
+            _verify_local_set_after_reconnect(
+                interface,
+                node_dest=node_dest,
+                config_fields=config_fields,
+                module_config_fields=module_config_fields,
+                cli_exit=cli_exit,
+                cli_print=cli_print,
+            )
+            return
         _terminate_cli(
             cli_exit,
             "ERROR: local --set verification could not read fresh device state: "
@@ -648,16 +708,6 @@ def _verify_local_set_apply(
             f"values for: {fields_text}. The device did not apply the requested "
             "value(s).",
         )
-    availability_fields = _availability_changing_set_fields(
-        config_fields, module_config_fields
-    )
-    if verification.status == LocalApplyStatus.RELOAD_FAILED and availability_fields:
-        cli_print(
-            "Region write may interrupt node availability ("
-            f"{', '.join(availability_fields)}); read-back verification was "
-            "unavailable. Requested changes were sent, not verified."
-        )
-        return
     if verification.status == LocalApplyStatus.RELOAD_FAILED and (
         _link_dropped(interface)
         or _config_generation_changed(interface, pre_write_config_id)
@@ -669,6 +719,30 @@ def _verify_local_set_apply(
             module_config_fields=module_config_fields,
             cli_exit=cli_exit,
             cli_print=cli_print,
+        )
+        return
+    availability_fields = _availability_changing_set_fields(
+        config_fields, module_config_fields
+    )
+    missing = set(verification.missing_sections)
+    unverified_paths = {
+        path
+        for fields in (config_fields, module_config_fields)
+        for section, values in fields.items()
+        if section in missing
+        for path in cli_configure_actions._flatten_leaf_paths(section, values)
+    }
+    if (
+        verification.status == LocalApplyStatus.RELOAD_FAILED
+        and unverified_paths
+        and unverified_paths <= set(availability_fields)
+        and missing <= {path.split(".", 1)[0] for path in unverified_paths}
+    ):
+        cli_print(
+            "Region write may interrupt node availability ("
+            f"{', '.join(sorted(unverified_paths))}); read-back verification was "
+            "unavailable. Requested changes were sent, not verified.",
+            force=True,
         )
         return
     if verification.status == LocalApplyStatus.RELOAD_FAILED:
@@ -752,6 +826,28 @@ def _verify_local_set_after_reconnect(
     )
     if reconnect_result == cli_configure_actions.ConfigureReconnectResult.VERIFIED:
         cli_print("Verified: fresh device state matches the requested --set values.")
+        return
+    requested_paths = {
+        path
+        for fields in (config_fields, module_config_fields)
+        for section, values in fields.items()
+        for path in cli_configure_actions._flatten_leaf_paths(section, values)
+    }
+    if (
+        reconnect_result
+        in (
+            cli_configure_actions.ConfigureReconnectResult.RECONNECT_FAILED,
+            cli_configure_actions.ConfigureReconnectResult.CONFIG_RELOAD_FAILED,
+        )
+        and requested_paths
+        and requested_paths <= cli_configure_actions.PREFS_WITH_AVAILABILITY_CHANGES
+    ):
+        cli_print(
+            "Region write may interrupt node availability ("
+            f"{', '.join(sorted(requested_paths))}); reconnect read-back verification "
+            "was unavailable. Requested changes were sent, not verified.",
+            force=True,
+        )
         return
     _terminate_cli(
         cli_exit,
@@ -930,9 +1026,10 @@ def _preview_set_command(
         cli_exit=cli_exit,
         cli_print=cli_print,
     ):
-        cli_exit(
+        _terminate_cli(
+            cli_exit,
             "ERROR: --set batch rejected during dry run; "
-            "no changes were written to the device."
+            "no changes were written to the device.",
         )
 
     # Validation sees every entry — including superseded duplicates — so an
@@ -946,16 +1043,18 @@ def _preview_set_command(
         pref_name = normalize_pref_name(raw_pref_name)
         resolved = _resolve_set_target(config_copies, pref_name)
         if resolved is None:
-            cli_exit(
+            _terminate_cli(
+                cli_exit,
                 "ERROR: --set field no longer resolves after successful preflight: "
-                f"{pref_name}."
+                f"{pref_name}.",
             )
         candidate, config_type = resolved
         resolved_leaf = _resolve_set_leaf(candidate, pref_name)
         if resolved_leaf is None:
-            cli_exit(
+            _terminate_cli(
+                cli_exit,
                 "ERROR: --set field no longer resolves after successful preflight: "
-                f"{pref_name}."
+                f"{pref_name}.",
             )
         target, leaf_field = resolved_leaf
         new_value = _read_set_leaf_value(target, leaf_field)

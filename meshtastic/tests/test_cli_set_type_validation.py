@@ -207,7 +207,7 @@ def test_cli_malformed_encoded_value_exits_without_writing(
     assert exc_info.value.code == 1
     node.writeConfig.assert_not_called()
     out, err = capsys.readouterr()
-    assert "Invalid value <redacted> for security.private_key" in err
+    assert "security.private_key: invalid value <redacted>" in err
     assert malformed not in out + err
     assert "Traceback" not in out + err
 
