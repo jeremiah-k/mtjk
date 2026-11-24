@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import importlib
 import inspect
 import logging
 from queue import Empty, Full
@@ -23,12 +22,11 @@ from meshtastic.interfaces.ble.compatibility_service import (
 from meshtastic.interfaces.ble.coordination import ThreadCoordinator, _InertThread
 from meshtastic.interfaces.ble.errors import BLEErrorHandler
 from meshtastic.interfaces.ble.management_runtime import (
+    TRUST_HEX_BLOB_RE,
+    TRUST_TOKEN_RE,
+    BLEManagementCommandHandler,
     _create_management_client,
     _is_blank_or_malformed_address_like,
-)
-from meshtastic.interfaces.ble.management_service import (
-    BLEManagementCommandHandler,
-    BLEManagementCommandsService,
 )
 from meshtastic.interfaces.ble.management_state import BLEManagementState
 from meshtastic.interfaces.ble.reconnection import (
@@ -693,7 +691,7 @@ def test_management_helpers_cover_factory_and_target_edge_paths(
         )
 
         with pytest.raises(RuntimeError, match="target resolution failure"):
-            BLEManagementCommandsService._start_management_phase(iface, None)
+            iface._get_management_command_handler().start_management_phase(None)
         with iface._management_lock:
             assert iface._management_inflight == 0
     finally:
@@ -718,42 +716,11 @@ def test_management_helpers_cover_factory_and_target_edge_paths(
         )
 
         with pytest.raises(fresh_iface.BLEError, match="changed"):
-            BLEManagementCommandsService._resolve_management_target(
-                fresh_iface, None, start_context
+            fresh_iface._get_management_command_handler().resolve_management_target(
+                None, start_context
             )
     finally:
         fresh_iface.close()
-
-
-def test_management_shim_handler_resolution_preserves_minimal_iface_double(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Shim handler resolution should preserve minimal iface-owned handler doubles."""
-    iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
-    try:
-        minimal_handler = SimpleNamespace(
-            execute_management_command=lambda *_args, **_kwargs: "ok"
-        )
-        iface._get_management_command_handler = cast(  # type: ignore[method-assign]
-            Any, lambda: minimal_handler
-        )
-        resolved = BLEManagementCommandsService._handler_for_shim(iface)
-        assert resolved is cast(Any, minimal_handler)
-        assert BLEManagementCommandsService._has_required_handler_entrypoint(
-            minimal_handler
-        )
-
-        iface._get_management_command_handler = MagicMock(  # type: ignore[method-assign]
-            side_effect=lambda: MagicMock()
-        )
-        fallback_handler = BLEManagementCommandsService._handler_for_shim(iface)
-        assert isinstance(fallback_handler, BLEManagementCommandHandler)
-        assert (
-            BLEManagementCommandsService._has_required_handler_entrypoint(object())
-            is False
-        )
-    finally:
-        iface.close()
 
 
 def _minimal_management_handler(
@@ -942,84 +909,6 @@ def test_management_handler_call_iface_override_respects_instance_and_subclass_o
         iface.close()
 
 
-def test_management_shim_default_connected_elsewhere_and_handler_like(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Management shim should cover strict handler-like positives and default ownership probe."""
-    iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
-    original_get_management_handler = iface._get_management_command_handler
-    original_direct_handler = getattr(iface, "_management_command_handler", None)
-    try:
-        required_methods = (
-            "resolve_target_address_for_management",
-            "management_target_gate",
-            "get_management_client_if_available",
-            "get_management_client_for_target",
-            "get_current_implicit_management_binding_locked",
-            "get_current_implicit_management_address_locked",
-            "revalidate_implicit_management_target",
-            "start_management_phase",
-            "resolve_management_target",
-            "acquire_client_for_target",
-            "execute_with_client",
-            "execute_management_command",
-            "begin_management_operation_locked",
-            "finish_management_operation",
-            "validate_management_await_timeout",
-            "validate_trust_timeout",
-            "validate_connect_timeout_override",
-            "pair",
-            "unpair",
-            "run_bluetoothctl_trust_command",
-            "trust",
-        )
-        handler_like_candidate = SimpleNamespace(
-            **{
-                method_name: (lambda *_args, **_kwargs: None)
-                for method_name in required_methods
-            }
-        )
-        assert BLEManagementCommandsService._is_handler_like(handler_like_candidate)
-
-        connected_elsewhere_calls: list[tuple[str | None, object | None]] = []
-        late_bound_calls: list[tuple[str | None, object | None]] = []
-
-        def _connected_elsewhere(key: str | None, owner: object | None = None) -> bool:
-            connected_elsewhere_calls.append((key, owner))
-            return True
-
-        def _late_bound(key: str | None, owner: object | None = None) -> bool:
-            late_bound_calls.append((key, owner))
-            return True
-
-        monkeypatch.setattr(
-            "meshtastic.interfaces.ble.management_compat_service._is_currently_connected_elsewhere",
-            _connected_elsewhere,
-        )
-        monkeypatch.setattr(
-            iface,
-            "_connected_elsewhere_late_bound",
-            _late_bound,
-            raising=True,
-        )
-        iface._get_management_command_handler = cast(  # type: ignore[method-assign]
-            Any, lambda: None
-        )
-        resolved_direct_handler = BLEManagementCommandsService._handler_for_shim(iface)
-        assert resolved_direct_handler is original_direct_handler
-
-        iface._management_command_handler = None
-        resolved_handler = BLEManagementCommandsService._handler_for_shim(iface)
-        assert isinstance(resolved_handler, BLEManagementCommandHandler)
-        assert resolved_handler._connected_elsewhere("device-key", iface) is True
-        assert late_bound_calls == [("device-key", iface)]
-        assert connected_elsewhere_calls == []
-    finally:
-        iface._get_management_command_handler = original_get_management_handler  # type: ignore[method-assign]
-        iface._management_command_handler = original_direct_handler
-        iface.close()
-
-
 def test_resolve_management_target_existing_client_explicit_address_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1045,10 +934,11 @@ def test_resolve_management_target_existing_client_explicit_address_paths(
             _resolve_target_address
         )
 
-        target_missing_client, active_client_missing_client = (
-            BLEManagementCommandsService._resolve_management_target(
-                iface, "target-id", cast(Any, start_context)
-            )
+        (
+            target_missing_client,
+            active_client_missing_client,
+        ) = iface._get_management_command_handler().resolve_management_target(
+            "target-id", cast(Any, start_context)
         )
         assert target_missing_client == "AA:BB:CC:DD:EE:FF"
         assert active_client_missing_client is None
@@ -1066,8 +956,10 @@ def test_resolve_management_target_existing_client_explicit_address_paths(
             Any, lambda _client: None
         )
 
-        target, active_client = BLEManagementCommandsService._resolve_management_target(
-            iface,
+        (
+            target,
+            active_client,
+        ) = iface._get_management_command_handler().resolve_management_target(
             "target-id",
             cast(Any, start_context),
         )
@@ -1088,8 +980,7 @@ def test_management_execute_with_client_preserves_command_outcome_on_close_failu
             side_effect=RuntimeError("close failed")
         )
 
-        result = BLEManagementCommandsService._execute_with_client(
-            iface,
+        result = iface._get_management_command_handler().execute_with_client(
             client_to_use=cast(Any, DummyClient()),
             temporary_client=cast(Any, DummyClient()),
             command=lambda _client: "ok",
@@ -1130,12 +1021,9 @@ def test_management_execute_management_command_existing_client_and_trust_edges(
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()),
         )
 
-        assert BLEManagementCommandsService._execute_management_command(
-            iface,
+        assert iface._get_management_command_handler().execute_management_command(
             None,
             lambda client: client,
-            ble_client_factory=cast(Any, DummyClient),
-            connected_elsewhere=lambda *_args: False,
         ) is cast(Any, refreshed_client)
 
         bluetooth_iface._format_bluetoothctl_address = (  # type: ignore[method-assign]
@@ -1153,18 +1041,13 @@ def test_management_execute_management_command_existing_client_and_trust_edges(
                 raise ValueError("unexpected non-oserror")
 
         with pytest.raises(bluetooth_iface.BLEError, match="trust"):
-            BLEManagementCommandsService._run_bluetoothctl_trust_command(
-                bluetooth_iface,
+            bluetooth_iface._get_management_command_handler().run_bluetoothctl_trust_command(
                 "/usr/bin/bluetoothctl",
                 "AA:BB:CC:DD:EE:FF",
                 1.0,
                 subprocess_module=_SubprocessModule,
-                trust_hex_blob_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_HEX_BLOB_RE,
-                trust_token_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_TOKEN_RE,
+                trust_hex_blob_re=TRUST_HEX_BLOB_RE,
+                trust_token_re=TRUST_TOKEN_RE,
                 trust_command_output_max_chars=3,
             )
 
@@ -1180,8 +1063,7 @@ def test_management_execute_management_command_existing_client_and_trust_edges(
         )
 
         with pytest.raises(bluetooth_iface.BLEError, match="require"):
-            BLEManagementCommandsService.trust(
-                bluetooth_iface,
+            bluetooth_iface._get_management_command_handler().trust(
                 None,
                 timeout=1.0,
                 sys_module=SimpleNamespace(platform="linux"),
@@ -1189,12 +1071,8 @@ def test_management_execute_management_command_existing_client_and_trust_edges(
                     which=lambda _name: "/usr/bin/bluetoothctl"
                 ),
                 subprocess_module=_SubprocessModule,
-                trust_hex_blob_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_HEX_BLOB_RE,
-                trust_token_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_TOKEN_RE,
+                trust_hex_blob_re=TRUST_HEX_BLOB_RE,
+                trust_token_re=TRUST_TOKEN_RE,
                 trust_command_output_max_chars=3,
             )
     finally:
@@ -1602,18 +1480,13 @@ def test_reconnect_scheduler_start_exception_and_management_trust_truncation(
                 )
 
         with pytest.raises(iface.BLEError, match="trust"):
-            BLEManagementCommandsService._run_bluetoothctl_trust_command(
-                iface,
+            iface._get_management_command_handler().run_bluetoothctl_trust_command(
                 "/usr/bin/bluetoothctl",
                 "AA:BB:CC:DD:EE:FF",
                 1.0,
                 subprocess_module=_FailingSubprocess,
-                trust_hex_blob_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_HEX_BLOB_RE,
-                trust_token_re=importlib.import_module(
-                    "meshtastic.interfaces.ble.management_service"
-                ).TRUST_TOKEN_RE,
+                trust_hex_blob_re=TRUST_HEX_BLOB_RE,
+                trust_token_re=TRUST_TOKEN_RE,
                 trust_command_output_max_chars=2,
             )
     finally:
