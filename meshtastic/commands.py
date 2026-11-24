@@ -22,7 +22,11 @@ from meshtastic.cli import preference_runtime as _cli_preference_runtime
 from meshtastic.cli.context import CliContext
 from meshtastic.cli.dispatch import _dispatch_connected
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
-from meshtastic.cli.parser import parse_cli_args
+from meshtastic.cli.parser import (
+    EMBEDDED_ACTION_DESTS,
+    EMBEDDED_OPTION_DESTS,
+    parse_cli_args,
+)
 from meshtastic.configuration import _preference_path
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.node import Node
@@ -37,95 +41,7 @@ __all__ = (
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
-_ACTIONS = frozenset(
-    {
-        "get",
-        "set",
-        "begin_edit",
-        "commit_edit",
-        "get_canned_message",
-        "set_canned_message",
-        "get_ringtone",
-        "set_ringtone",
-        "ch_vlongslow",
-        "ch_longslow",
-        "ch_longmod",
-        "ch_longfast",
-        "ch_longturbo",
-        "ch_medslow",
-        "ch_medfast",
-        "ch_shortslow",
-        "ch_shortfast",
-        "ch_shortturbo",
-        "ch_preset",
-        "set_owner",
-        "set_owner_short",
-        "set_ham",
-        "set_is_unmessageable",
-        "setalt",
-        "setlat",
-        "setlon",
-        "remove_position",
-        "pos_fields",
-        "ch_add",
-        "ch_del",
-        "ch_set",
-        "ch_enable",
-        "ch_disable",
-        "qr",
-        "qr_all",
-        "contact_qr",
-        "info",
-        "show_region_presets",
-        "nodes",
-        "sendtext",
-        "traceroute",
-        "request_telemetry",
-        "request_position",
-        "reboot",
-        "reboot_ota",
-        "enter_dfu",
-        "shutdown",
-        "remove_node",
-        "set_favorite_node",
-        "remove_favorite_node",
-        "set_ignored_node",
-        "remove_ignored_node",
-        "reset_nodedb",
-        "set_time",
-        "backup_preferences",
-        "restore_preferences",
-        "remove_backup_preferences",
-        "toggle_muted_node",
-        "delete_file",
-        "send_input_event",
-        "request_connection_status",
-        "get_ui_config",
-    }
-)
-_OPTIONS = frozenset(
-    {
-        "dest",
-        "ch_index",
-        "channel_fetch_attempts",
-        "contact_verified",
-        "contact_ignore",
-        "show_fields",
-        "role",
-        "hwmodel",
-        "sort",
-        "limit",
-        "private",
-        "reply",
-        "ack",
-        "quiet",
-        "input_kb_char",
-        "input_touch_x",
-        "input_touch_y",
-        "help",
-        "version",
-    }
-)
+_EMBEDDED_DESTS = EMBEDDED_ACTION_DESTS | EMBEDDED_OPTION_DESTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +160,7 @@ def _parser(output: Callable[[str], None]) -> tuple[_CommandParser, argparse.Nam
     # argparse has no public action-removal API. Remove actions from both parse
     # and help indexes so capability discovery, help and validation agree.
     for action in tuple(parser._actions):
-        if action.dest in _ACTIONS | _OPTIONS:
+        if action.dest in _EMBEDDED_DESTS:
             continue
         parser._remove_action(action)
         for option in action.option_strings:
@@ -258,7 +174,13 @@ def _parser(output: Callable[[str], None]) -> tuple[_CommandParser, argparse.Nam
 def getCommandCapabilities() -> CommandCapabilities:
     """Return accepted option spellings without opening a transport."""
     parser, _ = _parser(lambda _message: None)
-    return CommandCapabilities(1, tuple(sorted(parser._option_string_actions)))
+    # argparse keeps the action registry in a private attribute. Collect the
+    # accepted spellings from the surviving action definitions instead of the
+    # parse index, matching the minimal internal use in _parser.
+    option_strings = {
+        spelling for action in parser._actions for spelling in action.option_strings
+    }
+    return CommandCapabilities(1, tuple(sorted(option_strings)))
 
 
 def _fresh_get_pref(
@@ -437,7 +359,8 @@ def executeCommand(
             parser, defaults = _parser(capture._write)
             args = parser.parse_args(list(argv), namespace=defaults)
             if not any(
-                getattr(args, name) != parser.get_default(name) for name in _ACTIONS
+                getattr(args, name) != parser.get_default(name)
+                for name in EMBEDDED_ACTION_DESTS
             ):
                 raise _CommandExit(2, "Specify at least one supported command")
             args.dest = args.dest or BROADCAST_ADDR

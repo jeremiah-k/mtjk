@@ -1426,3 +1426,100 @@ def parse_cli_args(
         autocomplete = argcomplete_module.autocomplete
         autocomplete(parser)
     return parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+
+# Destinations of the argument groups that embedded command execution may use.
+# This allowlist is expressed beside the parser definitions it constrains and is
+# the single source for the embedded command surface: option spellings outside
+# these destinations are refused before any action runs, and long-running
+# services, transport selection, file-based configuration, and interactive
+# flows stay standalone-only.
+EMBEDDED_ACTION_DESTS: frozenset[str] = frozenset(
+    {
+        "get",
+        "set",
+        "begin_edit",
+        "commit_edit",
+        "get_canned_message",
+        "set_canned_message",
+        "get_ringtone",
+        "set_ringtone",
+        "ch_vlongslow",
+        "ch_longslow",
+        "ch_longmod",
+        "ch_longfast",
+        "ch_longturbo",
+        "ch_medslow",
+        "ch_medfast",
+        "ch_shortslow",
+        "ch_shortfast",
+        "ch_shortturbo",
+        "ch_preset",
+        "set_owner",
+        "set_owner_short",
+        "set_ham",
+        "set_is_unmessageable",
+        "setalt",
+        "setlat",
+        "setlon",
+        "remove_position",
+        "pos_fields",
+        "ch_add",
+        "ch_del",
+        "ch_set",
+        "ch_enable",
+        "ch_disable",
+        "qr",
+        "qr_all",
+        "contact_qr",
+        "info",
+        "show_region_presets",
+        "nodes",
+        "sendtext",
+        "traceroute",
+        "request_telemetry",
+        "request_position",
+        "reboot",
+        "reboot_ota",
+        "enter_dfu",
+        "shutdown",
+        "remove_node",
+        "set_favorite_node",
+        "remove_favorite_node",
+        "set_ignored_node",
+        "remove_ignored_node",
+        "reset_nodedb",
+        "set_time",
+        "backup_preferences",
+        "restore_preferences",
+        "remove_backup_preferences",
+        "toggle_muted_node",
+        "delete_file",
+        "send_input_event",
+        "request_connection_status",
+        "get_ui_config",
+    }
+)
+EMBEDDED_OPTION_DESTS: frozenset[str] = frozenset(
+    {
+        "dest",
+        "ch_index",
+        "channel_fetch_attempts",
+        "contact_verified",
+        "contact_ignore",
+        "show_fields",
+        "role",
+        "hwmodel",
+        "sort",
+        "limit",
+        "private",
+        "reply",
+        "ack",
+        "quiet",
+        "input_kb_char",
+        "input_touch_x",
+        "input_touch_y",
+        "help",
+        "version",
+    }
+)
