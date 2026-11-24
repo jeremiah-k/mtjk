@@ -59,6 +59,7 @@ from meshtastic.node_runtime.channel_presentation_runtime import (
 )
 from meshtastic.node_runtime.channel_request_runtime import _NodeChannelRequestRuntime
 from meshtastic.node_runtime.channel_state import _ChannelLock, _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.settings_runtime import (
     _NodeAdminCommandRuntime,
     _NodeOwnerProfileRuntime,
@@ -227,6 +228,8 @@ class Node:  # pylint: disable=too-many-instance-attributes
         self._canned_message_lock = threading.Lock()
         self._metadata_stdout_event_lock = threading.Lock()
         self._metadata_stdout_event: threading.Event | None = None
+        self._lazy_init_lock = threading.RLock()
+        self._node_port_cache: "_NodePort | None" = None
         self._admin_session_runtime = _NodeAdminSessionRuntime(self)
         self._admin_transport_runtime = _NodeAdminTransportRuntime(self)
         self._channel_lookup_runtime = _NodeChannelLookupRuntime(self._channel_state)
@@ -280,7 +283,6 @@ class Node:  # pylint: disable=too-many-instance-attributes
         self._position_time_runtime_cache: "_NodePositionTimeCommandRuntime | None" = (
             None
         )
-        self._lazy_init_lock = threading.RLock()
 
     def _get_channel_state(self) -> _NodeChannelState:
         """Return the channel-state owner, migrating legacy raw instance fields."""
@@ -434,6 +436,20 @@ class Node:  # pylint: disable=too-many-instance-attributes
                         self
                     )
         return self._position_time_runtime_cache
+
+    @property
+    def _node_port(self) -> "_NodePort":
+        """Lazy-init for the runtime collaborator port (thread-safe).
+
+        The port is created once per node and handed to every runtime
+        collaborator in place of ``self``; collaborators reach ``Node``
+        internals only through it.
+        """
+        if self._node_port_cache is None:
+            with self._lazy_init_lock:
+                if self._node_port_cache is None:
+                    self._node_port_cache = _NodePort(self)
+        return self._node_port_cache
 
     def __repr__(self) -> str:
         """Return a developer-oriented string identifying the Node.
