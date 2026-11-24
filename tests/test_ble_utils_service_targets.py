@@ -17,7 +17,6 @@ import meshtastic.interfaces.ble.compatibility_service as compatibility_mod
 import meshtastic.interfaces.ble.utils as ble_utils
 from meshtastic.interfaces.ble.compatibility_service import (
     BLECompatibilityEventPublisher,
-    BLECompatibilityEventService,
 )
 from meshtastic.interfaces.ble.coordination import ThreadCoordinator, _InertThread
 from meshtastic.interfaces.ble.errors import BLEErrorHandler
@@ -41,6 +40,24 @@ from meshtastic.util import DeferredExecution
 from tests.test_ble_interface_fixtures import DummyClient, _build_interface
 
 pytestmark = pytest.mark.unit
+
+
+def _publisher_with_thread(
+    iface: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    publishing_thread: object | None,
+) -> BLECompatibilityEventPublisher:
+    """Build a publisher whose thread resolution returns the given facade."""
+    publisher = BLECompatibilityEventPublisher(
+        iface,
+        publishing_thread_provider=lambda: publishing_thread,
+    )
+    monkeypatch.setattr(
+        publisher,
+        "_resolve_publishing_thread",
+        lambda use_cached_fallback=True: publishing_thread,
+    )
+    return publisher
 
 
 class _QueueFailure(Exception):
@@ -190,7 +207,7 @@ def test_compatibility_event_service_enqueue_paths() -> None:
         thread=SimpleNamespace(is_alive=lambda: False),
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             dead_thread,
             callback,
             prefer_non_blocking=False,
@@ -202,7 +219,7 @@ def test_compatibility_event_service_enqueue_paths() -> None:
         queueWork=None, queue=SimpleNamespace(), thread=None
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             no_put_nowait,
             callback,
             prefer_non_blocking=True,
@@ -217,7 +234,7 @@ def test_compatibility_event_service_enqueue_paths() -> None:
         thread=None,
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             full_nonblocking,
             callback,
             prefer_non_blocking=True,
@@ -233,7 +250,7 @@ def test_compatibility_event_service_enqueue_paths() -> None:
         thread=None,
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             queue_work_only,
             callback,
             prefer_non_blocking=False,
@@ -249,7 +266,7 @@ def test_compatibility_event_service_enqueue_paths() -> None:
         thread=None,
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             put_nowait_only,
             callback,
             prefer_non_blocking=False,
@@ -266,7 +283,7 @@ def test_nonblocking_enqueue_starts_lazy_publishing_worker() -> None:
 
     try:
         assert publishing_thread.thread is None
-        assert BLECompatibilityEventService._enqueue_publish_callback(
+        assert BLECompatibilityEventPublisher._enqueue_publish_callback(
             publishing_thread,
             completed.set,
             prefer_non_blocking=True,
@@ -302,14 +319,14 @@ def test_wait_for_disconnect_notifications_handles_timeout_and_dead_publisher(
     drained: list[object] = []
     monkeypatch.setattr(compatibility_mod, "Event", _FakeEvent, raising=True)
     monkeypatch.setattr(
-        BLECompatibilityEventService,
-        "_safe_execute",
-        staticmethod(lambda *_args, **_kwargs: True),
+        compatibility_mod,
+        "_safe_execute_through_adapter",
+        lambda *_args, **_kwargs: True,
     )
     monkeypatch.setattr(
-        BLECompatibilityEventService,
-        "drain_publish_queue",
-        staticmethod(lambda *_args, **_kwargs: drained.append("drained")),
+        BLECompatibilityEventPublisher,
+        "_drain_publish_queue_on_thread",
+        lambda self, _flush_event, *, publishing_thread=None: drained.append("drained"),
     )
 
     publishing_thread = SimpleNamespace(
@@ -317,11 +334,9 @@ def test_wait_for_disconnect_notifications_handles_timeout_and_dead_publisher(
         queueWork=lambda _cb: None,
         queue=SimpleNamespace(put_nowait=lambda _cb: None),
     )
-    BLECompatibilityEventService.wait_for_disconnect_notifications(
-        iface,
-        timeout=0.01,
-        publishing_thread=publishing_thread,
-    )
+    _publisher_with_thread(
+        iface, monkeypatch, publishing_thread
+    ).wait_for_disconnect_notifications(timeout=0.01)
     assert drained == ["drained"]
 
 
@@ -353,18 +368,14 @@ def test_drain_publish_queue_fallback_branches(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(compatibility_mod, "MAX_DRAIN_ITERATIONS", 2, raising=True)
 
-    BLECompatibilityEventService.drain_publish_queue(
-        iface,
-        flush_event,
-        publishing_thread=publishing_thread,
+    _publisher_with_thread(iface, monkeypatch, publishing_thread).drain_publish_queue(
+        flush_event
     )
     assert runnable_calls == ["ran", "ran"]
 
-    BLECompatibilityEventService.drain_publish_queue(
-        iface,
-        flush_event,
-        publishing_thread=SimpleNamespace(thread=None, queue=SimpleNamespace()),
-    )
+    _publisher_with_thread(
+        iface, monkeypatch, SimpleNamespace(thread=None, queue=SimpleNamespace())
+    ).drain_publish_queue(flush_event)
 
 
 def test_publish_connection_status_branches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -374,11 +385,9 @@ def test_publish_connection_status_branches(monkeypatch: pytest.MonkeyPatch) -> 
     import meshtastic.mesh_interface as mesh_iface_module
 
     monkeypatch.setattr(mesh_iface_module, "pub", None, raising=True)
-    BLECompatibilityEventService.publish_connection_status(
-        iface,
-        connected=True,
-        publishing_thread=SimpleNamespace(queueWork=lambda _cb: None, queue=None),
-    )
+    _publisher_with_thread(
+        iface, monkeypatch, SimpleNamespace(queueWork=lambda _cb: None, queue=None)
+    ).publish_connection_status(connected=True)
 
     class _RaisingPub:
         @staticmethod
@@ -386,11 +395,9 @@ def test_publish_connection_status_branches(monkeypatch: pytest.MonkeyPatch) -> 
             raise RuntimeError("publish failed")
 
     monkeypatch.setattr(mesh_iface_module, "pub", _RaisingPub(), raising=True)
-    BLECompatibilityEventService.publish_connection_status_legacy(
-        iface,
-        connected=False,
-        publishing_thread=SimpleNamespace(queueWork=None, queue=SimpleNamespace()),
-    )
+    _publisher_with_thread(
+        iface, monkeypatch, SimpleNamespace(queueWork=None, queue=SimpleNamespace())
+    ).publish_connection_status_legacy(False)
 
 
 def test_publish_connection_status_legacy_resolves_default_publishing_thread(
@@ -417,10 +424,11 @@ def test_publish_connection_status_legacy_resolves_default_publishing_thread(
     )
     iface = SimpleNamespace(_get_publishing_thread=lambda: publishing_thread)
 
-    BLECompatibilityEventService.publish_connection_status_legacy(
+    publisher = BLECompatibilityEventPublisher(
         iface,  # type: ignore[arg-type]
-        connected=True,
+        publishing_thread_provider=iface._get_publishing_thread,
     )
+    publisher.publish_connection_status_legacy(True)
 
     assert sent == [("meshtastic.connection.status", iface, True)]
 
@@ -466,11 +474,9 @@ def test_status_publish_ignores_synthesized_closing_probe(
         compatibility_service_mod, "Thread", _ImmediateThread, raising=True
     )
 
-    BLECompatibilityEventService.publish_connection_status(
-        iface,  # type: ignore[arg-type]
-        connected=True,
-        publishing_thread=None,
-    )
+    _publisher_with_thread(
+        cast(Any, iface), monkeypatch, None
+    ).publish_connection_status(connected=True)
 
     assert sent == [("meshtastic.connection.status", iface, True)]
 
@@ -515,11 +521,9 @@ def test_status_publish_closing_probe_failure_is_best_effort(
     )
     caplog.set_level(logging.DEBUG, logger="meshtastic.ble")
 
-    BLECompatibilityEventService.publish_connection_status(
-        iface,  # type: ignore[arg-type]
-        connected=True,
-        publishing_thread=None,
-    )
+    _publisher_with_thread(
+        cast(Any, iface), monkeypatch, None
+    ).publish_connection_status(connected=True)
 
     assert sent == [("meshtastic.connection.status", iface, True)]
     assert any(
@@ -527,56 +531,6 @@ def test_status_publish_closing_probe_failure_is_best_effort(
         and "Error probing interface closing state" in record.getMessage()
         for record in caplog.records
     )
-
-
-def test_legacy_status_publish_ignores_synthesized_thread_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Legacy status publishing should only call a declared provider hook."""
-    import meshtastic.mesh_interface as mesh_iface_module
-
-    sent: list[tuple[str, object, bool]] = []
-    fallback_thread = SimpleNamespace(
-        queue=SimpleNamespace(put_nowait=lambda callback: callback()),
-        thread=None,
-    )
-
-    class _Iface:
-        def __init__(self) -> None:
-            self.synthesized_provider_calls = 0
-
-        def __getattr__(self, name: str) -> object:
-            if name == "_get_publishing_thread":
-
-                def _synthesized_provider() -> object:
-                    self.synthesized_provider_calls += 1
-                    raise AssertionError("synthesized provider must be ignored")
-
-                return _synthesized_provider
-            raise AttributeError(name)
-
-    iface = _Iface()
-    monkeypatch.setattr(
-        mesh_iface_module, "publishingThread", fallback_thread, raising=True
-    )
-    monkeypatch.setattr(
-        mesh_iface_module,
-        "pub",
-        SimpleNamespace(
-            sendMessage=lambda topic, *, interface, connected: sent.append(
-                (topic, interface, connected)
-            )
-        ),
-        raising=True,
-    )
-
-    BLECompatibilityEventService.publish_connection_status_legacy(
-        iface,  # type: ignore[arg-type]
-        connected=True,
-    )
-
-    assert sent == [("meshtastic.connection.status", iface, True)]
-    assert iface.synthesized_provider_calls == 0
 
 
 def test_coordination_inert_thread_start_is_noop() -> None:
@@ -1152,7 +1106,7 @@ def test_compatibility_enqueue_put_nowait_full_without_queuework() -> None:
         thread=None,
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             publishing_thread,
             lambda: None,
             prefer_non_blocking=False,
@@ -1166,7 +1120,7 @@ def test_compatibility_resolve_safe_execute_wrapper() -> None:
     iface = SimpleNamespace(
         error_handler=SimpleNamespace(safe_execute=lambda func, **_kwargs: func())
     )
-    resolved = BLECompatibilityEventService._resolve_safe_execute(cast(Any, iface))
+    resolved = ble_utils._resolve_safe_execute(cast(Any, iface))
     assert callable(resolved)
     assert resolved(lambda: "ok") == "ok"
 
@@ -1188,41 +1142,25 @@ def test_compatibility_publisher_swallows_provider_failures(
         wait_threads: list[object | None] = []
         drain_threads: list[object | None] = []
         publish_threads: list[object | None] = []
-        publish_legacy_threads: list[object | None] = []
         monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "wait_for_disconnect_notifications",
-            staticmethod(
-                lambda _iface, _timeout=None, publishing_thread=None: wait_threads.append(
-                    publishing_thread
-                )
+            BLECompatibilityEventPublisher,
+            "_flush_disconnect_notifications",
+            lambda self, _timeout=None, *, publishing_thread=None: wait_threads.append(
+                publishing_thread
             ),
         )
         monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "drain_publish_queue",
-            staticmethod(
-                lambda _iface, _flush_event, publishing_thread=None: drain_threads.append(
-                    publishing_thread
-                )
+            BLECompatibilityEventPublisher,
+            "_drain_publish_queue_on_thread",
+            lambda self, _flush_event, *, publishing_thread=None: drain_threads.append(
+                publishing_thread
             ),
         )
         monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "publish_connection_status",
-            staticmethod(
-                lambda _iface, *, connected, publishing_thread=None: publish_threads.append(  # noqa: ARG005
-                    publishing_thread
-                )
-            ),
-        )
-        monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "publish_connection_status_legacy",
-            staticmethod(
-                lambda _iface, _connected, publishing_thread=None: publish_legacy_threads.append(  # noqa: ARG005
-                    publishing_thread
-                )
+            BLECompatibilityEventPublisher,
+            "_publish_connection_status_on_thread",
+            lambda self, *, connected, publishing_thread=None: publish_threads.append(
+                publishing_thread
             ),
         )
 
@@ -1235,7 +1173,6 @@ def test_compatibility_publisher_swallows_provider_failures(
         assert wait_threads == [expected_thread]
         assert drain_threads == [expected_thread]
         assert publish_threads == [expected_thread, expected_thread]
-        assert publish_legacy_threads == []
     finally:
         iface.close()
 
@@ -1262,12 +1199,10 @@ def test_compatibility_publisher_reuses_last_good_thread_on_provider_failure(
         )
         wait_threads: list[object | None] = []
         monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "wait_for_disconnect_notifications",
-            staticmethod(
-                lambda _iface, _timeout=None, publishing_thread=None: wait_threads.append(
-                    publishing_thread
-                )
+            BLECompatibilityEventPublisher,
+            "_flush_disconnect_notifications",
+            lambda self, _timeout=None, *, publishing_thread=None: wait_threads.append(
+                publishing_thread
             ),
         )
 
@@ -1301,12 +1236,10 @@ def test_compatibility_publisher_reuses_last_good_thread_on_provider_none(
         )
         wait_threads: list[object | None] = []
         monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "wait_for_disconnect_notifications",
-            staticmethod(
-                lambda _iface, _timeout=None, publishing_thread=None: wait_threads.append(
-                    publishing_thread
-                )
+            BLECompatibilityEventPublisher,
+            "_flush_disconnect_notifications",
+            lambda self, _timeout=None, *, publishing_thread=None: wait_threads.append(
+                publishing_thread
             ),
         )
 
@@ -1324,7 +1257,7 @@ def test_compatibility_enqueue_returns_false_when_no_enqueue_path() -> None:
         queueWork=None, queue=SimpleNamespace(), thread=None
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             publishing_thread,
             lambda: None,
             prefer_non_blocking=False,
@@ -1337,8 +1270,6 @@ def test_compatibility_service_remaining_enqueue_wait_and_drain_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Compatibility service should cover remaining enqueue/wait/drain branches."""
-    original_drain_publish_queue = BLECompatibilityEventService.drain_publish_queue
-    original_safe_execute = BLECompatibilityEventService._safe_execute
 
     def callback() -> None:
         return None
@@ -1349,7 +1280,7 @@ def test_compatibility_service_remaining_enqueue_wait_and_drain_branches(
         thread=SimpleNamespace(is_alive=lambda: (_ for _ in ()).throw(RuntimeError())),
     )
     assert (
-        BLECompatibilityEventService._enqueue_publish_callback(
+        BLECompatibilityEventPublisher._enqueue_publish_callback(
             enqueue_thread,
             callback,
             prefer_non_blocking=False,
@@ -1370,44 +1301,37 @@ def test_compatibility_service_remaining_enqueue_wait_and_drain_branches(
                 return False
 
         monkeypatch.setattr(compatibility_mod, "Event", _NeverSetEvent, raising=True)
-        monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "_safe_execute",
-            staticmethod(lambda *_args, **_kwargs: True),
-        )
         drained: list[str] = []
-        monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "drain_publish_queue",
-            staticmethod(lambda *_args, **_kwargs: drained.append("drained")),
-        )
-        BLECompatibilityEventService.wait_for_disconnect_notifications(
-            iface,
-            timeout=0.01,
-            publishing_thread=SimpleNamespace(
-                thread=SimpleNamespace(is_alive=lambda: True),
-                queueWork=lambda _cb: None,
-                queue=SimpleNamespace(put_nowait=lambda _cb: None),
-            ),
-        )
-        assert drained == []
-        monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "_safe_execute",
-            original_safe_execute,
-        )
-        monkeypatch.setattr(
-            BLECompatibilityEventService,
-            "drain_publish_queue",
-            original_drain_publish_queue,
-        )
+        with monkeypatch.context() as m:
+            m.setattr(
+                compatibility_mod,
+                "_safe_execute_through_adapter",
+                lambda *_args, **_kwargs: True,
+            )
+            m.setattr(
+                BLECompatibilityEventPublisher,
+                "_drain_publish_queue_on_thread",
+                lambda self, _flush_event, *, publishing_thread=None: drained.append(
+                    "drained"
+                ),
+            )
+            _publisher_with_thread(
+                iface,
+                monkeypatch,
+                SimpleNamespace(
+                    thread=SimpleNamespace(is_alive=lambda: True),
+                    queueWork=lambda _cb: None,
+                    queue=SimpleNamespace(put_nowait=lambda _cb: None),
+                ),
+            ).wait_for_disconnect_notifications(timeout=0.01)
+            assert drained == []
 
         flush_event = Event()
         called_thread_drain: list[str] = []
-        BLECompatibilityEventService.drain_publish_queue(
+        _publisher_with_thread(
             iface,
-            flush_event,
-            publishing_thread=SimpleNamespace(
+            monkeypatch,
+            SimpleNamespace(
                 thread=SimpleNamespace(
                     _drain_publish_queue=lambda _event: called_thread_drain.append(
                         "thread"
@@ -1417,13 +1341,13 @@ def test_compatibility_service_remaining_enqueue_wait_and_drain_branches(
                     get_nowait=lambda: (_ for _ in ()).throw(Empty())
                 ),
             ),
-        )
+        ).drain_publish_queue(flush_event)
         assert called_thread_drain == ["thread"]
 
-        BLECompatibilityEventService.drain_publish_queue(
+        _publisher_with_thread(
             iface,
-            flush_event,
-            publishing_thread=SimpleNamespace(
+            monkeypatch,
+            SimpleNamespace(
                 thread=None,
                 queue=SimpleNamespace(
                     get_nowait=lambda: (_ for _ in ()).throw(
@@ -1431,7 +1355,7 @@ def test_compatibility_service_remaining_enqueue_wait_and_drain_branches(
                     )
                 ),
             ),
-        )
+        ).drain_publish_queue(flush_event)
     finally:
         iface.close()
 

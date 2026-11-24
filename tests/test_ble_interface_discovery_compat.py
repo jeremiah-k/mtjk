@@ -52,6 +52,28 @@ from tests.test_ble_interface_fixtures import DummyClient, _build_interface
 pytestmark = pytest.mark.unit
 
 
+def _publisher_with_thread(
+    iface: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    publishing_thread: object | None,
+) -> Any:
+    """Build a compatibility publisher pinned to the given publishing thread."""
+    from meshtastic.interfaces.ble.compatibility_service import (
+        BLECompatibilityEventPublisher,
+    )
+
+    publisher = BLECompatibilityEventPublisher(
+        iface,
+        publishing_thread_provider=lambda: publishing_thread,
+    )
+    monkeypatch.setattr(
+        publisher,
+        "_resolve_publishing_thread",
+        lambda use_cached_fallback=True: publishing_thread,
+    )
+    return publisher
+
+
 def test_find_device_multiple_matches_raises() -> None:
     """Providing an address that matches multiple devices should raise BLEError."""
     # BLEDevice and BLEInterface already imported at top as ble_mod.BLEDevice, ble_mod.BLEInterface
@@ -397,7 +419,7 @@ def test_wait_for_disconnect_notifications_skips_unconfigured_queuework(
     None
     """
     from meshtastic.interfaces.ble.compatibility_service import (
-        BLECompatibilityEventService,
+        BLECompatibilityEventPublisher,
     )
 
     iface = SimpleNamespace(
@@ -407,17 +429,14 @@ def test_wait_for_disconnect_notifications_skips_unconfigured_queuework(
     queue_work = publishing_thread.queueWork
     drained: list[bool] = []
     monkeypatch.setattr(
-        BLECompatibilityEventService,
-        "drain_publish_queue",
-        lambda *_args, **_kwargs: drained.append(True),
+        BLECompatibilityEventPublisher,
+        "_drain_publish_queue_on_thread",
+        lambda self, _flush_event, *, publishing_thread=None: drained.append(True),
         raising=True,
     )
 
-    BLECompatibilityEventService.wait_for_disconnect_notifications(
-        cast(Any, iface),
-        timeout=0.01,
-        publishing_thread=publishing_thread,
-    )
+    publisher = _publisher_with_thread(cast(Any, iface), monkeypatch, publishing_thread)
+    publisher.wait_for_disconnect_notifications(timeout=0.01)
 
     assert drained == [True]
     queue_work.assert_not_called()
@@ -444,9 +463,6 @@ def test_publish_connection_status_runs_async_fallback_when_queuework_unconfigur
     from meshtastic.interfaces.ble import (
         compatibility_service as compatibility_service_mod,
     )
-    from meshtastic.interfaces.ble.compatibility_service import (
-        BLECompatibilityEventService,
-    )
 
     sent: list[tuple[str, object, bool]] = []
 
@@ -471,11 +487,9 @@ def test_publish_connection_status_runs_async_fallback_when_queuework_unconfigur
     publishing_thread = SimpleNamespace()
 
     with caplog.at_level(logging.DEBUG):
-        BLECompatibilityEventService.publish_connection_status(
-            cast(Any, iface),
-            connected=True,
-            publishing_thread=publishing_thread,
-        )
+        _publisher_with_thread(
+            cast(Any, iface), monkeypatch, publishing_thread
+        ).publish_connection_status(connected=True)
 
     assert sent == [("meshtastic.connection.status", iface, True)]
     assert "publish queue is unavailable" in caplog.text.lower()
@@ -502,9 +516,6 @@ def test_publish_connection_status_runs_async_fallback_when_enqueue_raises(
     from meshtastic.interfaces.ble import (
         compatibility_service as compatibility_service_mod,
     )
-    from meshtastic.interfaces.ble.compatibility_service import (
-        BLECompatibilityEventService,
-    )
 
     sent: list[tuple[str, object, bool]] = []
 
@@ -522,6 +533,10 @@ def test_publish_connection_status_runs_async_fallback_when_enqueue_raises(
         raising=True,
     )
 
+    from meshtastic.interfaces.ble.compatibility_service import (
+        BLECompatibilityEventPublisher,
+    )
+
     iface = SimpleNamespace(
         _closed=False,
         _state_manager=SimpleNamespace(is_closing=False),
@@ -529,7 +544,7 @@ def test_publish_connection_status_runs_async_fallback_when_enqueue_raises(
     publishing_thread = SimpleNamespace()
 
     monkeypatch.setattr(
-        BLECompatibilityEventService,
+        BLECompatibilityEventPublisher,
         "_enqueue_publish_callback",
         staticmethod(
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -538,11 +553,9 @@ def test_publish_connection_status_runs_async_fallback_when_enqueue_raises(
         ),
     )
     with caplog.at_level(logging.DEBUG):
-        BLECompatibilityEventService.publish_connection_status(
-            cast(Any, iface),
-            connected=False,
-            publishing_thread=publishing_thread,
-        )
+        _publisher_with_thread(
+            cast(Any, iface), monkeypatch, publishing_thread
+        ).publish_connection_status(connected=False)
 
     assert sent == [("meshtastic.connection.status", iface, False)]
     assert "Error queuing connection status publish" in caplog.text
@@ -556,9 +569,6 @@ def test_publish_connection_status_runs_async_fallback_when_publishing_thread_mi
     from meshtastic import mesh_interface as mesh_iface_module
     from meshtastic.interfaces.ble import (
         compatibility_service as compatibility_service_mod,
-    )
-    from meshtastic.interfaces.ble.compatibility_service import (
-        BLECompatibilityEventService,
     )
 
     sent: list[tuple[str, object, bool]] = []
@@ -582,11 +592,9 @@ def test_publish_connection_status_runs_async_fallback_when_publishing_thread_mi
     )
 
     with caplog.at_level(logging.DEBUG):
-        BLECompatibilityEventService.publish_connection_status(
-            cast(Any, iface),
-            connected=True,
-            publishing_thread=None,
-        )
+        _publisher_with_thread(
+            cast(Any, iface), monkeypatch, None
+        ).publish_connection_status(connected=True)
 
     assert sent == [("meshtastic.connection.status", iface, True)]
     assert "publishing thread is unavailable" in caplog.text.lower()
@@ -598,9 +606,6 @@ def test_publish_connection_status_skips_when_publishing_thread_missing_during_s
 ) -> None:
     """Status publish should skip when publishing thread is missing during shutdown."""
     from meshtastic import mesh_interface as mesh_iface_module
-    from meshtastic.interfaces.ble.compatibility_service import (
-        BLECompatibilityEventService,
-    )
 
     sent: list[tuple[str, object, bool]] = []
 
@@ -616,11 +621,9 @@ def test_publish_connection_status_skips_when_publishing_thread_missing_during_s
     )
 
     with caplog.at_level(logging.DEBUG):
-        BLECompatibilityEventService.publish_connection_status(
-            cast(Any, iface),
-            connected=False,
-            publishing_thread=None,
-        )
+        _publisher_with_thread(
+            cast(Any, iface), monkeypatch, None
+        ).publish_connection_status(connected=False)
 
     assert sent == []
     assert "publishing thread is unavailable" in caplog.text.lower()
