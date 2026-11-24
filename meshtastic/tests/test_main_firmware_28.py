@@ -13,6 +13,7 @@ import pytest
 from pubsub import pub
 
 import meshtastic.__main__ as main_module
+import meshtastic.lockdown as lockdown
 from meshtastic.__main__ import (
     initParser,
 )
@@ -110,8 +111,8 @@ def _run_lockdown_cli(
             status,
         ]
         monkeypatch.setattr(getpass, "getpass", lambda _prompt: "secret")
-    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "build_lockdown_auth", build)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
     main_module.onConnected(interface)
     return interface, build, send
 
@@ -139,7 +140,7 @@ def test_lockdown_cli_unlock_from_file(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     read_file = MagicMock(return_value=b"file-secret")
-    monkeypatch.setattr(main_module, "read_lockdown_passphrase_file", read_file)
+    monkeypatch.setattr(lockdown, "read_lockdown_passphrase_file", read_file)
     status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCKED)
 
     interface, build, send = _run_lockdown_cli(
@@ -303,8 +304,8 @@ def test_lockdown_cli_rejects_remote_destination(
     interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
     build = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "build_lockdown_auth", build)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
 
     with pytest.raises(SystemExit) as exc_info:
         main_module.onConnected(interface)
@@ -343,9 +344,9 @@ def test_lockdown_cli_rejects_unacknowledged_command_line_secret(
     validate = MagicMock()
     build = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(main_module, "validate_lockdown_passphrase", validate)
-    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "validate_lockdown_passphrase", validate)
+    monkeypatch.setattr(lockdown, "build_lockdown_auth", build)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
 
     with pytest.raises(SystemExit) as exc_info:
         main_module.onConnected(interface)
@@ -367,7 +368,7 @@ def test_lockdown_cli_command_line_secret_formats_unknown_state_and_backoff(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     validate = MagicMock(return_value=b"secret")
-    monkeypatch.setattr(main_module, "validate_lockdown_passphrase", validate)
+    monkeypatch.setattr(lockdown, "validate_lockdown_passphrase", validate)
     status = mesh_pb2.LockdownStatus(state=999, backoff_seconds=7)  # type: ignore[arg-type]
 
     _interface, build, _send = _run_lockdown_cli(
@@ -433,20 +434,16 @@ def test_lockdown_cli_provision_reports_auth_failure(
     monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     prompts = iter(["secret", "secret"])
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: next(prompts))
-    monkeypatch.setattr(
-        main_module, "validate_lockdown_passphrase", lambda value: value
-    )
+    monkeypatch.setattr(lockdown, "validate_lockdown_passphrase", lambda value: value)
     failed = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCK_FAILED)
     _init_lockdown_cli(monkeypatch, "--lockdown-provision")
     interface = MagicMock()
     interface.devPath = ""
     interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
     monkeypatch.setattr(
-        main_module, "build_lockdown_auth", MagicMock(return_value=object())
+        lockdown, "build_lockdown_auth", MagicMock(return_value=object())
     )
-    monkeypatch.setattr(
-        main_module, "send_lockdown_auth", MagicMock(return_value=failed)
-    )
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", MagicMock(return_value=failed))
 
     with pytest.raises(SystemExit):
         main_module.onConnected(interface)
@@ -463,7 +460,7 @@ def test_lockdown_cli_lock_now_allows_reboot_without_status(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     read = MagicMock(return_value=b"file secret")
-    monkeypatch.setattr(main_module, "read_lockdown_passphrase_file", read)
+    monkeypatch.setattr(lockdown, "read_lockdown_passphrase_file", read)
     interface, build, send = _run_lockdown_cli(
         monkeypatch,
         "--lockdown-lock-now",
@@ -489,7 +486,7 @@ def test_lockdown_cli_disable_sets_disable_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        main_module, "read_lockdown_passphrase_file", lambda _path: b"secret"
+        lockdown, "read_lockdown_passphrase_file", lambda _path: b"secret"
     )
     status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCKED)
     _interface, build, _send = _run_lockdown_cli(
@@ -541,7 +538,7 @@ def test_lockdown_cli_lock_now_refuses_unauthorized_reboot(
         if isinstance(auth_result, Exception)
         else MagicMock(return_value=mesh_pb2.LockdownStatus(state=auth_result))  # type: ignore[arg-type]
     )
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: "secret")
     _init_lockdown_cli(monkeypatch, "--lockdown-lock-now", "--lockdown-yes")
     interface = MagicMock()
@@ -568,8 +565,8 @@ def test_lockdown_cli_lock_now_cannot_provision_disabled_device(
     """Reject unsupported or disabled lockdown without sending a provision request."""
     build = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "build_lockdown_auth", build)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
     _init_lockdown_cli(
         monkeypatch, "--lockdown-lock-now", "--lockdown-yes", "--lockdown-wait", "0.01"
     )
@@ -664,11 +661,11 @@ def test_lockdown_cli_maps_passphrase_errors_to_user_facing_exit(
     interface.myInfo = SimpleNamespace(my_node_num=1)
     if "--lockdown-passphrase-file" in cli_args:
         monkeypatch.setattr(
-            main_module, "read_lockdown_passphrase_file", MagicMock(side_effect=error)
+            lockdown, "read_lockdown_passphrase_file", MagicMock(side_effect=error)
         )
     else:
         monkeypatch.setattr(
-            main_module, "validate_lockdown_passphrase", MagicMock(side_effect=error)
+            lockdown, "validate_lockdown_passphrase", MagicMock(side_effect=error)
         )
 
     with pytest.raises(SystemExit):
@@ -684,7 +681,7 @@ def test_lockdown_cli_maps_invalid_limits_to_user_facing_exit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        main_module, "read_lockdown_passphrase_file", lambda _path: b"secret"
+        lockdown, "read_lockdown_passphrase_file", lambda _path: b"secret"
     )
     _init_lockdown_cli(
         monkeypatch,
@@ -722,9 +719,9 @@ def test_lockdown_cli_maps_send_failures_to_user_facing_exit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        main_module, "read_lockdown_passphrase_file", lambda _path: b"secret"
+        lockdown, "read_lockdown_passphrase_file", lambda _path: b"secret"
     )
-    monkeypatch.setattr(main_module, "send_lockdown_auth", MagicMock(side_effect=error))
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", MagicMock(side_effect=error))
     _init_lockdown_cli(
         monkeypatch,
         "--lockdown-unlock",
@@ -751,7 +748,7 @@ def test_lockdown_cli_interactive_unlock_uses_single_prompt(
     getpass_mock = MagicMock(return_value="secret")
     validate_mock = MagicMock(return_value=b"secret")
     monkeypatch.setattr(getpass, "getpass", getpass_mock)
-    monkeypatch.setattr(main_module, "validate_lockdown_passphrase", validate_mock)
+    monkeypatch.setattr(lockdown, "validate_lockdown_passphrase", validate_mock)
     status = mesh_pb2.LockdownStatus(state=mesh_pb2.LockdownStatus.UNLOCKED)
 
     _interface, build, _send = _run_lockdown_cli(
@@ -776,8 +773,8 @@ def test_lockdown_cli_without_action_does_not_call_lockdown_helpers(
     interface.myInfo = SimpleNamespace(my_node_num=int("25d6e474", 16))
     build = MagicMock()
     send = MagicMock()
-    monkeypatch.setattr(main_module, "build_lockdown_auth", build)
-    monkeypatch.setattr(main_module, "send_lockdown_auth", send)
+    monkeypatch.setattr(lockdown, "build_lockdown_auth", build)
+    monkeypatch.setattr(lockdown, "send_lockdown_auth", send)
 
     main_module.onConnected(interface)
 

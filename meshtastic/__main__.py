@@ -32,7 +32,6 @@ import meshtastic.cli.invocation as cli_invocation
 import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
 import meshtastic.cli.notification_rendering as cli_notification_rendering
 import meshtastic.cli.preference_runtime as cli_preference_runtime
-import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
 import meshtastic.cli.set_actions as cli_set_actions
 import meshtastic.cli.values as cli_values
@@ -40,7 +39,7 @@ import meshtastic.ota
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
 import meshtastic.util
-from meshtastic import _self_signal, _topics, mt_config, remote_hardware
+from meshtastic import _self_signal, _topics, mt_config
 from meshtastic._branding import (
     PRIMARY_CLI_NAME,
     PROJECT_ISSUE_URL,
@@ -70,6 +69,13 @@ from meshtastic.cli.values import (  # noqa: F401,W0611 - legacy __main__ compat
     looks_like_integer_literal as _looks_like_integer_literal,
 )
 
+# COMPAT_STABLE_SHIM: lockdown auth seams remain importable from
+# meshtastic.__main__ for historical callers.
+from meshtastic.lockdown import build_lockdown_auth  # noqa: F401
+from meshtastic.lockdown import read_lockdown_passphrase_file  # noqa: F401
+from meshtastic.lockdown import send_lockdown_auth  # noqa: F401
+from meshtastic.lockdown import validate_lockdown_passphrase  # noqa: F401
+
 # black and isort disagree on these three statements: isort's line-length math
 # excludes the noqa comment (so it collapses the statement to one line) while
 # black includes it (so it must stay exploded). They are frozen compat
@@ -93,16 +99,6 @@ from meshtastic.configure_verify import (  # noqa: F401 - legacy __main__ compat
 )
 from meshtastic.host_port import parseHostAndPort
 from meshtastic.interfaces.ble.interface import BLEInterface
-from meshtastic.key_verification import (
-    buildKeyVerificationAdmin,
-    sendKeyVerification,
-)
-from meshtastic.lockdown import (
-    build_lockdown_auth,
-    read_lockdown_passphrase_file,
-    send_lockdown_auth,
-    validate_lockdown_passphrase,
-)
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import (  # noqa: F401 - legacy __main__ compatibility export
     admin_pb2,
@@ -113,7 +109,6 @@ from meshtastic.protobuf import (  # noqa: F401 - legacy __main__ compatibility 
     portnums_pb2,
 )
 from meshtastic.version import (
-    INSTALL_UPGRADE_HINT,
     PROJECT_DISPLAY_NAME,
     get_active_version,
 )
@@ -968,73 +963,15 @@ def _validate_cli_sort_field(interface: MeshInterface, sort_field: str) -> None:
 
 
 def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
-    """Build connected-action hooks from historical ``__main__`` seams."""
-    device_hooks = cli_device_actions.DeviceActionHooks(
+    """Compatibility wrapper assembling connected dispatch hooks."""
+    return cli_dispatch._build_connected_dispatch_hooks(
         cli_exit=_cli_exit,
         cli_print=_cli_print,
-        set_pref=setPref,
-        is_local_destination=_is_local_destination,
-        send_local_factory_reset_and_wait=_send_local_factory_reset_and_wait,
-        post_factory_reset_ready_probe=_post_factory_reset_ready_probe,
-        handle_ota_update=_handle_ota_update,
-        build_lockdown_auth=build_lockdown_auth,
-        read_lockdown_passphrase_file=read_lockdown_passphrase_file,
-        send_lockdown_auth=send_lockdown_auth,
-        validate_lockdown_passphrase=validate_lockdown_passphrase,
-        build_key_verification_admin=buildKeyVerificationAdmin,
-        send_key_verification=sendKeyVerification,
-    )
-    channel_contact_hooks = cli_channel_contact_actions.ChannelContactHooks(
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        get_channel_index=_current_channel_index,
-        set_channel_index=_set_current_channel_index,
-        resolve_pref=_resolve_pref,
-        set_pref=setPref,
-        fatal_preference_value_errors=_fatal_preference_value_errors,
-        preference_value_error=_PreferenceValueError,
-        print_channel_field_choices=lambda settings, name: _print_channel_field_choices(
-            settings, name, cli_print=lambda message: _cli_print(message, force=True)
-        ),
-        is_local_destination=_is_local_destination,
-        modem_preset_shorthands=_MODEM_PRESET_SHORTHANDS,
-        qr_render=(cli_qr.renderTerminalQr if cli_qr.segno is not None else None),
-    )
-    configure_hooks = cli_configure_actions.ConfigureActionHooks(
-        handle_set_command=_handle_set_command,
-        export_profile=exportProfile,
-        handle_configure_command=_handle_configure_command,
-        export_config=exportConfig,
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        is_local_destination=_is_local_destination,
-        preview_set_command=_preview_set_command,
-        preview_configure_command=_run_configure_preview,
-    )
-    service_hooks = cli_messaging_service_actions.MessagingServiceHooks(
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        preference_print=lambda message: _cli_print(message, force=True),
-        get_channel_index=_current_channel_index,
-        check_channel=checkChannel,
-        remote_hardware_client=remote_hardware.RemoteHardwareClient,
-        get_pref=getPref,
-        validate_cli_show_fields=_validate_cli_show_fields,
-        validate_cli_sort_field=_validate_cli_sort_field,
-        newer_version=meshtastic.util.check_if_newer_version,
-        install_upgrade_hint=INSTALL_UPGRADE_HINT,
         powermon_available=lambda: have_powermon,
         powermon_error=lambda: powermon_exception,
+        get_meter=lambda: meter,
         log_set_factory=LogSet,
         power_stress_factory=PowerStress,
-        get_meter=lambda: meter,
-    )
-    return cli_dispatch.DispatchHooks(
-        cli_print=_cli_print,
-        device=device_hooks,
-        channel_contact=channel_contact_hooks,
-        configure=configure_hooks,
-        services=service_hooks,
         sleep=time.sleep,
     )
 

@@ -181,7 +181,7 @@ def test_main_configure_seturl_unstable_aborts_before_transaction(
     iface.isConnected.set()
     iface.waitForConfig = MagicMock()
     monkeypatch.setattr(
-        "meshtastic.__main__._post_seturl_stability_check",
+        "meshtastic.cli.configure_actions._post_seturl_stability_check",
         lambda *a, **k: False,
     )
     _patch_fast_monotonic(monkeypatch)
@@ -217,13 +217,13 @@ def test_main_configure_seturl_stable_proceeds_to_transaction(
     iface.isConnected.set()
     iface.waitForConfig = MagicMock()
     monkeypatch.setattr(
-        "meshtastic.__main__._post_seturl_stability_check",
+        "meshtastic.cli.configure_actions._post_seturl_stability_check",
         lambda *a, **k: True,
     )
     # This test's concern is the seturl stability gate, not verification
     # values; drive a verified reconnect outcome explicitly.
     monkeypatch.setattr(
-        main_module,
+        cli_configure_actions,
         "_post_configure_reconnect_and_verify",
         MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
     )
@@ -290,7 +290,7 @@ def test_main_configure_channel_url_skip_when_already_matching(
     )
     iface, target_node = _build_configure_interface()
     monkeypatch.setattr(
-        "meshtastic.__main__._channel_url_matches_current_device_state",
+        "meshtastic.cli.configure_actions._channel_url_matches_current_device_state",
         lambda *a, **k: True,
     )
     _run_main_configure_file(config_path, iface, monkeypatch)
@@ -354,12 +354,20 @@ def test_main_configure_post_reconnect_verifies_channel_url(
         )
     )
     target_node.requestChannels = MagicMock(side_effect=_request_channels_side_effect)
+    real_reconnect_verify = cli_configure_actions._post_configure_reconnect_and_verify
+
+    def _failing_url_verify(*args: Any, **kwargs: Any) -> Any:
+        """Force the channel URL comparator to report a mismatch."""
+        kwargs["verify_channel_url_against_state"] = lambda *a, **k: False
+        return real_reconnect_verify(*args, **kwargs)
+
     monkeypatch.setattr(
-        "meshtastic.__main__._verify_channel_url_against_state",
-        lambda *a, **k: False,
+        cli_configure_actions,
+        "_post_configure_reconnect_and_verify",
+        _failing_url_verify,
     )
     monkeypatch.setattr(
-        "meshtastic.__main__._post_seturl_stability_check",
+        "meshtastic.cli.configure_actions._post_seturl_stability_check",
         lambda *a, **k: True,
     )
     _patch_fast_monotonic(monkeypatch)
@@ -462,7 +470,7 @@ def test_main_configure_region_unavailable_reload_reports_unverified(
         return_value=cli_configure_actions.ConfigureReconnectResult.CONFIG_RELOAD_FAILED
     )
     monkeypatch.setattr(
-        main_module, "_post_configure_reconnect_and_verify", reconnect_spy
+        cli_configure_actions, "_post_configure_reconnect_and_verify", reconnect_spy
     )
     _patch_fast_monotonic(monkeypatch)
 
@@ -525,7 +533,7 @@ def test_main_configure_channel_url_region_change_refuses_mixed_writes(
         return_value=cli_configure_actions.ConfigureReconnectResult.CONFIG_RELOAD_FAILED
     )
     monkeypatch.setattr(
-        main_module, "_post_configure_reconnect_and_verify", reconnect_spy
+        cli_configure_actions, "_post_configure_reconnect_and_verify", reconnect_spy
     )
     _patch_fast_monotonic(monkeypatch)
 

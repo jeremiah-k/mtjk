@@ -664,7 +664,7 @@ def test_main_export_config_to_file(
     iface.getRingtone.return_value = None
 
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface) as mo:
-        with patch("meshtastic.__main__.exportConfig") as mock_export:
+        with patch("meshtastic.cli.dispatch._export_config") as mock_export:
             mock_export.return_value = "test config content"
             main()
             out, _err = capsys.readouterr()
@@ -696,7 +696,7 @@ def test_main_export_config_to_file_error(
     iface.getRingtone.return_value = None
 
     with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
-        with patch("meshtastic.__main__.exportConfig") as mock_export:
+        with patch("meshtastic.cli.dispatch._export_config") as mock_export:
             mock_export.return_value = "test config content"
             with pytest.raises(SystemExit) as pytest_wrapped_e:
                 main()
