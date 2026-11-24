@@ -258,15 +258,19 @@ class Node:  # pylint: disable=too-many-instance-attributes
             channel_lookup_runtime=self._channel_lookup_runtime,
         )
         self._ack_nak_runtime = _NodeAckNakRuntime(self)
-        self._settings_message_builder = _NodeSettingsMessageBuilder(self)
+        self._settings_message_builder = _NodeSettingsMessageBuilder(
+            self, self._node_port
+        )
         self._settings_runtime = _NodeSettingsRuntime(
             self,
+            self._node_port,
             message_builder=self._settings_message_builder,
         )
         self._settings_response_runtime = _NodeSettingsResponseRuntime(self)
-        self._admin_command_runtime = _NodeAdminCommandRuntime(self)
+        self._admin_command_runtime = _NodeAdminCommandRuntime(self, self._node_port)
         self._owner_profile_runtime = _NodeOwnerProfileRuntime(
             self,
+            self._node_port,
             admin_command_runtime=self._admin_command_runtime,
         )
         self._content_cache_store_cache: "_NodeContentCacheStore | None" = None

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
 
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2
 
 if TYPE_CHECKING:
@@ -19,8 +20,19 @@ _ERR_INVALID_CONFIG_NAME = "Error: No valid config with name {}"
 class _NodeSettingsMessageBuilder:
     """Owns settings request/write AdminMessage construction and field mapping."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def build_request_message(
         self, config_type: int | FieldDescriptor
@@ -88,10 +100,9 @@ class _NodeSettingsMessageBuilder:
         """Build one set_config/set_module_config message for a config name."""
         config_entry = self.get_write_config_entry(config_name)
         if config_entry is None:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 _ERR_INVALID_CONFIG_NAME.format(config_name)
             )
-            raise AssertionError("Unreachable: _raise_interface_error must raise")
 
         message = admin_pb2.AdminMessage()
         setter_name, source_config = config_entry
@@ -102,7 +113,6 @@ class _NodeSettingsMessageBuilder:
     def validate_config_name(self, config_name: str) -> None:
         """Validate config-name dispatch key without constructing a message."""
         if self.get_write_config_entry(config_name) is None:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 _ERR_INVALID_CONFIG_NAME.format(config_name)
             )
-            raise AssertionError("Unreachable: _raise_interface_error must raise")

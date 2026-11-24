@@ -3,6 +3,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.shared import (
     EMPTY_LONG_NAME_MSG,
     EMPTY_SHORT_NAME_MSG,
@@ -26,10 +27,24 @@ class _NodeOwnerProfileRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         admin_command_runtime: "_NodeAdminCommandRuntime",
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        admin_command_runtime : _NodeAdminCommandRuntime
+            Shared admin-command send policy owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._admin_command_runtime = admin_command_runtime
 
     def set_owner(
@@ -65,7 +80,7 @@ class _NodeOwnerProfileRuntime:
             long_name = long_name.strip()
             # Validate that long_name is not empty or whitespace-only
             if not long_name:
-                self._node._raise_interface_error(EMPTY_LONG_NAME_MSG)  # noqa: SLF001
+                self._port.raise_interface_error(EMPTY_LONG_NAME_MSG)
             if len(long_name) > MAX_LONG_NAME_LEN:
                 long_name = long_name[:MAX_LONG_NAME_LEN]
                 logger.warning(
@@ -78,7 +93,7 @@ class _NodeOwnerProfileRuntime:
             short_name = short_name.strip()
             # Validate that short_name is not empty or whitespace-only
             if not short_name:
-                self._node._raise_interface_error(EMPTY_SHORT_NAME_MSG)  # noqa: SLF001
+                self._port.raise_interface_error(EMPTY_SHORT_NAME_MSG)
             if len(short_name) > MAX_SHORT_NAME_LEN:
                 short_name = short_name[:MAX_SHORT_NAME_LEN]
                 logger.warning(
