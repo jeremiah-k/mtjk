@@ -366,6 +366,10 @@ def test_standalone_build_copies_configured_distribution_metadata(
     legacy_lock: bool,
 ) -> None:
     """The frozen executable must carry distribution metadata and product modules only."""
+    product_package = tmp_path / "meshtastic"
+    product_package.mkdir()
+    for member in ("py.typed", "_runtime_compatibility.json"):
+        (product_package / member).touch()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     pyinstaller_args = tmp_path / "pyinstaller-args.txt"
@@ -447,6 +451,12 @@ exit 2
     excluded_index = args.index("--exclude-module")
     assert args[excluded_index + 1] == "meshtastic.tests"
     assert "--collect-all" not in args
+    assert [
+        args[index + 1] for index, arg in enumerate(args) if arg == "--add-data"
+    ] == [
+        "meshtastic/py.typed:meshtastic",
+        "meshtastic/_runtime_compatibility.json:meshtastic",
+    ]
     assert sorted(entry.name for entry in (tmp_path / "dist").iterdir()) == [
         PRIMARY_CLI_NAME
     ]

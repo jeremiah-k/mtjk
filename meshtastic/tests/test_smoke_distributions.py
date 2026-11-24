@@ -260,6 +260,8 @@ def test_record_missing_py_typed_fails(write_valid_wheel: Callable[..., Path]) -
         "meshtastic/tests/test_product_only.py",
         "meshtastic/tests/seturl/test_planner.py",
         "meshtastic/tests/api_baselines/api_baseline.json",
+        "mtjk-9.9.9.data/purelib/meshtastic/tests/test_relocated.py",
+        "mtjk-9.9.9.data/platlib/meshtastic/tests/test_relocated.py",
     ],
 )
 def test_wheel_packaging_test_tree_members_fails(

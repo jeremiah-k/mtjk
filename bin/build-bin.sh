@@ -19,6 +19,15 @@ fi
 distribution_name="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import DISTRIBUTION_NAME; print(DISTRIBUTION_NAME)')"
 primary_cli="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import PRIMARY_CLI_NAME; print(PRIMARY_CLI_NAME)')"
 
+# Preserve product package data without collecting the test tree. Historical
+# release tags may predate the compatibility manifest.
+product_data=()
+for member in py.typed _runtime_compatibility.json; do
+	if [[ -f "meshtastic/${member}" ]]; then
+		product_data+=(--add-data "meshtastic/${member}:meshtastic")
+	fi
+done
+
 "${PROJECT_RUN[@]}" pyinstaller \
 	--clean \
 	--noconfirm \
@@ -27,6 +36,7 @@ primary_cli="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import P
 	--copy-metadata "${distribution_name}" \
 	--collect-submodules meshtastic \
 	--exclude-module meshtastic.tests \
+	"${product_data[@]}" \
 	meshtastic/__main__.py
 
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then

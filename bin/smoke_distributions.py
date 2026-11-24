@@ -1073,7 +1073,15 @@ def validate_wheel_contents(
         entry_points_text = archive.read(entry_points_name).decode("utf-8")
         wheel_paths = set(names)
         packaged_test_members = sorted(
-            name for name in wheel_paths if name.startswith("meshtastic/tests/")
+            name
+            for name in wheel_paths
+            if name.startswith("meshtastic/tests/")
+            or (
+                ".data/" in name
+                and name.split(".data/", 1)[1].startswith(
+                    ("purelib/meshtastic/tests/", "platlib/meshtastic/tests/")
+                )
+            )
         )
         if packaged_test_members:
             raise SmokeGateError(
