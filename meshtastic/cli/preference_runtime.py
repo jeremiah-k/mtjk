@@ -22,7 +22,11 @@ from google.protobuf.message import Message
 from google.protobuf.message_factory import GetMessageClass
 
 import meshtastic.util
+from meshtastic.cli import config_io
+from meshtastic.cli.config_readiness import wait_for_config_sections
+from meshtastic.cli.invocation import current_camel_case
 from meshtastic.cli.values import parse_bitfield_value
+from meshtastic.mesh_interface import MeshInterface
 from meshtastic.protobuf import config_pb2
 from meshtastic.schema_metadata import (
     FieldLimits,
@@ -1089,3 +1093,169 @@ def traverse_config(
                 ", ".join(fields),
             )
     return success
+
+
+def get_pref(
+    node: Any,
+    comp_name: str,
+    *,
+    allow_secrets: bool = False,
+    cli_print: Callable[[str], None] = print,
+) -> bool:
+    """Retrieve and display a node configuration preference or populated section fields.
+
+    Parameters
+    ----------
+    node : Any
+        Node exposing local and module configuration data and configuration requests.
+    comp_name : str
+        Preference path or configuration section name to retrieve.
+    allow_secrets : bool
+        Whether sensitive preference values may be displayed without redaction.
+    cli_print : Callable[[str], None]
+        Sink receiving each output line. Defaults to ``print`` so standalone CLI
+        behavior is unchanged; dispatch passes its ``cli_print`` hook so embedded
+        consumers can capture preference output.
+
+    Returns
+    -------
+    bool
+        ``True`` if the preference exists and values were displayed (or its
+        request was skipped under ``noProto``),
+        ``False`` if it was not found.
+    """
+
+    def _print_setting(
+        config_type: str,
+        uni_name: str,
+        pref_value: str | list[str],
+        *,
+        repeated: bool,
+        secret_name: str,
+    ) -> None:
+        """Send a preference value to the supplied output sink and debug log.
+
+        When `repeated` is True, `pref_value` is treated as an iterable and
+            each element is converted to a string; otherwise the single value is
+            converted to a string. Output is formatted as "<section>.<name>: <value>".
+
+        Parameters
+        ----------
+        config_type : str
+            Name of the configuration section owning the preference.
+        uni_name : str
+            The preference name within the configuration section.
+        pref_value : str | list[str]
+            The preference value to print; an iterable when `repeated` is True.
+        repeated : bool
+            If True, treat `pref_value` as a sequence and print the list of stringified values.
+        secret_name : str
+            Canonical snake_case field name used to determine whether to redact.
+        """
+        if repeated:
+            display_value: str | list[str] = [
+                (
+                    meshtastic.util.toStr(v)
+                    if allow_secrets
+                    else redact_pref_value(secret_name, meshtastic.util.toStr(v))
+                )
+                for v in pref_value
+            ]
+            log_value: str | list[str] = [
+                redact_pref_value(secret_name, meshtastic.util.toStr(v))
+                for v in pref_value
+            ]
+        else:
+            raw_display = meshtastic.util.toStr(pref_value)
+            display_value = (
+                raw_display
+                if allow_secrets
+                else redact_pref_value(secret_name, raw_display)
+            )
+            log_value = redact_pref_value(secret_name, raw_display)
+        cli_print(f"{str(config_type)}.{uni_name}: {str(display_value)}")
+        logger.debug("%s.%s: %s", config_type, uni_name, log_value)
+
+    comp_name = normalize_pref_name(comp_name)
+    name = split_compound_name(comp_name)
+    whole_field = name[0] == name[1]  # We want the whole field
+
+    camel_name = meshtastic.util.snake_to_camel(name[1])
+    # Note: protobufs has the keys in snake_case, so snake internally
+    snake_name = meshtastic.util.camel_to_snake(name[1])
+    uni_name = camel_name if current_camel_case() else snake_name
+    logger.debug("snake_name:%s camel_name:%s", snake_name, camel_name)
+    logger.debug("use camel:%s", current_camel_case())
+
+    # First validate the input
+    local_config = node.localConfig
+    module_config = node.moduleConfig
+    found: bool = False
+    config = local_config
+    config_type = None
+    pref = None
+    for config in [local_config, module_config]:
+        obj_desc = config.DESCRIPTOR
+        config_type = obj_desc.fields_by_name.get(name[0])
+        pref = None
+        if config_type:
+            pref = config_type.message_type.fields_by_name.get(snake_name)
+            if pref is not None or whole_field:
+                found = True
+                break
+
+    if not found:
+        cli_print(
+            f"{local_config.__class__.__name__} and {module_config.__class__.__name__} "
+            f"do not have an attribute {uni_name}."
+        )
+        cli_print("Choices are...")
+        camel_case = current_camel_case()
+        config_io.print_config(local_config, camel_case=camel_case, cli_print=cli_print)
+        config_io.print_config(
+            module_config, camel_case=camel_case, cli_print=cli_print
+        )
+        return False
+
+    # Check if we need to request the config
+    if config_type is None:
+        return False
+
+    if not config.HasField(config_type.name):
+        node.requestConfig(config_type)
+        if getattr(node, "noProto", False):
+            return True
+        if not config.HasField(config_type.name):
+            wait_for_config_sections(node, [(config, config_type)])
+        if not config.HasField(config_type.name):
+            raise MeshInterface.MeshInterfaceError(
+                f"Timed out waiting for the {config_type.name} configuration"
+                " section from the device; no preference values were received."
+            )
+
+    if pref is not None or whole_field:
+        # read the value
+        config_values = getattr(config, config_type.name)
+        if not whole_field:
+            if pref is None:
+                return False
+            pref_value = getattr(config_values, pref.name)
+            repeated = config_io.is_repeated_field(pref)
+            _print_setting(
+                config_type.name,
+                uni_name,
+                pref_value,
+                repeated=repeated,
+                secret_name=f"{config_type.name}.{snake_name}",
+            )
+        else:
+            for field in config_values.ListFields():
+                repeated = config_io.is_repeated_field(field[0])
+                _print_setting(
+                    config_type.name,
+                    field[0].name,
+                    field[1],
+                    repeated=repeated,
+                    secret_name=f"{config_type.name}.{field[0].name}",
+                )
+    return True
