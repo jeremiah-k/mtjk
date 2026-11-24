@@ -24,9 +24,11 @@ from unittest.mock import MagicMock, create_autospec, patch
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.set_actions as cli_set_actions
 from meshtastic import mt_config
 from meshtastic.__main__ import main
 from meshtastic.cli import configure_actions as cli_configure_actions
+from meshtastic.cli.context import CliExit
 from meshtastic.configure_verify import LocalApplyStatus
 from meshtastic.node import Node
 from meshtastic.protobuf import admin_pb2, config_pb2, localonly_pb2
@@ -255,6 +257,9 @@ def _run_main_set(
         apply_patch.setattr(mt_config, "args", cast(Any, ["", *argv]))
         apply_patch.setattr(
             main_module, "time", SimpleNamespace(**time_attrs), raising=True
+        )
+        apply_patch.setattr(
+            cli_set_actions, "time", SimpleNamespace(**time_attrs), raising=True
         )
         with patch("meshtastic.serial_interface.SerialInterface", return_value=iface):
             main()
@@ -610,7 +615,7 @@ def test_local_set_reboot_during_verify_recovers_verified(
     )
     monkeypatch.setattr(cli_configure_actions, "CONFIG_RECONNECT_WAIT_SECONDS", 0.5)
     monkeypatch.setattr(cli_configure_actions, "CONFIG_REBOOT_PROBE_SECONDS", 0.0)
-    real_reconnect_verify = main_module._post_configure_reconnect_and_verify
+    real_reconnect_verify = cli_configure_actions._post_configure_reconnect_and_verify
 
     def _restore_link_at_reconnect_check(*args: Any, **kwargs: Any) -> Any:
         """Restore the modeled link only once the reconnect fallback owns it."""
@@ -618,7 +623,7 @@ def test_local_set_reboot_during_verify_recovers_verified(
         return real_reconnect_verify(*args, **kwargs)
 
     monkeypatch.setattr(
-        main_module,
+        cli_configure_actions,
         "_post_configure_reconnect_and_verify",
         _restore_link_at_reconnect_check,
     )
@@ -702,7 +707,7 @@ def test_local_set_verification_returning_exit_seam_fails_closed(
     iface = MagicMock()
     node = MagicMock()
     monkeypatch.setattr(
-        main_module,
+        cli_set_actions,
         "verify_local_config_apply",
         lambda *_args, **_kwargs: SimpleNamespace(
             status=LocalApplyStatus.MISMATCH,
@@ -710,16 +715,20 @@ def test_local_set_verification_returning_exit_seam_fails_closed(
             missing_sections=(),
         ),
     )
-    monkeypatch.setattr(main_module, "_cli_exit", lambda *_args, **_kwargs: None)
+    returning_exit = cast(
+        "CliExit", lambda *_args, **_kwargs: None
+    )  # Deliberately returns instead of raising; the seam must fail closed.
 
     with pytest.raises(AssertionError, match="cli_exit returned unexpectedly"):
-        main_module._verify_local_set_apply(
+        cli_set_actions._verify_local_set_apply(
             iface,
             node,
             node_dest="^local",
             pre_write_config_id=None,
             config_fields={"power": {"ls_secs": 222}},
             module_config_fields={},
+            cli_exit=returning_exit,
+            cli_print=main_module._cli_print,
         )
 
 
@@ -737,7 +746,7 @@ def test_local_set_connected_reload_failure_skips_reconnect_fallback(
     )
     reconnect_spy = MagicMock()
     monkeypatch.setattr(
-        main_module, "_post_configure_reconnect_and_verify", reconnect_spy
+        cli_configure_actions, "_post_configure_reconnect_and_verify", reconnect_spy
     )
 
     with pytest.raises(SystemExit) as exit_info:

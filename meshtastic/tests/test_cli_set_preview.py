@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import meshtastic.__main__ as main_module
+import meshtastic.cli.set_actions as cli_set_actions
 from meshtastic.__main__ import _handle_set_command, _preview_set_command
 from meshtastic.cli.config_preview import ConfigSnapshotCopies, render_preview_value
 from meshtastic.node import Node
@@ -125,8 +126,8 @@ def test_set_preview_leaf_helpers_fail_closed_for_stale_paths() -> None:
     config = localonly_pb2.LocalConfig()
     config.power.SetInParent()
 
-    assert main_module._resolve_set_leaf(config, "missing.value") is None
-    assert main_module._resolve_set_leaf(config, "power.missing") is None
+    assert cli_set_actions._resolve_set_leaf(config, "missing.value") is None
+    assert cli_set_actions._resolve_set_leaf(config, "power.missing") is None
     assert (
         main_module._render_preview_current_value(
             "missing.value", (config, localonly_pb2.LocalModuleConfig())
@@ -147,7 +148,7 @@ def test_set_preview_current_value_handles_scalar_root_presence() -> None:
     config = localonly_pb2.LocalConfig()
     config.version = 7
 
-    parent, field = main_module._resolve_set_leaf(config, "version") or (None, None)
+    parent, field = cli_set_actions._resolve_set_leaf(config, "version") or (None, None)
 
     assert parent is config
     assert field is not None and field.name == "version"
@@ -431,11 +432,15 @@ def test_preview_set_fails_closed_if_target_disappears_after_preflight(
     """A post-preflight target-resolution divergence aborts the preview."""
     interface, _node = _preview_interface()
     args = _set_args([["power.ls_secs", "300"]])
-    monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
     monkeypatch.setattr(
-        main_module, "_validate_set_entries_against_configs", lambda *_a, **_kw: True
+        cli_set_actions, "_ensure_set_sections_loaded", lambda *_a, **_kw: None
     )
-    monkeypatch.setattr(main_module, "_resolve_set_target", lambda *_a: None)
+    monkeypatch.setattr(
+        cli_set_actions,
+        "_validate_set_entries_against_configs",
+        lambda *_a, **_kw: True,
+    )
+    monkeypatch.setattr(cli_set_actions, "_resolve_set_target", lambda *_a: None)
 
     with pytest.raises(SystemExit) as exc_info:
         main_module._preview_set_command(interface, args, {})
@@ -452,11 +457,15 @@ def test_preview_set_fails_closed_if_leaf_disappears_after_preflight(
     interface, node = _preview_interface()
     node.localConfig.power.SetInParent()
     args = _set_args([["power.ls_secs", "300"]])
-    monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", lambda *_a: None)
     monkeypatch.setattr(
-        main_module, "_validate_set_entries_against_configs", lambda *_a, **_kw: True
+        cli_set_actions, "_ensure_set_sections_loaded", lambda *_a, **_kw: None
     )
-    monkeypatch.setattr(main_module, "_resolve_set_leaf", lambda *_a: None)
+    monkeypatch.setattr(
+        cli_set_actions,
+        "_validate_set_entries_against_configs",
+        lambda *_a, **_kw: True,
+    )
+    monkeypatch.setattr(cli_set_actions, "_resolve_set_leaf", lambda *_a: None)
 
     with pytest.raises(SystemExit) as exc_info:
         main_module._preview_set_command(interface, args, {})

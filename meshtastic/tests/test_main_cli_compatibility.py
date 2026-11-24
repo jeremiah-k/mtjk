@@ -11,6 +11,7 @@ import pytest
 import meshtastic.__main__ as main_module
 import meshtastic.cli.configure_actions as cli_configure_actions
 import meshtastic.cli.device_actions as cli_device_actions
+import meshtastic.cli.set_actions as cli_set_actions
 from meshtastic.cli.values import is_local_destination as _is_local_destination
 from meshtastic.configure_verify import _verify_channel_url_against_state
 from meshtastic.protobuf import localonly_pb2
@@ -127,22 +128,24 @@ def test_set_apply_divergence_terminates_after_successful_preflight(
     field = SimpleNamespace(name="power")
     config = object()
     monkeypatch.setattr(
-        main_module,
+        cli_set_actions,
         "_normalize_set_entries",
         MagicMock(return_value=[("power.ls_secs", "1")]),
     )
-    monkeypatch.setattr(main_module, "_ensure_set_sections_loaded", MagicMock())
+    monkeypatch.setattr(cli_set_actions, "_ensure_set_sections_loaded", MagicMock())
     monkeypatch.setattr(
-        main_module, "_preflight_set_entries", MagicMock(return_value=True)
+        cli_set_actions, "_preflight_set_entries", MagicMock(return_value=True)
     )
     monkeypatch.setattr(
-        main_module, "_resolve_set_target", MagicMock(return_value=(config, field))
+        cli_set_actions, "_resolve_set_target", MagicMock(return_value=(config, field))
     )
     if isinstance(apply_result, Exception):
-        monkeypatch.setattr(main_module, "setPref", MagicMock(side_effect=apply_result))
+        monkeypatch.setattr(
+            cli_set_actions, "_set_pref", MagicMock(side_effect=apply_result)
+        )
     else:
         monkeypatch.setattr(
-            main_module, "setPref", MagicMock(return_value=apply_result)
+            cli_set_actions, "_set_pref", MagicMock(return_value=apply_result)
         )
     cli_exit = MagicMock(side_effect=SystemExit(1))
     monkeypatch.setattr(main_module, "_cli_exit", cli_exit)

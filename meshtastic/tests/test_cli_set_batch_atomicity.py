@@ -416,7 +416,7 @@ def test_preflight_exception_redacts_secret_value_across_runtime_messages(
     with (
         patch("meshtastic.tcp_interface.TCPInterface", return_value=interface),
         patch(
-            "meshtastic.__main__.setPref",
+            "meshtastic.cli.set_actions._set_pref",
             side_effect=TypeError(f"{secret!r} has type str"),
         ),
     ):
