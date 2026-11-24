@@ -1235,6 +1235,8 @@ class Config(_message.Message):
         GPS_FORMAT_FIELD_NUMBER: _builtins.int
         AUTO_SCREEN_CAROUSEL_SECS_FIELD_NUMBER: _builtins.int
         COMPASS_NORTH_TOP_FIELD_NUMBER: _builtins.int
+        BEARINGS_VIEW_RADAR_FIELD_NUMBER: _builtins.int
+        RADAR_FAVORITES_ONLY_FIELD_NUMBER: _builtins.int
         FLIP_SCREEN_FIELD_NUMBER: _builtins.int
         UNITS_FIELD_NUMBER: _builtins.int
         OLED_FIELD_NUMBER: _builtins.int
@@ -1285,6 +1287,14 @@ class Config(_message.Message):
             (top of display is heading direction) is used.
             """
 
+        bearings_view_radar: _builtins.bool
+        """
+        If true, the bearings and distance screen is replaced by the radar minimap.
+        """
+        radar_favorites_only: _builtins.bool
+        """
+        If true, the radar minimap only plots favorite nodes.
+        """
         flip_screen: _builtins.bool
         """
         Flip screen vertically, for cases that mount the screen upside down
@@ -1334,6 +1344,8 @@ class Config(_message.Message):
             gps_format: Global___Config.DisplayConfig.DeprecatedGpsCoordinateFormat.ValueType = ...,
             auto_screen_carousel_secs: _builtins.int = ...,
             compass_north_top: _builtins.bool = ...,
+            bearings_view_radar: _builtins.bool = ...,
+            radar_favorites_only: _builtins.bool = ...,
             flip_screen: _builtins.bool = ...,
             units: Global___Config.DisplayConfig.DisplayUnits.ValueType = ...,
             oled: Global___Config.DisplayConfig.OledType.ValueType = ...,
@@ -1347,7 +1359,7 @@ class Config(_message.Message):
         ) -> None: ...
         _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
         def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-        _ClearFieldArgType: _TypeAlias = _typing.Literal["auto_screen_carousel_secs", b"auto_screen_carousel_secs", "compass_north_top", b"compass_north_top", "compass_orientation", b"compass_orientation", "displaymode", b"displaymode", "enable_message_bubbles", b"enable_message_bubbles", "flip_screen", b"flip_screen", "gps_format", b"gps_format", "heading_bold", b"heading_bold", "oled", b"oled", "screen_on_secs", b"screen_on_secs", "units", b"units", "use_12h_clock", b"use_12h_clock", "use_long_node_name", b"use_long_node_name", "wake_on_tap_or_motion", b"wake_on_tap_or_motion"]  # noqa: Y015
+        _ClearFieldArgType: _TypeAlias = _typing.Literal["auto_screen_carousel_secs", b"auto_screen_carousel_secs", "bearings_view_radar", b"bearings_view_radar", "compass_north_top", b"compass_north_top", "compass_orientation", b"compass_orientation", "displaymode", b"displaymode", "enable_message_bubbles", b"enable_message_bubbles", "flip_screen", b"flip_screen", "gps_format", b"gps_format", "heading_bold", b"heading_bold", "oled", b"oled", "radar_favorites_only", b"radar_favorites_only", "screen_on_secs", b"screen_on_secs", "units", b"units", "use_12h_clock", b"use_12h_clock", "use_long_node_name", b"use_long_node_name", "wake_on_tap_or_motion", b"wake_on_tap_or_motion"]  # noqa: Y015
         def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
         def WhichOneof(self, oneof_group: _Never) -> None: ...
 

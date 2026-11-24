@@ -667,6 +667,10 @@ class _HardwareModelEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_Hardwar
     """
     Meshnology W15
     """
+    M5STACK_SOLAR_NODE: _HardwareModel.ValueType  # 154
+    """
+    M5Stack SolarNode
+    """
     VIRTUAL_NODE: _HardwareModel.ValueType  # 254
     """
     A virtual node: a phone or desktop app acting as a mesh node of its own, with no radio hardware of its own
@@ -1315,6 +1319,10 @@ Heltec Magnetic Power Bank V2
 MESHNOLOGY_W15: HardwareModel.ValueType  # 153
 """
 Meshnology W15
+"""
+M5STACK_SOLAR_NODE: HardwareModel.ValueType  # 154
+"""
+M5Stack SolarNode
 """
 VIRTUAL_NODE: HardwareModel.ValueType  # 254
 """
