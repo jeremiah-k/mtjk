@@ -85,8 +85,10 @@ check-artifacts:
 # mypy-protobuf .pyi stubs (they reference private protobuf internals removed
 # in protobuf 6) and spews per-module stub-parsing errors; excluding the
 # generated modules keeps the run clean.
+# !meshtastic\.tests: the generated documentation covers the product package;
+# the test tree is not documentation surface.
 docs:
-	$(UV_RUN) --all-extras --group powermon pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf'
+	$(UV_RUN) --all-extras --group powermon pdoc --no-search -d numpy --output-directory docs meshtastic '!meshtastic\.protobuf' '!meshtastic\.tests'
 
 # lint the codebase (same command as CI)
 lint:
