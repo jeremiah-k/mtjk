@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2, mesh_pb2
 
 WAIT_ATTR_NAK = "receivedNak"
@@ -120,7 +121,7 @@ def _send_admin_with_ack_scope(
     private ``responseWaitAttr`` keyword. Preserve that seam while enabling
     request-scoped bookkeeping for the real bound method.
     """
-    send_admin = node._send_admin  # noqa: SLF001
+    send_admin = _NodePort(node).admin_sender
     scoped_send = _get_bound_interface_helper(node, "_send_data_with_wait")
     if (
         scope_ack

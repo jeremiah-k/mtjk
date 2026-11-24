@@ -205,3 +205,30 @@ def test_node_creates_the_port_once(anode: Node) -> None:
     second = anode._node_port  # noqa: SLF001
     assert first is second
     assert first._node is anode  # noqa: SLF001
+
+
+@pytest.mark.unit
+def test_port_preserves_explicit_default_arguments(
+    anode: Node, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicitly supplied default is distinct from an omitted keyword."""
+    sender = MagicMock(return_value=mesh_pb2.MeshPacket())
+    writer = MagicMock()
+    monkeypatch.setattr(anode, "_send_admin", sender)
+    monkeypatch.setattr(anode, "_write_channel_snapshot", writer)
+    port = anode._node_port  # noqa: SLF001
+    msg = admin_pb2.AdminMessage()
+    port.send_admin(
+        msg,
+        want_response=False,
+        on_response=None,
+        admin_index=None,
+        response_wait_attr=None,
+    )
+    sender.assert_called_once_with(
+        msg, wantResponse=False, onResponse=None, adminIndex=None, responseWaitAttr=None
+    )
+    channel = channel_pb2.Channel()
+    port.write_channel_snapshot(channel, admin_index=None)
+    writer.assert_called_once_with(channel, adminIndex=None)
+    assert port.admin_sender is sender

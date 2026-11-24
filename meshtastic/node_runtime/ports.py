@@ -14,6 +14,7 @@ concentrated in this module.
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NoReturn, TypedDict, TypeVar
 
 from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2
@@ -29,9 +30,13 @@ class _SendAdminKwargs(TypedDict, total=False):
     """Keyword arguments forwarded to the facade's admin-send seam."""
 
     wantResponse: bool
-    onResponse: Callable[[dict[str, Any]], Any]
-    adminIndex: int
-    responseWaitAttr: str
+    onResponse: Callable[[dict[str, Any]], Any] | None
+    adminIndex: int | None
+    responseWaitAttr: str | None
+
+
+class _Omitted(Enum):
+    VALUE = 0
 
 
 class _NodePort:
@@ -93,13 +98,18 @@ class _NodePort:
         """
         self._node._raise_interface_error(message)  # noqa: SLF001
 
+    @property
+    def admin_sender(self) -> Callable[..., mesh_pb2.MeshPacket | None]:
+        """Resolve the live sender for ACK-scope signature inspection."""
+        return self._node._send_admin  # noqa: SLF001
+
     def send_admin(
         self,
         admin_message: admin_pb2.AdminMessage,
-        want_response: bool = False,
-        on_response: Callable[[dict[str, Any]], Any] | None = None,
-        admin_index: int | None = None,
-        response_wait_attr: str | None = None,
+        want_response: bool | _Omitted = _Omitted.VALUE,
+        on_response: Callable[[dict[str, Any]], Any] | None | _Omitted = _Omitted.VALUE,
+        admin_index: int | None | _Omitted = _Omitted.VALUE,
+        response_wait_attr: str | None | _Omitted = _Omitted.VALUE,
     ) -> mesh_pb2.MeshPacket | None:
         """Send an AdminMessage through the facade's admin channel.
 
@@ -126,19 +136,19 @@ class _NodePort:
 
         Notes
         -----
-        Only explicitly supplied, non-default arguments are forwarded, so the
+        Only explicitly supplied arguments are forwarded, including None and False, so the
         facade seam observes the exact call shape the runtime caller wrote.
         """
         forwarded: _SendAdminKwargs = {}
-        if want_response:
+        if not isinstance(want_response, _Omitted):
             forwarded["wantResponse"] = want_response
-        if on_response is not None:
+        if not isinstance(on_response, _Omitted):
             forwarded["onResponse"] = on_response
-        if admin_index is not None:
+        if not isinstance(admin_index, _Omitted):
             forwarded["adminIndex"] = admin_index
-        if response_wait_attr is not None:
+        if not isinstance(response_wait_attr, _Omitted):
             forwarded["responseWaitAttr"] = response_wait_attr
-        return self._node._send_admin(admin_message, **forwarded)  # noqa: SLF001
+        return self.admin_sender(admin_message, **forwarded)
 
     def execute_with_node_db_lock(self, func: Callable[[], _ResultT]) -> _ResultT:
         """Execute ``func`` while holding the interface node-database lock.
@@ -158,7 +168,7 @@ class _NodePort:
     def write_channel_snapshot(
         self,
         channel_to_write: channel_pb2.Channel,
-        admin_index: int | None = None,
+        admin_index: int | None | _Omitted = _Omitted.VALUE,
     ) -> None:
         """Write a pre-built channel snapshot to the device.
 
@@ -170,7 +180,7 @@ class _NodePort:
             Admin channel index to use; when None the node's configured
             admin channel is used.
         """
-        if admin_index is not None:
+        if not isinstance(admin_index, _Omitted):
             self._node._write_channel_snapshot(  # noqa: SLF001
                 channel_to_write,
                 adminIndex=admin_index,
