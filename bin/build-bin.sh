@@ -25,7 +25,8 @@ primary_cli="$("${PROJECT_RUN[@]}" python -c 'from meshtastic._branding import P
 	-F \
 	-n "${primary_cli}" \
 	--copy-metadata "${distribution_name}" \
-	--collect-all meshtastic \
+	--collect-submodules meshtastic \
+	--exclude-module meshtastic.tests \
 	meshtastic/__main__.py
 
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then

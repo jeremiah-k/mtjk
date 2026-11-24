@@ -365,7 +365,7 @@ def test_standalone_build_copies_configured_distribution_metadata(
     tmp_path: Path,
     legacy_lock: bool,
 ) -> None:
-    """The frozen executable must carry metadata used by importlib.metadata.version()."""
+    """The frozen executable must carry distribution metadata and product modules only."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     pyinstaller_args = tmp_path / "pyinstaller-args.txt"
@@ -442,6 +442,11 @@ exit 2
     assert args[metadata_index + 1] == DISTRIBUTION_NAME
     name_index = args.index("-n")
     assert args[name_index + 1] == PRIMARY_CLI_NAME
+    modules_index = args.index("--collect-submodules")
+    assert args[modules_index + 1] == "meshtastic"
+    excluded_index = args.index("--exclude-module")
+    assert args[excluded_index + 1] == "meshtastic.tests"
+    assert "--collect-all" not in args
     assert sorted(entry.name for entry in (tmp_path / "dist").iterdir()) == [
         PRIMARY_CLI_NAME
     ]
