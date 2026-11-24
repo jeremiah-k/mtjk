@@ -68,6 +68,12 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   `_is_currently_connected_elsewhere`, `sys/shutil/subprocess`) are delegated
   from the interface so existing tests/integrations that monkeypatch
   `meshtastic.interfaces.ble.interface.*` continue to work.
+- The documented stable `BLEReceiveRecoveryService` and
+  `BLECompatibilityEventService.publish_connection_status_legacy()` entrypoints
+  remain available for existing callers. Runtime code uses the controller and
+  publisher directly; it does not inspect patches to the compatibility services.
+- The lifecycle and management static services were internal test/patch surfaces,
+  not upstream public API; their removal is separate from the stable aliases.
 - Collaborator instances remain implementation details; runtime orchestration
   should enter through collaborator/controller interfaces rather than static
   helpers.
