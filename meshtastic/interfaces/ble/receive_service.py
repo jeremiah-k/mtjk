@@ -1147,11 +1147,4 @@ class BLEReceiveRecoveryController:
         )
 
 
-# COMPAT_STABLE_SHIM: Re-export legacy receive service name for compatibility.
-# Lazy module resolution preserves the receive-service compatibility cycle without
-# a non-top-level import statement.
-BLEReceiveRecoveryService = _load_runtime_module(
-    "meshtastic.interfaces.ble.receive_compat_service"
-).BLEReceiveRecoveryService
-
-__all__ = ["BLEReceiveRecoveryController", "BLEReceiveRecoveryService"]
+__all__ = ["BLEReceiveRecoveryController"]

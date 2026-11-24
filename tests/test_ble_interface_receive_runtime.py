@@ -176,9 +176,9 @@ def test_receive_recovery_backoff_reaches_configured_cap_for_non_power_of_two(
         raising=True,
     )
 
-    receive_service_mod.BLEReceiveRecoveryService._recover_receive_thread(
-        iface, "receive_thread_fatal"
-    )
+    receive_service_mod.BLEReceiveRecoveryController(
+        cast(Any, iface)
+    ).recover_receive_thread("receive_thread_fatal")
 
     assert wait_calls == [30.0]
     assert iface._read_retry_count == 7
