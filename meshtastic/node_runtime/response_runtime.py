@@ -8,6 +8,7 @@ from meshtastic.node_runtime.admin_wait import (
     _record_admin_wait_error_for_packet,
 )
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.shared import ERROR_REASON_NONE, MAX_CHANNELS
 from meshtastic.protobuf import channel_pb2, config_pb2, mesh_pb2, portnums_pb2
 from meshtastic.util import stripnl
@@ -33,8 +34,19 @@ def _has_protobuf_field(obj: Any, field_name: str) -> bool:
 class _NodeMetadataResponseRuntime:
     """Owns metadata response routing/error handling, state mutation, and signaling."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def _handle_routing_portnum(
         self, decoded: dict[str, Any], packet: dict[str, Any] | None = None
@@ -57,7 +69,7 @@ class _NodeMetadataResponseRuntime:
                     packet,
                     "Received malformed metadata response (missing routing).",
                 )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return True
         error_reason = routing.get("errorReason")
         if not isinstance(error_reason, str):
@@ -72,7 +84,7 @@ class _NodeMetadataResponseRuntime:
                     packet,
                     "Received malformed metadata response (invalid routing.errorReason).",
                 )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return True
         if error_reason != ERROR_REASON_NONE:
             logger.warning(
@@ -84,7 +96,7 @@ class _NodeMetadataResponseRuntime:
                 _record_admin_wait_error_for_packet(
                     self._node, packet, f"Routing error on response: {error_reason}"
                 )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return True
         logger.debug(
             "Metadata request routed successfully; waiting for ADMIN_APP payload."
@@ -111,7 +123,7 @@ class _NodeMetadataResponseRuntime:
                     packet,
                     "Received malformed metadata response (invalid routing.errorReason).",
                 )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return True
         if error_reason != ERROR_REASON_NONE:
             logger.error("Error on response: %s", error_reason)
@@ -120,7 +132,7 @@ class _NodeMetadataResponseRuntime:
                 _record_admin_wait_error_for_packet(
                     self._node, packet, f"Routing error on response: {error_reason}"
                 )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return True
         return False
 
@@ -133,14 +145,14 @@ class _NodeMetadataResponseRuntime:
     ) -> None:
         """Emit enum metadata field using enum name when valid and raw value otherwise."""
         formatted = enum_type.Name(value) if value in enum_type.values() else value
-        self._node._emit_metadata_line(f"{field_name}: {formatted}")
+        self._port.emit_metadata_line(f"{field_name}: {formatted}")
 
     def _emit_metadata_lines(self, metadata: mesh_pb2.DeviceMetadata) -> None:
         """Emit metadata lines with historical formatting and enum fallback behavior."""
-        self._node._emit_metadata_line(
+        self._port.emit_metadata_line(
             f"\nfirmware_version: {metadata.firmware_version}"
         )
-        self._node._emit_metadata_line(
+        self._port.emit_metadata_line(
             f"device_state_version: {metadata.device_state_version}"
         )
         self._format_and_emit_enum(
@@ -148,7 +160,7 @@ class _NodeMetadataResponseRuntime:
             value=metadata.role,
             enum_type=config_pb2.Config.DeviceConfig.Role,
         )
-        self._node._emit_metadata_line(
+        self._port.emit_metadata_line(
             f"position_flags: {self._node.position_flags_list(metadata.position_flags)}"
         )
         self._format_and_emit_enum(
@@ -156,9 +168,9 @@ class _NodeMetadataResponseRuntime:
             value=metadata.hw_model,
             enum_type=mesh_pb2.HardwareModel,
         )
-        self._node._emit_metadata_line(f"hasPKC: {metadata.hasPKC}")
+        self._port.emit_metadata_line(f"hasPKC: {metadata.hasPKC}")
         if metadata.excluded_modules > 0:
-            self._node._emit_metadata_line(
+            self._port.emit_metadata_line(
                 f"excluded_modules: {self._node.excluded_modules_list(metadata.excluded_modules)}"
             )
 
@@ -177,7 +189,7 @@ class _NodeMetadataResponseRuntime:
                 packet,
                 "Received malformed metadata response (missing decoded).",
             )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return
         if self._handle_routing_portnum(decoded, packet):
             return
@@ -196,7 +208,7 @@ class _NodeMetadataResponseRuntime:
                 packet,
                 "Received malformed metadata response (missing admin).",
             )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return
         raw_admin = admin_message.get("raw")
         if raw_admin is None or not _has_protobuf_field(
@@ -212,25 +224,44 @@ class _NodeMetadataResponseRuntime:
                 packet,
                 "Received malformed metadata response (missing admin.raw).",
             )
-            self._node._signal_metadata_stdout_event()
+            self._port.signal_metadata_stdout_event()
             return
         metadata_response = raw_admin.get_device_metadata_response
         metadata_snapshot = mesh_pb2.DeviceMetadata()
         metadata_snapshot.CopyFrom(metadata_response)
         self._node.iface._acknowledgment.receivedAck = True
         _mark_admin_wait_acknowledged_for_packet(self._node, packet)
-        self._node._set_metadata_snapshot(metadata_snapshot)
-        self._node._timeout.reset()  # We made forward progress
+        self._port.set_metadata_snapshot(metadata_snapshot)
+        self._port.timeout.reset()  # We made forward progress
         logger.debug("Received metadata %s", stripnl(metadata_response))
         self._emit_metadata_lines(metadata_response)
-        self._node._signal_metadata_stdout_event()
+        self._port.signal_metadata_stdout_event()
 
 
 class _NodeChannelResponseRuntime:
     """Owns channel-response routing/error handling, sequencing, and final installation."""
 
-    def __init__(self, node: "Node", *, channel_state: _NodeChannelState) -> None:
+    def __init__(
+        self,
+        node: "Node",
+        port: _NodePort | None = None,
+        *,
+        channel_state: _NodeChannelState,
+    ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._pending_channel_request_index: int | None = None
         self._pending_channel_retry_count = 0
@@ -249,7 +280,7 @@ class _NodeChannelResponseRuntime:
             self._pending_channel_retry_count = 0
         self._pending_channel_request_index = channel_index
         self._channel_request_failed = True
-        self._node._timeout.reset()  # noqa: SLF001
+        self._port.timeout.reset()
 
     def has_channel_request_failed(self) -> bool:
         """Return whether the active channel download has terminally failed."""
@@ -264,7 +295,7 @@ class _NodeChannelResponseRuntime:
                 error_reason,
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return
 
         if self._pending_channel_retry_count >= CHANNEL_ROUTING_RETRY_LIMIT:
@@ -274,7 +305,7 @@ class _NodeChannelResponseRuntime:
                 request_index,
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return
 
         self._pending_channel_retry_count += 1
@@ -285,16 +316,16 @@ class _NodeChannelResponseRuntime:
             self._pending_channel_retry_count,
             CHANNEL_ROUTING_RETRY_LIMIT,
         )
-        retry_request = self._node._request_channel(request_index)  # noqa: SLF001
+        retry_request = self._port.request_channel(request_index)
         if retry_request is None:
             logger.warning(
                 "Channel retry for index %s was not started.",
                 request_index,
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return
-        self._node._timeout.reset()  # We retried the in-flight request
+        self._port.timeout.reset()  # We retried the in-flight request
 
     def _handle_routing_response(self, decoded: dict[str, Any]) -> bool:
         """Handle ROUTING_APP channel responses and indicate whether processing is complete."""
@@ -309,7 +340,7 @@ class _NodeChannelResponseRuntime:
                 "Received malformed channel response (missing routing): %s", decoded
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
         else:
             error_reason = routing.get("errorReason")
             if not isinstance(error_reason, str):
@@ -318,7 +349,7 @@ class _NodeChannelResponseRuntime:
                     decoded,
                 )
                 self._channel_request_failed = True
-                self._node._timeout.reset()  # noqa: SLF001
+                self._port.timeout.reset()
             elif error_reason != ERROR_REASON_NONE:
                 self._retry_pending_channel_request(error_reason)
             else:
@@ -340,7 +371,7 @@ class _NodeChannelResponseRuntime:
                 "Received malformed channel response without decoded payload"
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return (False, None)
         logger.debug(
             "onResponseRequestChannel() portnum=%s",
@@ -353,7 +384,7 @@ class _NodeChannelResponseRuntime:
         if not isinstance(admin_message, dict):
             logger.warning("Received malformed channel response without admin payload")
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return (False, None)
         raw_admin = admin_message.get("raw")
         if raw_admin is None or not _has_protobuf_field(
@@ -363,7 +394,7 @@ class _NodeChannelResponseRuntime:
                 "Received malformed channel response without admin.raw payload"
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()
             return (False, None)
 
         response_channel = raw_admin.get_channel_response
@@ -417,7 +448,7 @@ class _NodeChannelResponseRuntime:
                 channel_response.index,
             )
             return
-        self._node._timeout.reset()  # We made forward progress
+        self._port.timeout.reset()  # We made forward progress
         safe_role = (
             channel_pb2.Channel.Role.Name(channel_response.role)
             if channel_response.role in channel_pb2.Channel.Role.values()
@@ -440,7 +471,7 @@ class _NodeChannelResponseRuntime:
             self._pending_channel_request_index = None
             self._pending_channel_retry_count = 0
             return
-        next_request = self._node._request_channel(index + 1)  # noqa: SLF001
+        next_request = self._port.request_channel(index + 1)
         if next_request is None:
             logger.warning(
                 "Failed to request next channel index %s after receiving index %s.",
@@ -448,4 +479,4 @@ class _NodeChannelResponseRuntime:
                 index,
             )
             self._channel_request_failed = True
-            self._node._timeout.reset()  # noqa: SLF001
+            self._port.timeout.reset()

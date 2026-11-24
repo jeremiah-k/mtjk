@@ -237,17 +237,23 @@ class Node:  # pylint: disable=too-many-instance-attributes
             self._channel_state
         )
         self._channel_export_runtime = _NodeChannelExportRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._channel_request_runtime = _NodeChannelRequestRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._channel_presentation_runtime = _NodeChannelPresentationRuntime(
             self,
             channel_state=self._channel_state,
             export_runtime=self._channel_export_runtime,
         )
-        self._contact_runtime = contact_runtime._NodeContactRuntime(self)
+        self._contact_runtime = contact_runtime._NodeContactRuntime(
+            self, self._node_port
+        )
         self._channel_write_runtime = _NodeChannelWriteRuntime(
             self,
             self._node_port,
@@ -394,6 +400,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
                     self._content_request_runtime_cache = _NodeAdminContentRuntime(
                         self,
+                        self._node_port,
                         cache_store=self._content_cache_store,
                         response_runtime=self._content_response_runtime,
                     )
@@ -410,7 +417,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._metadata_response_runtime_cache = (
-                        _NodeMetadataResponseRuntime(self)
+                        _NodeMetadataResponseRuntime(self, self._node_port)
                     )
         return self._metadata_response_runtime_cache
 
@@ -425,7 +432,9 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._channel_response_runtime_cache = _NodeChannelResponseRuntime(
-                        self, channel_state=self._get_channel_state()
+                        self,
+                        self._node_port,
+                        channel_state=self._get_channel_state(),
                     )
         return self._channel_response_runtime_cache
 

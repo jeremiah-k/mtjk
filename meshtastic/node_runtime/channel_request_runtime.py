@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Protocol, cast
 
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2, channel_pb2, mesh_pb2
 from meshtastic.util import Timeout
 
@@ -82,10 +83,24 @@ class _NodeChannelRequestRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         channel_state: _NodeChannelState,
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
 
     def set_channels(self, channels: Sequence[channel_pb2.Channel]) -> None:
@@ -124,7 +139,7 @@ class _NodeChannelRequestRuntime:
                     channel_state=self._channel_state,
                     channel_response_runtime=channel_response_runtime,
                 )
-                completed = self._node._timeout.waitForSet(  # noqa: SLF001
+                completed = self._port.timeout.waitForSet(
                     probe,
                     attrs=("is_set",),
                 )
@@ -133,7 +148,7 @@ class _NodeChannelRequestRuntime:
                 if self._channel_state.has_channels():
                     return True
                 return not bool(has_channel_request_failed())
-            return self._node._timeout.waitForSet(  # noqa: SLF001
+            return self._port.timeout.waitForSet(
                 self._node,
                 attrs=("channels",),
             )
@@ -141,7 +156,7 @@ class _NodeChannelRequestRuntime:
         local_config = self._node.localConfig
         has_field = getattr(local_config, "HasField", None)
         if callable(has_field):
-            return self._node._timeout.waitForSet(  # noqa: SLF001
+            return self._port.timeout.waitForSet(
                 _LocalConfigFieldProbe(
                     has_field_fn=cast(Callable[[str], bool], has_field),
                     name=attribute,
@@ -149,7 +164,7 @@ class _NodeChannelRequestRuntime:
                 attrs=("is_set",),
             )
 
-        return self._node._timeout.waitForSet(  # noqa: SLF001
+        return self._port.timeout.waitForSet(
             local_config,
             attrs=(attribute,),
         )
@@ -222,10 +237,10 @@ class _NodeChannelRequestRuntime:
             logger.debug("Requesting channel %s", channel_num)
 
         try:
-            request = self._node._send_admin(
+            request = self._port.send_admin(
                 message,
-                wantResponse=True,
-                onResponse=self._node.onResponseRequestChannel,
+                want_response=True,
+                on_response=self._node.onResponseRequestChannel,
             )
         except Exception:
             if callable(mark_channel_request_send_failed):
