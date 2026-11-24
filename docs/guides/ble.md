@@ -30,7 +30,6 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 | `BLEShutdownLifecycleCoordinator`            | Owns close/shutdown sequencing and terminal cleanup orchestration                                                                                  |
 | `BLEReceiveRecoveryController`               | Instance-bound receive collaborator for read-loop execution, retry, and recovery                                                                   |
 | `BLECompatibilityEventPublisher`             | Instance-bound publisher for legacy status events and publish-queue drain/flush                                                                    |
-| `*...Service` classes                        | Compatibility shim surfaces and shared helper logic behind collaborator-owned runtime flows                                                        |
 
 ### Boundary contract (current)
 
@@ -39,7 +38,7 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
 - Lifecycle runtime ownership is partitioned under `BLELifecycleController`
   into receive, disconnect, connection-ownership, and shutdown coordinators.
 - Underscore-prefixed methods are canonical for internal orchestration
-  collaborators (`state`, `coordination`, and compatibility shims);
+  collaborators (`state`, `coordination`);
   runtime ownership is in controllers/coordinators/dispatchers.
 - `BLEInterface` uses collaborator APIs for state/notification interactions
   (for example `NotificationManager._get_callback()/_subscribe()` and
@@ -56,32 +55,22 @@ patterns for code that embeds `mtjk` through the `meshtastic` package namespace.
   shims that delegate to the collaborator.
 - Receive-loop and recovery runtime orchestration routes through
   `BLEReceiveRecoveryController`; interface-level receive helpers are facade
-  shims that delegate to the collaborator.
-- `BLEReceiveRecoveryService._*` receive runtime entrypoints are compatibility
-  shims that delegate to `BLEReceiveRecoveryController` owners
+  shims that delegate to the collaborator, whose own methods
   (`_read_and_handle_payload`, `_handle_payload_read`, `_run_receive_cycle`,
-  `_receive_from_radio_impl`, `_recover_receive_thread`,
-  `_read_from_radio_with_retries`, `_handle_transient_read_error`,
-  `_log_empty_read_warning`).
+  `receive_from_radio_impl`, `recover_receive_thread`,
+  `read_from_radio_with_retries`, `handle_transient_read_error`,
+  `log_empty_read_warning`) are the receive runtime entrypoints.
 - `BLEManagementCommandHandler` owns management timeout validation,
   trust-command execution, and trust lifecycle orchestration in addition to
   pair/unpair and command execution ownership.
-- `BLEManagementCommandsService._*` entrypoints are compatibility shims that
-  delegate to `BLEManagementCommandHandler` for runtime behavior.
 - `BLEInterface` remains the compatibility boundary: patch-sensitive
   collaborators (for example `publishingThread`, `BLEClient`,
   `_is_currently_connected_elsewhere`, `sys/shutil/subprocess`) are delegated
   from the interface so existing tests/integrations that monkeypatch
   `meshtastic.interfaces.ble.interface.*` continue to work.
-- Service classes remain implementation details; runtime orchestration should
-  enter through collaborator/controller interfaces rather than static helpers.
-- `BLELifecycleService._*` methods are retained as compatibility/test shim
-  entrypoints and delegate to coordinator-owned implementations.
-- `BLEReceiveRecoveryService._*` and `BLEManagementCommandsService._*` remain
-  available for compatibility-targeted direct service/test entrypoints;
-  collaborator owners remain authoritative for runtime behavior in
-  `BLEInterface` call paths (`BLEReceiveRecoveryController` and
-  `BLEManagementCommandHandler`).
+- Collaborator instances remain implementation details; runtime orchestration
+  should enter through collaborator/controller interfaces rather than static
+  helpers.
 
 ### Key design choices
 
