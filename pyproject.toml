@@ -124,6 +124,11 @@ source-exclude = [
   "**/.hypothesis/**",
   "meshtastic/tests/api_baselines/*_test.json",
 ]
+# Wheels ship the product only: installed consumers never need the test tree.
+# Source distributions keep it so an unpacked sdist can still run its own
+# test suite; that is why the exclusion below is wheel-scoped instead of
+# folded into source-exclude.
+wheel-exclude = ["meshtastic/tests/**"]
 
 # Optional: pipx install poethepoet, then run poe code inside the project environment.
 [tool.poe.tasks]

@@ -1039,8 +1039,8 @@ def validate_wheel_contents(
     Raises
     ------
     SmokeGateError
-        On any missing marker, metadata member, entry point, or protobuf
-        module; expectations are runtime-derived.
+        On any missing marker, metadata member, entry point, packaged test
+        module, or protobuf module; expectations are runtime-derived.
     """
     with zipfile.ZipFile(wheel) as archive:
         # ZIP directory entries are not installed files and need no RECORD row.
@@ -1072,6 +1072,17 @@ def validate_wheel_contents(
             )
         entry_points_text = archive.read(entry_points_name).decode("utf-8")
         wheel_paths = set(names)
+        packaged_test_members = sorted(
+            name for name in wheel_paths if name.startswith("meshtastic/tests/")
+        )
+        if packaged_test_members:
+            raise SmokeGateError(
+                "contents",
+                "wheel packages meshtastic/tests members; built wheels ship "
+                "the product only",
+                artifact=str(wheel),
+                detail="\n".join(packaged_test_members[:20]),
+            )
         record_paths = {
             row[0] for row in csv.reader(io.StringIO(record_text)) if row and row[0]
         }
