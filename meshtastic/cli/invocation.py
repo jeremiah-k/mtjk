@@ -65,6 +65,22 @@ def current_camel_case() -> bool:
     return invocation.camel_case if invocation is not None else mt_config.camel_case
 
 
+def current_channel_index() -> int | None:
+    """Return the invocation-selected channel index with the legacy fallback."""
+    invocation = get_current_invocation()
+    return (
+        invocation.channel_index if invocation is not None else mt_config.channel_index
+    )
+
+
+def set_current_channel_index(value: int) -> None:
+    """Update invocation-owned channel selection and mirror the compatibility global."""
+    invocation = get_current_invocation()
+    if invocation is not None:
+        invocation.channel_index = value
+    mt_config.channel_index = value
+
+
 _CURRENT_OUTPUT: contextvars.ContextVar[Callable[[str], None] | None] = (
     contextvars.ContextVar("cli_output", default=None)
 )

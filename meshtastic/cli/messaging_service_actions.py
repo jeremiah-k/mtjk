@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import platform
+import textwrap
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from meshtastic._core_constants import BROADCAST_ADDR
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
 from meshtastic.cli.parser import parse_cli_args
 from meshtastic.cli.session_resources import SessionCleanup
+from meshtastic.mesh_interface_runtime import node_data
 from meshtastic.protobuf import portnums_pb2
 
 logger = logging.getLogger(__name__)
@@ -715,3 +717,59 @@ def _handle_long_running_services(
         context.outcome.close_now = False
 
     _start_tunnel(context, hooks)
+
+
+def _validate_cli_show_fields(
+    interface: Any, show_fields: list[str], *, cli_exit: CliExit
+) -> None:
+    """Reject unavailable --show-fields values with a concrete choice list."""
+    nodes_by_num = getattr(interface, "nodesByNum", None)
+    observed_nodes = (
+        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    )
+    available = node_data.get_known_field_paths(observed_nodes)
+    available_set = set(available)
+    invalid = [field for field in show_fields if field not in available_set]
+    if invalid:
+        choices = textwrap.fill(
+            ", ".join(available),
+            width=100,
+            initial_indent="  ",
+            subsequent_indent="  ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        cli_exit(
+            "Unknown --show-fields value(s): "
+            f"{', '.join(invalid)}.\nAvailable fields:\n{choices}",
+            1,
+        )
+
+
+def _validate_cli_sort_field(
+    interface: Any, sort_field: str, *, cli_exit: CliExit
+) -> None:
+    """Reject unavailable --sort fields with a concrete choice list."""
+    nodes_by_num = getattr(interface, "nodesByNum", None)
+    observed_nodes = (
+        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    )
+    available = [
+        *node_data.FIELD_ALIASES.keys(),
+        *node_data.get_known_field_paths(observed_nodes),
+    ]
+    resolved = node_data._resolve_field_alias(sort_field)
+    available_set = set(available)
+    if resolved not in available_set and sort_field not in available_set:
+        choices = textwrap.fill(
+            ", ".join(sorted(available_set)),
+            width=100,
+            initial_indent="  ",
+            subsequent_indent="  ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        cli_exit(
+            f"Unknown --sort field '{sort_field}'.\nAvailable fields:\n{choices}",
+            1,
+        )

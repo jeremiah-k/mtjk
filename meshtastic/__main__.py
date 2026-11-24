@@ -11,7 +11,6 @@ import os
 import platform
 import signal
 import sys
-import textwrap
 import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -105,7 +104,6 @@ from meshtastic.lockdown import (
     validate_lockdown_passphrase,
 )
 from meshtastic.mesh_interface import MeshInterface
-from meshtastic.mesh_interface_runtime import node_data
 from meshtastic.protobuf import (  # noqa: F401 - legacy __main__ compatibility export
     admin_pb2,
     channel_pb2,
@@ -343,19 +341,13 @@ def _current_camel_case() -> bool:
 
 
 def _current_channel_index() -> int | None:
-    """Return the invocation-selected channel index with legacy fallback."""
-    invocation = cli_invocation.get_current_invocation()
-    return (
-        invocation.channel_index if invocation is not None else mt_config.channel_index
-    )
+    """Compatibility wrapper returning the invocation-selected channel index."""
+    return cli_invocation.current_channel_index()
 
 
 def _set_current_channel_index(value: int) -> None:
-    """Update invocation-owned channel selection and mirror the compatibility global."""
-    invocation = cli_invocation.get_current_invocation()
-    if invocation is not None:
-        invocation.channel_index = value
-    mt_config.channel_index = value
+    """Compatibility wrapper updating the invocation-selected channel index."""
+    cli_invocation.set_current_channel_index(value)
 
 
 def _set_current_logfile(value: IO[str] | None) -> None:
@@ -734,13 +726,8 @@ def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:
 
 
 def checkChannel(interface: MeshInterface, channelIndex: int) -> bool:
-    """Determine whether the local node has the channel at the given index enabled."""
-    if hasattr(type(interface.localNode), "getChannelCopyByChannelIndex"):
-        ch = interface.localNode.getChannelCopyByChannelIndex(channelIndex)
-    else:
-        ch = interface.localNode.getChannelByChannelIndex(channelIndex)
-    logger.debug("ch:%s", ch)
-    return bool(ch and ch.role != channel_pb2.Channel.Role.DISABLED)
+    """Compatibility wrapper for the cli channel-enabled check."""
+    return cli_channel_contact_actions.check_channel(interface, channelIndex)
 
 
 _normalize_pref_name = cli_preference_runtime.normalize_pref_name
@@ -812,21 +799,7 @@ _resolve_pref = cli_preference_runtime.resolve_pref
 _protobuf_field_type_label = cli_preference_runtime.protobuf_field_type_label
 
 
-def _print_channel_field_choices(
-    settings: Any, pref_name: str, *, cli_print: Callable[[str], None] = print
-) -> None:
-    """Print available channel-setting fields after an unknown --ch-set name."""
-    cli_print(f"{settings.__class__.__name__} does not have an attribute {pref_name}.")
-    cli_print("Choices are...")
-    for field in settings.DESCRIPTOR.fields:
-        if field.name != "module_settings":
-            cli_print(field.name)
-            continue
-        cli_print(f"{field.name}:")
-        if field.message_type is None:
-            continue
-        for sub_field in sorted(field.message_type.fields, key=lambda item: item.name):
-            cli_print(f"    {field.name}.{sub_field.name}")
+_print_channel_field_choices = cli_channel_contact_actions._print_channel_field_choices
 
 
 def _reject_pref_value(
@@ -981,55 +954,17 @@ def _run_configure_preview(
 
 
 def _validate_cli_show_fields(interface: MeshInterface, show_fields: list[str]) -> None:
-    """Reject unavailable --show-fields values with a concrete choice list."""
-    nodes_by_num = getattr(interface, "nodesByNum", None)
-    observed_nodes = (
-        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    """Compatibility wrapper for ``--show-fields`` validation."""
+    cli_messaging_service_actions._validate_cli_show_fields(
+        interface, show_fields, cli_exit=_cli_exit
     )
-    available = node_data.get_known_field_paths(observed_nodes)
-    available_set = set(available)
-    invalid = [field for field in show_fields if field not in available_set]
-    if invalid:
-        choices = textwrap.fill(
-            ", ".join(available),
-            width=100,
-            initial_indent="  ",
-            subsequent_indent="  ",
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        _cli_exit(
-            "Unknown --show-fields value(s): "
-            f"{', '.join(invalid)}.\nAvailable fields:\n{choices}",
-            1,
-        )
 
 
 def _validate_cli_sort_field(interface: MeshInterface, sort_field: str) -> None:
-    """Reject unavailable --sort fields with a concrete choice list."""
-    nodes_by_num = getattr(interface, "nodesByNum", None)
-    observed_nodes = (
-        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    """Compatibility wrapper for ``--sort`` field validation."""
+    cli_messaging_service_actions._validate_cli_sort_field(
+        interface, sort_field, cli_exit=_cli_exit
     )
-    available = [
-        *node_data.FIELD_ALIASES.keys(),
-        *node_data.get_known_field_paths(observed_nodes),
-    ]
-    resolved = node_data._resolve_field_alias(sort_field)
-    available_set = set(available)
-    if resolved not in available_set and sort_field not in available_set:
-        choices = textwrap.fill(
-            ", ".join(sorted(available_set)),
-            width=100,
-            initial_indent="  ",
-            subsequent_indent="  ",
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        _cli_exit(
-            f"Unknown --sort field '{sort_field}'.\nAvailable fields:\n{choices}",
-            1,
-        )
 
 
 def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
