@@ -9,6 +9,7 @@ from meshtastic.node_runtime.admin_wait import (
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2, mesh_pb2
 
 if TYPE_CHECKING:
@@ -23,8 +24,19 @@ DEGREES_TO_INT_SCALE = int(1e7)
 class _NodePositionTimeCommandRuntime:
     """Owns setFixedPosition/removeFixedPosition/setTime command orchestration."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def _select_remote_ack_callback(self) -> Callable[[dict[str, Any]], Any] | None:
         """Return callback policy used by remote admin command sends."""
@@ -82,19 +94,19 @@ class _NodePositionTimeCommandRuntime:
         if lat is not None and (
             isinstance(lat, bool) or not isinstance(lat, (int, float))
         ):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Invalid latitude type: {type(lat).__name__}. Expected int or float."
             )
         if lon is not None and (
             isinstance(lon, bool) or not isinstance(lon, (int, float))
         ):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Invalid longitude type: {type(lon).__name__}. Expected int or float."
             )
         if alt is not None and (
             isinstance(alt, bool) or not isinstance(alt, (int, float))
         ):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Invalid altitude type: {type(alt).__name__}. Expected int or float."
             )
 
@@ -134,7 +146,7 @@ class _NodePositionTimeCommandRuntime:
     def _set_time(self, *, time_sec: int = 0) -> mesh_pb2.MeshPacket | None:
         """Send set_time_only admin command with current-time fallback."""
         if isinstance(time_sec, bool) or not isinstance(time_sec, int):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Invalid time_sec type: {type(time_sec).__name__}. Expected int."
             )
         self._node.ensureSessionKey()

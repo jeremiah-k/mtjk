@@ -230,7 +230,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
         self._metadata_stdout_event: threading.Event | None = None
         self._lazy_init_lock = threading.RLock()
         self._node_port_cache: "_NodePort | None" = None
-        self._admin_session_runtime = _NodeAdminSessionRuntime(self)
+        self._admin_session_runtime = _NodeAdminSessionRuntime(self, self._node_port)
         self._admin_transport_runtime = _NodeAdminTransportRuntime(self)
         self._channel_lookup_runtime = _NodeChannelLookupRuntime(self._channel_state)
         self._channel_normalization_runtime = _NodeChannelNormalizationRuntime(
@@ -249,10 +249,13 @@ class Node:  # pylint: disable=too-many-instance-attributes
         )
         self._contact_runtime = contact_runtime._NodeContactRuntime(self)
         self._channel_write_runtime = _NodeChannelWriteRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._delete_channel_runtime = _NodeDeleteChannelRuntime(
             self,
+            self._node_port,
             channel_state=self._channel_state,
             channel_write_runtime=self._channel_write_runtime,
             channel_lookup_runtime=self._channel_lookup_runtime,
@@ -437,7 +440,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._position_time_runtime_cache = _NodePositionTimeCommandRuntime(
-                        self
+                        self, self._node_port
                     )
         return self._position_time_runtime_cache
 
