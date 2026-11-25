@@ -323,8 +323,13 @@ class Tunnel:
                 try:
                     if not self._stop_event.is_set():
                         device.write(payload)
+                except BlockingIOError:
+                    logger.debug("TUN write skipped: kernel queue is full")
                 except OSError:
-                    logger.debug("TUN write skipped: device closed during shutdown")
+                    if self._stop_event.is_set():
+                        logger.debug("TUN write skipped: device closed during shutdown")
+                    else:
+                        logger.warning("TUN write failed", exc_info=True)
 
     def _should_filter_packet(self, p: bytes) -> bool:
         """Decides whether an IPv4 packet should be ignored based on its protocol and port blacklists.
@@ -443,7 +448,10 @@ class Tunnel:
             dest_addr = p[IP_DEST_ADDR_OFFSET : IP_DEST_ADDR_OFFSET + 4]
 
             if not self._should_filter_packet(p) and not self._stop_event.is_set():
-                self._send_packet(dest_addr, p)
+                try:
+                    self._send_packet(dest_addr, p)
+                except Exception:
+                    logger.warning("TUN packet could not be sent to the mesh", exc_info=True)
 
     def _ip_to_node_id(self, ip_addr: bytes) -> str | None:
         """Convert a 4-byte IP address to the corresponding mesh node ID.

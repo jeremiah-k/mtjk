@@ -472,9 +472,9 @@ The Linux `Tunnel` supports one active instance per process, bound to the
 interface passed at construction. Constructing another tunnel while the slot is
 owned (including setup and teardown) raises `Tunnel.TunnelError`; close the
 existing tunnel before opening a replacement. The `mt_config.tunnel_instance`
-attribute and its historical alias continue to expose the active instance.
-Assigning that attribute is not a substitute for closing or constructing a
-Tunnel and cannot transfer ownership or redirect receive dispatch. Closing
+attribute and its historical alias expose the instance after setup completes.
+Assignment and `mt_config.reset()` only change this compatibility attribute.
+Keep the original instance and call `close()` to retire its ownership. Closing
 an initializing tunnel requests cancellation; its constructor retains the
 slot until rollback finishes. Closing an active tunnel wakes idle TUN reads,
 retires receive dispatch, and admits no further sends. If a reader or an

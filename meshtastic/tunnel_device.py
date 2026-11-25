@@ -20,6 +20,8 @@ import ipaddress
 import logging
 import os
 import platform
+import select
+import socket
 import struct
 import subprocess
 import threading
@@ -79,10 +81,6 @@ IFNAMSIZ: Final[int] = 16
 DEFAULT_MTU: Final[int] = 1500
 # One os.read() returns a single packet; buffer for the largest IPv4 datagram.
 MAX_IP_PACKET_SIZE: Final[int] = 65535
-# Idle read retry interval. Polling caps the added latency of the first packet
-# after an idle period at this bound, in exchange for reads that close() can
-# wake promptly without a blocking syscall or an extra descriptor.
-_READ_RETRY_SECONDS: Final[float] = 0.05
 
 
 def _require_asm_generic_ioctl() -> None:
@@ -126,8 +124,8 @@ class LinuxTunDevice:
     used (``up``/``ifconfig``/``read``/``write``/``close``) so it can serve
     as a drop-in replacement.
 
-    The descriptor is nonblocking. Reads retain their blocking API by waiting
-    on a close-aware event between attempts; close wakes an idle reader.
+    The descriptor is nonblocking. Idle reads wait on TUN readiness or a
+    close notification from a private socket pair.
     Writes do not block on a full kernel queue; they report
     ``BlockingIOError`` instead. Descriptor lookup and I/O are serialized
     with close to prevent fd reuse.
@@ -162,6 +160,8 @@ class LinuxTunDevice:
         self.name = ""
         self._fd: int | None = None
         self._io_lock = threading.Lock()
+        self._read_lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self._closed = threading.Event()
         fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR | os.O_NONBLOCK)
         try:
@@ -179,6 +179,7 @@ class LinuxTunDevice:
             resolved = fcntl.ioctl(fd, TUNSETIFF, request)
             self.name = resolved[:IFNAMSIZ].split(b"\x00", 1)[0].decode("ascii")
             logger.debug("Opened TUN interface %s (mtu=%d)", self.name, self.mtu)
+            self._wake_reader, self._wake_writer = socket.socketpair()
             self._fd = fd
         except BaseException:
             os.close(fd)
@@ -255,13 +256,22 @@ class LinuxTunDevice:
         OSError
             If the device is closed or the read fails.
         """
-        while True:
-            with self._io_lock:
-                try:
-                    return os.read(self._open_fd(), MAX_IP_PACKET_SIZE)
-                except BlockingIOError:
-                    pass
-            self._closed.wait(_READ_RETRY_SECONDS)
+        # Keep both descriptors valid until the readiness wait returns. The
+        # I/O lock is released during that wait so writes can still proceed.
+        poller = None
+        with self._read_lock:
+            while True:
+                with self._io_lock:
+                    fd = self._open_fd()
+                    try:
+                        return os.read(fd, MAX_IP_PACKET_SIZE)
+                    except BlockingIOError:
+                        pass
+                if poller is None:
+                    poller = select.poll()
+                    poller.register(fd, select.POLLIN)
+                    poller.register(self._wake_reader, select.POLLIN)
+                poller.poll()
 
     def write(self, data: bytes) -> None:
         """Write one raw IP packet to the TUN device.
@@ -277,14 +287,25 @@ class LinuxTunDevice:
             If the device is closed or the write fails.
         """
         with self._io_lock:
-            os.write(self._open_fd(), data)
+            written = os.write(self._open_fd(), data)
+            if written != len(data):
+                raise OSError(f"Short TUN packet write: {written} of {len(data)} bytes")
 
     def close(self) -> None:
         """Close the device file descriptor. Idempotent."""
-        self._closed.set()
-        with self._io_lock:
-            if self._fd is not None:
-                fd = self._fd
-                self._fd = None
-                os.close(fd)
-                logger.debug("Closed TUN interface %s", self.name)
+        with self._close_lock:
+            if self._fd is None:
+                return
+            self._closed.set()
+            # EOF wakes the poller before waiting for its descriptor lease.
+            try:
+                self._wake_writer.close()
+            finally:
+                with self._read_lock, self._io_lock:
+                    fd = self._fd
+                    self._fd = None
+                    try:
+                        os.close(fd)
+                    finally:
+                        self._wake_reader.close()
+        logger.debug("Closed TUN interface %s", self.name)

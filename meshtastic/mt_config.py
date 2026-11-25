@@ -50,6 +50,9 @@ def reset() -> None:
     access should coordinate around `_warned_deprecations_lock` (or another
     explicit module-wide lock) before invoking reset().
 
+    Resetting the compatibility attribute ``tunnel_instance`` leaves the
+    owning Tunnel open. Call ``Tunnel.close()`` to retire it.
+
     Returns
     -------
     None

@@ -1,7 +1,7 @@
 """Regression tests for the single-active-tunnel ownership contract."""
 
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
@@ -104,17 +104,18 @@ def test_failed_construction_releases_slot_and_device() -> None:
 
 def test_partial_subscription_failure_rolls_back() -> None:
     """An exception during pubsub registration cannot strand the singleton."""
-    with (
-        patch(
-            "meshtastic.tunnel.pub.subscribe",
-            side_effect=RuntimeError("subscribe failed"),
-        ),
-        patch("meshtastic.tunnel.pub.unsubscribe") as unsubscribe,
-    ):
+    subscribe = pub.subscribe
+
+    def subscribe_then_fail(listener: Callable[..., Any], topic: str) -> None:
+        subscribe(listener, topic)
+        assert pub.isSubscribed(listener, topic)
+        raise RuntimeError("subscribe failed")
+
+    with patch("meshtastic.tunnel.pub.subscribe", side_effect=subscribe_then_fail):
         with pytest.raises(RuntimeError, match="subscribe failed"):
             Tunnel(_interface())
         assert mt_config.tunnel_instance is None
-        unsubscribe.assert_called_once_with(onTunnelReceive, TUNNEL_TOPIC)
+        assert not pub.isSubscribed(onTunnelReceive, TUNNEL_TOPIC)
     tunnel = Tunnel(_interface())
     tunnel.close()
 
@@ -205,8 +206,24 @@ def test_close_during_construction_leaves_slot_reusable() -> None:
         device.close.assert_called_once_with()
     assert mt_config.tunnel_instance is None
     assert tunnel_module._tunnel_owner is None
+    assert not pub.isSubscribed(onTunnelReceive, TUNNEL_TOPIC)
     tunnel = Tunnel(_interface())
     tunnel.close()
+
+
+def test_config_reset_only_clears_the_compatibility_mirror() -> None:
+    """Resetting global CLI state does not retire a live tunnel's resources."""
+    tunnel = Tunnel(_interface())
+    try:
+        mt_config.reset()
+        assert mt_config.tunnel_instance is None
+        assert pub.isSubscribed(onTunnelReceive, TUNNEL_TOPIC)
+        with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+            Tunnel(_interface())
+    finally:
+        tunnel.close()
+    replacement = Tunnel(_interface())
+    replacement.close()
 
 
 def test_close_reserves_slot_and_stale_close_cannot_unsubscribe_replacement() -> None:

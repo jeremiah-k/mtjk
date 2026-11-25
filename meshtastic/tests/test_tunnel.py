@@ -260,11 +260,20 @@ def test_onTunnelReceive_ignores_invalid_decoded_or_payload(
 
 
 @pytest.mark.unit
-def test_onTunnelReceive_tun_write_oserror_is_swallowed(
+@pytest.mark.parametrize(
+    ("error", "expected_log"),
+    [
+        (OSError("device error"), "TUN write failed"),
+        (BlockingIOError("queue full"), "TUN write skipped: kernel queue is full"),
+    ],
+)
+def test_onTunnelReceive_logs_failed_tun_writes(
     caplog: pytest.LogCaptureFixture,
     iface_with_nodes: MeshInterface,
+    error: OSError,
+    expected_log: str,
 ) -> None:
-    """Tunnel receive should log and continue if TUN write fails during shutdown races."""
+    """Tunnel receive distinguishes kernel backpressure from other write errors."""
     iface = iface_with_nodes
     assert iface.myInfo is not None
     iface.myInfo.my_node_num = 2475227164
@@ -273,11 +282,11 @@ def test_onTunnelReceive_tun_write_oserror_is_swallowed(
         with _managed_tunnel(iface) as tun:
             tun.iface.noProto = False
             tun.tun = MagicMock()
-            tun.tun.write.side_effect = OSError("device closed")
+            tun.tun.write.side_effect = error
             tun._should_filter_packet = MagicMock(return_value=False)  # type: ignore[method-assign]
             tun.onReceive({"decoded": {"payload": b"\x45" * 20}, "from": 123})
 
-    assert "TUN write skipped: device closed during shutdown" in caplog.text
+    assert expected_log in caplog.text
 
 
 @pytest.mark.unitslow
