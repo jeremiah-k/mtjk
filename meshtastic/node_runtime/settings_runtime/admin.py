@@ -9,6 +9,7 @@ from meshtastic.node_runtime.admin_wait import (
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2, mesh_pb2
 from meshtastic.util import toNodeNum
 
@@ -21,8 +22,19 @@ logger = logging.getLogger(__name__)
 class _NodeAdminCommandRuntime:
     """Owns generic admin-command session/callback/send policy for command family methods."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def _select_remote_ack_callback(self) -> Callable[[dict[str, Any]], Any] | None:
         """Return callback policy used by remote admin command sends."""
@@ -155,9 +167,7 @@ class _NodeAdminCommandRuntime:
     ) -> mesh_pb2.MeshPacket | None:
         """Validate OTA args and send ota_request command."""
         if self._node is not self._node.iface.localNode:
-            self._node._raise_interface_error(
-                "startOTA only possible on local node"
-            )  # noqa: SLF001
+            self._port.raise_interface_error("startOTA only possible on local node")
 
         # COMPAT_STABLE_SHIM: support legacy keyword aliases used by older callers:
         # `ota_mode` -> `mode`, and `ota_hash`/`hash` -> `ota_file_hash`.
@@ -215,14 +225,10 @@ class _NodeAdminCommandRuntime:
         """Send factory-reset command, preserving full/config split behavior."""
         message = admin_pb2.AdminMessage()
         if full:
-            message.factory_reset_device = (
-                self._node._get_factory_reset_request_value()
-            )  # noqa: SLF001
+            message.factory_reset_device = self._port.factory_reset_request_value
             logger.info("Telling node to factory reset (full device reset)")
         else:
-            message.factory_reset_config = (
-                self._node._get_factory_reset_request_value()
-            )  # noqa: SLF001
+            message.factory_reset_config = self._port.factory_reset_request_value
             logger.info("Telling node to factory reset (config reset)")
         if self._node is self._node.iface.localNode:
             # The CLI waits after factoryReset() returns so it can keep the
@@ -232,10 +238,10 @@ class _NodeAdminCommandRuntime:
             # its legacy wait, and without a response handler that ACK is not
             # reflected in the compatibility acknowledgment flags.
             self._node.ensureSessionKey()
-            return self._node._send_admin(  # noqa: SLF001
+            return self._port.send_admin(
                 message,
-                onResponse=self._node.onAckNak,
-                responseWaitAttr=WAIT_ATTR_NAK,
+                on_response=self._node.onAckNak,
+                response_wait_attr=WAIT_ATTR_NAK,
             )
         return self._send_command(
             message,

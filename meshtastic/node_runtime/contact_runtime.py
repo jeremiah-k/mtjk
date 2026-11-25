@@ -14,6 +14,7 @@ from meshtastic.node_runtime.admin_wait import (
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2, config_pb2, mesh_pb2
 from meshtastic.util import toNodeNum
 
@@ -50,8 +51,19 @@ def _decode_node_bytes_field(value: str | bytes) -> bytes:
 class _NodeContactRuntime:
     """Own contact URL generation, validation, and admin import orchestration."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def _read_user_snapshot(self, node_num: int) -> dict[str, Any] | None:
         """Return a detached user mapping from the NodeDB under its lock."""
@@ -66,7 +78,7 @@ class _NodeContactRuntime:
                 return None
             return dict(user)
 
-        return self._node._execute_with_node_db_lock(_snapshot)  # noqa: SLF001
+        return self._port.execute_with_node_db_lock(_snapshot)
 
     def get_contact_url(
         self,
@@ -79,19 +91,17 @@ class _NodeContactRuntime:
         """Build a shareable contact URL from the current NodeDB snapshot."""
         node_num = toNodeNum(node_id)
         if node_num == 0 or node_num >= 0xFFFFFFFF:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Invalid node number for contact: {node_num}"
             )
 
         user = self._read_user_snapshot(node_num)
         if not user:
-            self._node._raise_interface_error(  # noqa: SLF001
-                f"Node {node_id} not found in NodeDB"
-            )
+            self._port.raise_interface_error(f"Node {node_id} not found in NodeDB")
 
         user_id = user.get("id")
         if not isinstance(user_id, str) or not user_id:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Node {node_id} has no usable user ID in NodeDB"
             )
 
@@ -103,7 +113,7 @@ class _NodeContactRuntime:
             try:
                 contact.user.macaddr = decode_bytes_field(user["macaddr"])
             except (binascii.Error, ValueError) as exc:
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"Invalid macaddr in NodeDB for {node_id}: {exc}"
                 )
         if user.get("longName"):
@@ -134,7 +144,7 @@ class _NodeContactRuntime:
             try:
                 contact.user.public_key = decode_bytes_field(user["publicKey"])
             except (binascii.Error, ValueError) as exc:
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"Invalid publicKey in NodeDB for {node_id}: {exc}"
                 )
         if user.get("isLicensed"):
@@ -155,11 +165,11 @@ class _NodeContactRuntime:
         """Decode and validate the SharedContact payload carried by ``url``."""
         fragment = urlparse(url).fragment
         if not fragment:
-            self._node._raise_interface_error(f"Invalid URL '{url}'")  # noqa: SLF001
+            self._port.raise_interface_error(f"Invalid URL '{url}'")
 
         max_encoded_fragment = (max_payload // 3 + 1) * 4 + 4
         if len(fragment) > max_encoded_fragment:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Contact URL fragment too large ({len(fragment)} chars)"
             )
 
@@ -171,12 +181,10 @@ class _NodeContactRuntime:
         try:
             decoded = base64.b64decode(encoded, altchars=b"-_", validate=True)
         except (binascii.Error, ValueError) as exc:
-            self._node._raise_interface_error(  # noqa: SLF001
-                f"Failed to decode contact URL: {exc}"
-            )
+            self._port.raise_interface_error(f"Failed to decode contact URL: {exc}")
 
         if len(decoded) > max_payload:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Contact URL payload too large ({len(decoded)} bytes, "
                 f"max {max_payload})"
             )
@@ -185,22 +193,16 @@ class _NodeContactRuntime:
             contact = admin_pb2.SharedContact()
             contact.ParseFromString(decoded)
         except google.protobuf.message.DecodeError as exc:
-            self._node._raise_interface_error(  # noqa: SLF001
-                f"Failed to parse contact URL: {exc}"
-            )
+            self._port.raise_interface_error(f"Failed to parse contact URL: {exc}")
 
         if contact.node_num == 0 or contact.node_num >= 0xFFFFFFFF:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Invalid node number in contact: {contact.node_num}"
             )
         if not contact.HasField("user"):
-            self._node._raise_interface_error(  # noqa: SLF001
-                "Contact URL contains no user data"
-            )
+            self._port.raise_interface_error("Contact URL contains no user data")
         if not contact.user.id:
-            self._node._raise_interface_error(  # noqa: SLF001
-                "Contact URL contains no user ID"
-            )
+            self._port.raise_interface_error("Contact URL contains no user ID")
         return contact
 
     def add_contact_url(

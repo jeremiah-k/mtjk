@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from meshtastic._deadline import _remaining_timeout
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.shared import (
     MAX_CANNED_MESSAGE_LENGTH,
     MAX_RINGTONE_LENGTH,
@@ -269,11 +270,27 @@ class _NodeAdminContentRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         cache_store: _NodeContentCacheStore,
         response_runtime: _NodeContentResponseRuntime,
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        cache_store : _NodeContentCacheStore
+            Shared content cache owner.
+        response_runtime : _NodeContentResponseRuntime
+            Content response application owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._cache_store = cache_store
         self._response_runtime = response_runtime
         self._ringtone_operation_lock = threading.Lock()
@@ -378,10 +395,10 @@ class _NodeAdminContentRuntime:
         try:
             request_message = admin_pb2.AdminMessage()
             build_request(request_message)
-            request = self._node._send_admin(  # noqa: SLF001
+            request = self._port.send_admin(
                 request_message,
-                wantResponse=True,
-                onResponse=_on_response,
+                want_response=True,
+                on_response=_on_response,
             )
             if request is None:
                 logger.debug("%s", skipped_send_debug_message)
@@ -396,7 +413,7 @@ class _NodeAdminContentRuntime:
             )
             request_id = request_id_value if isinstance(request_id_value, int) else None
             if not response_event.wait(
-                timeout=_remaining_timeout(self._node._timeout.expireTimeout)
+                timeout=_remaining_timeout(self._port.timeout.expireTimeout)
             ):
                 logger.warning("%s", timeout_warning_message)
                 request_wait_runtime = getattr(
@@ -464,16 +481,16 @@ class _NodeAdminContentRuntime:
             ):
                 return None
             if len(ringtone) > MAX_RINGTONE_LENGTH:
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"The ringtone must be {MAX_RINGTONE_LENGTH} characters or fewer."
                 )
             self._node.ensureSessionKey()
             request_message = admin_pb2.AdminMessage()
             request_message.set_ringtone_message = ringtone
             logger.debug("Setting ringtone (%d chars)", len(ringtone))
-            send_result = self._node._send_admin(
+            send_result = self._port.send_admin(
                 request_message,
-                onResponse=self._select_write_response_handler(),
+                on_response=self._select_write_response_handler(),
             )
             if send_result is not None:
                 self._cache_store._invalidate_ringtone_cache()
@@ -519,7 +536,7 @@ class _NodeAdminContentRuntime:
             ):
                 return None
             if len(message) > MAX_CANNED_MESSAGE_LENGTH:
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"The canned message must be {MAX_CANNED_MESSAGE_LENGTH} characters or fewer."
                 )
             self._node.ensureSessionKey()
@@ -528,9 +545,9 @@ class _NodeAdminContentRuntime:
                 request_message = admin_pb2.AdminMessage()
                 request_message.set_canned_message_module_messages = message
                 logger.debug("Setting canned message (%d chars)", len(message))
-                send_result = self._node._send_admin(
+                send_result = self._port.send_admin(
                     request_message,
-                    onResponse=self._select_write_response_handler(),
+                    on_response=self._select_write_response_handler(),
                 )
                 if send_result is not None:
                     self._cache_store._invalidate_canned_message_cache()
@@ -553,9 +570,9 @@ class _NodeAdminContentRuntime:
                 for chunk_index, chunk in enumerate(chunks):
                     request_message = admin_pb2.AdminMessage()
                     request_message.set_canned_message_module_messages = chunk
-                    send_result = self._node._send_admin(
+                    send_result = self._port.send_admin(
                         request_message,
-                        onResponse=response_handler,
+                        on_response=response_handler,
                     )
                     if chunk_index == 0:
                         first_send_result = send_result

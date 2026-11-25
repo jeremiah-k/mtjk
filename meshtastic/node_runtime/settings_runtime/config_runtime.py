@@ -13,6 +13,7 @@ from meshtastic.node_runtime.admin_wait import (
     _send_admin_with_ack_scope,
     _wait_for_admin_ack,
 )
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.settings_runtime.message import (  # pylint: disable=no-name-in-module
     _NodeSettingsMessageBuilder,
 )
@@ -35,10 +36,24 @@ class _NodeSettingsRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         message_builder: _NodeSettingsMessageBuilder,
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        message_builder : _NodeSettingsMessageBuilder
+            Shared request-message builder owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._message_builder = message_builder
 
     def request_config(
@@ -77,7 +92,7 @@ class _NodeSettingsRuntime:
         )
         # In noProto mode, _send_admin legitimately returns None (no actual sending)
         if request is None and not getattr(self._node, "noProto", False):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"requestConfig failed: admin message not started (admin_index={admin_index})"
             )
         if on_response is not None and request is not None:
@@ -104,7 +119,7 @@ class _NodeSettingsRuntime:
         """
         config_entry = self._message_builder.get_write_config_entry(config_name)
         if config_entry is None:
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"Error: No valid config with name {config_name}"
             )
 
@@ -120,7 +135,7 @@ class _NodeSettingsRuntime:
                 config_name,
             )
             return
-        self._node._raise_interface_error(  # noqa: SLF001
+        self._port.raise_interface_error(
             "Error: No config has been read. "
             "Request config from the device before writing."
         )
@@ -139,10 +154,9 @@ class _NodeSettingsRuntime:
         if verify:
             config_entry = self._message_builder.get_write_config_entry(config_name)
             if config_entry is None:
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     f"Error: No valid config with name {config_name}"
                 )
-                raise AssertionError("Unreachable: _raise_interface_error must raise")
             setter_name, _source_config = config_entry
             staged_bytes = getattr(
                 getattr(message, setter_name), config_name
@@ -160,7 +174,7 @@ class _NodeSettingsRuntime:
         )
         # In noProto mode, _send_admin legitimately returns None (no actual sending)
         if request is None and not getattr(self._node, "noProto", False):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"writeConfig failed: admin message not started (config_name={config_name})"
             )
         if on_response is not None and request is not None:
@@ -178,10 +192,9 @@ class _NodeSettingsRuntime:
             descriptor = source_config.DESCRIPTOR.fields_by_name.get(config_name)
             if descriptor is not None:
                 return source_config, descriptor
-        self._node._raise_interface_error(  # noqa: SLF001
+        self._port.raise_interface_error(
             f"Error: No valid config with name {config_name}"
         )
-        raise AssertionError("Unreachable: _raise_interface_error must raise")
 
     def _verify_written_config(self, config_name: str, *, staged_bytes: bytes) -> None:
         """Re-request one config section and require the sent values back.
@@ -275,17 +288,17 @@ class _NodeSettingsRuntime:
                             "Verified %s write via device read-back", config_name
                         )
                         return
-                    self._node._raise_interface_error(  # noqa: SLF001
+                    self._port.raise_interface_error(
                         f"writeConfig verification for {config_name} failed: the"
                         " device reported different values than the staged write"
                     )
                 if response_received.is_set() and failure is not None:
-                    self._node._raise_interface_error(  # noqa: SLF001
+                    self._port.raise_interface_error(
                         f"writeConfig verification for {config_name} failed:"
                         f" {failure}"
                     )
                 time.sleep(CONFIG_VERIFY_POLL_INTERVAL_SECONDS)
-            self._node._raise_interface_error(  # noqa: SLF001
+            self._port.raise_interface_error(
                 f"writeConfig verification for {config_name} failed: the device"
                 f" did not report the staged values within"
                 f" {CONFIG_VERIFY_TIMEOUT_SECONDS:g} seconds"

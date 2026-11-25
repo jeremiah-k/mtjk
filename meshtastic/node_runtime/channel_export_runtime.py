@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import apponly_pb2, channel_pb2, localonly_pb2
 from meshtastic.util import fromPSK, generate_channel_hash
 
@@ -19,8 +20,27 @@ LORA_TIMEOUT_MSG = "Timeout waiting for LoRa config"
 class _NodeChannelExportRuntime:
     """Owns channel URL export, channel-hash export, and primary PSK mutation."""
 
-    def __init__(self, node: "Node", *, channel_state: _NodeChannelState) -> None:
+    def __init__(
+        self,
+        node: "Node",
+        port: _NodePort | None = None,
+        *,
+        channel_state: _NodeChannelState,
+    ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
 
     def _snapshot_channels(self) -> list[channel_pb2.Channel]:
@@ -30,7 +50,7 @@ class _NodeChannelExportRuntime:
     def _snapshot_local_config(self) -> localonly_pb2.LocalConfig:
         """Return detached localConfig snapshot for consistent field checks/copies."""
         config_snapshot = localonly_pb2.LocalConfig()
-        node_db_lock = getattr(self._node, "_node_db_lock", None)
+        node_db_lock = self._port.channel_snapshot_lock
         if node_db_lock is None:
             local_config = getattr(self._node, "localConfig", None)
             if local_config is not None:
@@ -51,9 +71,7 @@ class _NodeChannelExportRuntime:
         """
         channel_set = apponly_pb2.ChannelSet()
         if not channels_snapshot:
-            self._node._raise_interface_error(  # noqa: SLF001
-                "Error: No channels have been read"
-            )
+            self._port.raise_interface_error("Error: No channels have been read")
         primary_channel = next(
             (
                 channel
@@ -63,10 +81,7 @@ class _NodeChannelExportRuntime:
             None,
         )
         if primary_channel is None:
-            self._node._raise_interface_error(  # noqa: SLF001
-                "Error: No primary channel found"
-            )
-            raise AssertionError("unreachable")  # type narrowing for static analysis
+            self._port.raise_interface_error("Error: No primary channel found")
         channel_set.settings.append(primary_channel.settings)
         if include_all:
             for channel in channels_snapshot:
@@ -85,12 +100,9 @@ class _NodeChannelExportRuntime:
                     raise RuntimeError(LORA_TIMEOUT_MSG)
             local_config_snapshot = self._snapshot_local_config()
             if not local_config_snapshot.HasField("lora"):
-                self._node._raise_interface_error(  # noqa: SLF001
+                self._port.raise_interface_error(
                     "LoRa config must be loaded before exporting a channel URL"
                 )
-                raise AssertionError(
-                    "unreachable"
-                )  # type narrowing for static analysis
         channel_set.lora_config.CopyFrom(local_config_snapshot.lora)
         serialized_channel_set = channel_set.SerializeToString()
         encoded = base64.urlsafe_b64encode(serialized_channel_set).decode("ascii")
@@ -163,9 +175,7 @@ class _NodeChannelExportRuntime:
         with self._channel_state.lock:
             channels = self._channel_state.channels
             if not channels:
-                self._node._raise_interface_error(  # noqa: SLF001
-                    "Error: No channels have been read"
-                )
+                self._port.raise_interface_error("Error: No channels have been read")
             original_channels_ref = channels
             for channel in channels:
                 if channel.role == channel_pb2.Channel.Role.PRIMARY:
@@ -176,14 +186,9 @@ class _NodeChannelExportRuntime:
                     primary_snapshot.settings.psk = fromPSK("none")
                     break
             if primary_snapshot is None:
-                self._node._raise_interface_error(  # noqa: SLF001
-                    "Error: No primary channel found"
-                )
-                raise AssertionError(
-                    "unreachable"
-                )  # type narrowing for static analysis
+                self._port.raise_interface_error("Error: No primary channel found")
         logger.info("Writing modified channels to device")
-        self._node._write_channel_snapshot(primary_snapshot)  # noqa: SLF001
+        self._port.write_channel_snapshot(primary_snapshot)
         with self._channel_state.lock:
             channels = self._channel_state.channels
             if not channels:

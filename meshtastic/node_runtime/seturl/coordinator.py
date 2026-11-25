@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.seturl.cache import _SetUrlCacheManager
 from meshtastic.node_runtime.seturl.context import _SetUrlAdminContext
 from meshtastic.node_runtime.seturl.execution import (
@@ -67,6 +68,7 @@ class _SetUrlTransactionCoordinator:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         parsed_input: _SetUrlParsedInput,
         channel_state: _NodeChannelState,
@@ -77,18 +79,23 @@ class _SetUrlTransactionCoordinator:
         ----------
         node : Node
             The node instance to coordinate transactions for.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
         parsed_input : _SetUrlParsedInput
             Parsed setURL input containing channel set and flags.
         """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._parsed_input = parsed_input
         self._admin_context = self._resolve_admin_context()
         self._cache_manager = _SetUrlCacheManager(
-            node, channel_state=self._channel_state
+            node, self._port, channel_state=self._channel_state
         )
         self._execution_engine = _SetUrlExecutionEngine(
             node,
+            self._port,
             channel_state=self._channel_state,
             cache_manager=self._cache_manager,
         )
@@ -97,9 +104,7 @@ class _SetUrlTransactionCoordinator:
         """Capture admin-channel write context before staging any transaction writes."""
         admin_write_node = self._node.iface.localNode
         if admin_write_node is None:
-            self._node._raise_interface_error(  # noqa: SLF001
-                "Interface localNode not initialized"
-            )
+            self._port.raise_interface_error("Interface localNode not initialized")
         admin_index_for_write = (
             admin_write_node._get_admin_channel_index()
         )  # noqa: SLF001
@@ -465,6 +470,7 @@ class _SetUrlTransactionCoordinator:
         """Execute addOnly while holding the per-node channel-mutation lock."""
         planner = _SetUrlAddOnlyPlanner(
             self._node,
+            self._port,
             parsed_input=self._parsed_input,
             admin_context=self._admin_context,
             channel_state=self._channel_state,
@@ -536,6 +542,7 @@ class _SetUrlTransactionCoordinator:
         """Execute replace-all and recovery under the channel-mutation lock."""
         planner = _SetUrlReplacePlanner(
             self._node,
+            self._port,
             parsed_input=self._parsed_input,
             admin_context=self._admin_context,
             channel_state=self._channel_state,

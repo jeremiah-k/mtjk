@@ -10,6 +10,7 @@ from meshtastic.node_runtime.admin_wait import (
 )
 from meshtastic.node_runtime.channel_lookup_runtime import _NodeChannelLookupRuntime
 from meshtastic.node_runtime.channel_state import _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.shared import MAX_CHANNELS
 from meshtastic.protobuf import admin_pb2, channel_pb2
 
@@ -32,10 +33,24 @@ class _NodeChannelWriteRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         channel_state: _NodeChannelState,
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
 
     def _write_channel_snapshot(
@@ -69,7 +84,7 @@ class _NodeChannelWriteRuntime:
                 "Channel write was not started for index %s.",
                 channel_to_write.index,
             )
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Channel write for index {channel_to_write.index} was not started"
             )
         # Wait for ACK/NAK response for remote nodes
@@ -77,7 +92,7 @@ class _NodeChannelWriteRuntime:
             try:
                 _wait_for_admin_ack(self._node, request)
             except Exception as exc:
-                self._node._raise_interface_error(
+                self._port.raise_interface_error(
                     f"Channel write for index {channel_to_write.index} failed: {exc}"
                 )
         logger.debug("Wrote channel %s", channel_to_write.index)
@@ -90,13 +105,13 @@ class _NodeChannelWriteRuntime:
             with self._channel_state.lock:
                 channels = self._channel_state.channels
                 if channels is None:
-                    self._node._raise_interface_error(
+                    self._port.raise_interface_error(
                         "Error: No channels have been read"
                     )
                 if len(channels) == 0:
-                    self._node._raise_interface_error("Error: Channels list is empty")
+                    self._port.raise_interface_error("Error: Channels list is empty")
                 if channel_index < 0 or channel_index >= len(channels):
-                    self._node._raise_interface_error(
+                    self._port.raise_interface_error(
                         f"Channel index {channel_index} out of range (0-{len(channels) - 1})"
                     )
                 channel_snapshot = channel_pb2.Channel()
@@ -126,12 +141,30 @@ class _NodeDeleteChannelRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         channel_state: _NodeChannelState,
         channel_write_runtime: _NodeChannelWriteRuntime,
         channel_lookup_runtime: _NodeChannelLookupRuntime,
     ) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        channel_state : _NodeChannelState
+            Shared channel-state owner.
+        channel_write_runtime : _NodeChannelWriteRuntime
+            Channel snapshot write owner.
+        channel_lookup_runtime : _NodeChannelLookupRuntime
+            Channel lookup helper owner.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._channel_write_runtime = channel_write_runtime
         self._channel_lookup_runtime = channel_lookup_runtime
@@ -163,11 +196,11 @@ class _NodeDeleteChannelRuntime:
         """
         channels = self._channel_state.channels
         if channels is None:
-            self._node._raise_interface_error("Error: No channels have been read")
+            self._port.raise_interface_error("Error: No channels have been read")
         if len(channels) == 0:
-            self._node._raise_interface_error("Error: Channels list is empty")
+            self._port.raise_interface_error("Error: Channels list is empty")
         if channel_index < 0 or channel_index >= len(channels):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 f"Channel index {channel_index} out of range (0-{len(channels) - 1})"
             )
 
@@ -176,7 +209,7 @@ class _NodeDeleteChannelRuntime:
             channel_pb2.Channel.Role.SECONDARY,
             channel_pb2.Channel.Role.DISABLED,
         ):
-            self._node._raise_interface_error(
+            self._port.raise_interface_error(
                 "Only SECONDARY or DISABLED channels can be deleted"
             )
 
@@ -188,7 +221,7 @@ class _NodeDeleteChannelRuntime:
         else:
             local_node = self._node.iface.localNode
             if local_node is None:
-                self._node._raise_interface_error(
+                self._port.raise_interface_error(
                     "Cannot delete remote channel: local node not available"
                 )
             pre_delete_admin_index = local_node._get_admin_channel_index()
@@ -228,7 +261,7 @@ class _NodeDeleteChannelRuntime:
         else:
             local_node = self._node.iface.localNode
             if local_node is None:
-                self._node._raise_interface_error(
+                self._port.raise_interface_error(
                     "Cannot delete remote channel: local node not available"
                 )
             post_delete_admin_index = local_node._get_admin_channel_index()

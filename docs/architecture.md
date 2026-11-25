@@ -70,7 +70,9 @@ remote nodes. Internal `node_runtime` modules own areas such as:
 
 The public facade preserves historical mutate-then-write workflows, method
 names, positional arguments, and documented aliases even when the implementation
-behind them has changed substantially.
+behind them has changed substantially. Runtime modules reach the facade through
+one internal port (`meshtastic.node_runtime.ports`) instead of touching `Node`
+private attributes directly.
 
 ### CLI
 

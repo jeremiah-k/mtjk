@@ -3,6 +3,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.protobuf import admin_pb2
 
 if TYPE_CHECKING:
@@ -41,8 +42,19 @@ class _AdminSessionPassKeyProbe:
 class _NodeAdminSessionRuntime:
     """Owns admin-session readiness checks and session-key request behavior."""
 
-    def __init__(self, node: "Node") -> None:
+    def __init__(self, node: "Node", port: _NodePort | None = None) -> None:
+        """Initialize the runtime with its facade and collaborator port.
+
+        Parameters
+        ----------
+        node : Node
+            The facade whose public state the runtime reads.
+        port : _NodePort | None
+            Narrow port over the facade's internals; derived from ``node``
+            when omitted.
+        """
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
 
     def _ensure_session_key(self, *, admin_index: int | None = None) -> None:
         """Ensure session key is present, preserving historical noProto behavior.
@@ -74,6 +86,6 @@ class _NodeAdminSessionRuntime:
             )
             # Wait for adminSessionPassKey to be populated
             probe = _AdminSessionPassKeyProbe(self._node)
-            key_received = self._node._timeout.waitForSet(probe, attrs=("is_set",))
+            key_received = self._port.timeout.waitForSet(probe, attrs=("is_set",))
             if not key_received:
                 raise TimeoutError(TIMEOUT_SESSION_KEY_MSG)

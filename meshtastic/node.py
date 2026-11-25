@@ -59,6 +59,7 @@ from meshtastic.node_runtime.channel_presentation_runtime import (
 )
 from meshtastic.node_runtime.channel_request_runtime import _NodeChannelRequestRuntime
 from meshtastic.node_runtime.channel_state import _ChannelLock, _NodeChannelState
+from meshtastic.node_runtime.ports import _NodePort
 from meshtastic.node_runtime.settings_runtime import (
     _NodeAdminCommandRuntime,
     _NodeOwnerProfileRuntime,
@@ -227,43 +228,59 @@ class Node:  # pylint: disable=too-many-instance-attributes
         self._canned_message_lock = threading.Lock()
         self._metadata_stdout_event_lock = threading.Lock()
         self._metadata_stdout_event: threading.Event | None = None
-        self._admin_session_runtime = _NodeAdminSessionRuntime(self)
+        self._lazy_init_lock = threading.RLock()
+        self._node_port_cache: "_NodePort | None" = None
+        self._admin_session_runtime = _NodeAdminSessionRuntime(self, self._node_port)
         self._admin_transport_runtime = _NodeAdminTransportRuntime(self)
         self._channel_lookup_runtime = _NodeChannelLookupRuntime(self._channel_state)
         self._channel_normalization_runtime = _NodeChannelNormalizationRuntime(
             self._channel_state
         )
         self._channel_export_runtime = _NodeChannelExportRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._channel_request_runtime = _NodeChannelRequestRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._channel_presentation_runtime = _NodeChannelPresentationRuntime(
             self,
+            self._node_port,
             channel_state=self._channel_state,
             export_runtime=self._channel_export_runtime,
         )
-        self._contact_runtime = contact_runtime._NodeContactRuntime(self)
+        self._contact_runtime = contact_runtime._NodeContactRuntime(
+            self, self._node_port
+        )
         self._channel_write_runtime = _NodeChannelWriteRuntime(
-            self, channel_state=self._channel_state
+            self,
+            self._node_port,
+            channel_state=self._channel_state,
         )
         self._delete_channel_runtime = _NodeDeleteChannelRuntime(
             self,
+            self._node_port,
             channel_state=self._channel_state,
             channel_write_runtime=self._channel_write_runtime,
             channel_lookup_runtime=self._channel_lookup_runtime,
         )
         self._ack_nak_runtime = _NodeAckNakRuntime(self)
-        self._settings_message_builder = _NodeSettingsMessageBuilder(self)
+        self._settings_message_builder = _NodeSettingsMessageBuilder(
+            self, self._node_port
+        )
         self._settings_runtime = _NodeSettingsRuntime(
             self,
+            self._node_port,
             message_builder=self._settings_message_builder,
         )
         self._settings_response_runtime = _NodeSettingsResponseRuntime(self)
-        self._admin_command_runtime = _NodeAdminCommandRuntime(self)
+        self._admin_command_runtime = _NodeAdminCommandRuntime(self, self._node_port)
         self._owner_profile_runtime = _NodeOwnerProfileRuntime(
             self,
+            self._node_port,
             admin_command_runtime=self._admin_command_runtime,
         )
         self._content_cache_store_cache: "_NodeContentCacheStore | None" = None
@@ -280,7 +297,6 @@ class Node:  # pylint: disable=too-many-instance-attributes
         self._position_time_runtime_cache: "_NodePositionTimeCommandRuntime | None" = (
             None
         )
-        self._lazy_init_lock = threading.RLock()
 
     def _get_channel_state(self) -> _NodeChannelState:
         """Return the channel-state owner, migrating legacy raw instance fields."""
@@ -385,6 +401,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
 
                     self._content_request_runtime_cache = _NodeAdminContentRuntime(
                         self,
+                        self._node_port,
                         cache_store=self._content_cache_store,
                         response_runtime=self._content_response_runtime,
                     )
@@ -401,7 +418,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._metadata_response_runtime_cache = (
-                        _NodeMetadataResponseRuntime(self)
+                        _NodeMetadataResponseRuntime(self, self._node_port)
                     )
         return self._metadata_response_runtime_cache
 
@@ -416,7 +433,9 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._channel_response_runtime_cache = _NodeChannelResponseRuntime(
-                        self, channel_state=self._get_channel_state()
+                        self,
+                        self._node_port,
+                        channel_state=self._get_channel_state(),
                     )
         return self._channel_response_runtime_cache
 
@@ -431,9 +450,23 @@ class Node:  # pylint: disable=too-many-instance-attributes
                     )
 
                     self._position_time_runtime_cache = _NodePositionTimeCommandRuntime(
-                        self
+                        self, self._node_port
                     )
         return self._position_time_runtime_cache
+
+    @property
+    def _node_port(self) -> "_NodePort":
+        """Lazy-init for the runtime collaborator port (thread-safe).
+
+        The port is created once per node and handed to every runtime
+        collaborator in place of ``self``; collaborators reach ``Node``
+        internals only through it.
+        """
+        if self._node_port_cache is None:
+            with self._lazy_init_lock:
+                if self._node_port_cache is None:
+                    self._node_port_cache = _NodePort(self)
+        return self._node_port_cache
 
     def __repr__(self) -> str:
         """Return a developer-oriented string identifying the Node.
@@ -1048,6 +1081,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
         )
         transaction = _SetUrlTransactionCoordinator(
             self,
+            self._node_port,
             parsed_input=parsed_input,
             channel_state=channel_state,
         )
