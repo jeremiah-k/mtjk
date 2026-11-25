@@ -468,6 +468,15 @@ the call before any packet is sent (raising `TypeError` for missing or
 unknown arguments), rather than at function-binding time; a non-local
 destination fails the pre-existing locality check first.
 
+The Linux `Tunnel` supports one active instance per process, bound to the
+interface passed at construction. Constructing another tunnel while the slot is
+owned (including setup and teardown) raises `Tunnel.TunnelError`; close the
+existing tunnel before opening a replacement. The `mt_config.tunnel_instance`
+attribute and its historical alias continue to expose the active instance.
+Assigning that attribute is not a substitute for closing or constructing a
+Tunnel. Receive callbacks keep their existing signature and only forward
+packets from the bound interface.
+
 ### BLE and Related Exports
 
 `meshtastic.interfaces.ble.management_service` remains a facade/re-export path,
