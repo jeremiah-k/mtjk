@@ -253,6 +253,39 @@ def test_record_missing_py_typed_fails(write_valid_wheel: Callable[..., Path]) -
         smoke.validate_wheel_contents(wheel, EXPECTATIONS, PB2_STEMS)
 
 
+@pytest.mark.parametrize(
+    "member",
+    [
+        "meshtastic/tests/__init__.py",
+        "meshtastic/tests/test_product_only.py",
+        "meshtastic/tests/seturl/test_planner.py",
+        "meshtastic/tests/api_baselines/api_baseline.json",
+        "mtjk-9.9.9.data/purelib/meshtastic/tests/test_relocated.py",
+        "mtjk-9.9.9.data/platlib/meshtastic/tests/test_relocated.py",
+    ],
+)
+def test_wheel_packaging_test_tree_members_fails(
+    write_valid_wheel: Callable[..., Path], member: str
+) -> None:
+    """A wheel carrying any meshtastic/tests member must fail the gate."""
+    wheel = write_valid_wheel()
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr(member, "")
+    with pytest.raises(SmokeGateError, match=r"meshtastic/tests members"):
+        smoke.validate_wheel_contents(wheel, EXPECTATIONS, PB2_STEMS)
+
+
+def test_wheel_without_test_tree_reports_no_other_contents_change(
+    write_valid_wheel: Callable[..., Path],
+) -> None:
+    """The valid synthetic wheel carries no meshtastic/tests members."""
+    wheel = write_valid_wheel()
+    with zipfile.ZipFile(wheel) as archive:
+        packaged = [entry.filename for entry in archive.infolist()]
+    assert not any(name.startswith("meshtastic/tests/") for name in packaged)
+    smoke.validate_wheel_contents(wheel, EXPECTATIONS, PB2_STEMS)
+
+
 def test_record_unaccounted_member_fails(
     write_valid_wheel: Callable[..., Path],
 ) -> None:

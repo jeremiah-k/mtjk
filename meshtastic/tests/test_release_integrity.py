@@ -361,11 +361,25 @@ def _write_fake_standalone(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("legacy_lock", [False, True])
+@pytest.mark.parametrize(
+    "archive_member",
+    [
+        "meshtastic.cli.parser",
+        "meshtastic.tests",
+        "meshtastic.tests.test_smoke",
+        "meshtastic/tests/api_baselines/fixture.json",
+    ],
+)
 def test_standalone_build_copies_configured_distribution_metadata(
     tmp_path: Path,
     legacy_lock: bool,
+    archive_member: str,
 ) -> None:
-    """The frozen executable must carry metadata used by importlib.metadata.version()."""
+    """The frozen executable must carry distribution metadata and product modules only."""
+    product_package = tmp_path / "meshtastic"
+    product_package.mkdir()
+    for member in ("py.typed", "_runtime_compatibility.json"):
+        (product_package / member).touch()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     pyinstaller_args = tmp_path / "pyinstaller-args.txt"
@@ -395,9 +409,20 @@ if [[ $1 == run && $2 == python && $3 == -c ]]; then
 fi
 if [[ $1 == run && $2 == pyinstaller ]]; then
   shift 2
+  args=("$@")
+  for ((index = 0; index < ${{#args[@]}}; index++)); do
+    if [[ ${{args[index]}} == --additional-hooks-dir ]]; then
+      cp "${{args[index + 1]}}/hook-meshtastic.py" hook-meshtastic.py
+      mkdir "${{args[index + 1]}}/__pycache__"
+    fi
+  done
   printf '%s\n' "$@" > "${{PYINSTALLER_ARGS}}"
   mkdir -p dist
   : > 'dist/{PRIMARY_CLI_NAME}'
+  exit 0
+fi
+if [[ $1 == run && $2 == pyi-archive_viewer ]]; then
+  printf '%s\n' "${{ARCHIVE_MEMBER}}"
   exit 0
 fi
 exit 2
@@ -408,6 +433,7 @@ exit 2
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
     env["PYINSTALLER_ARGS"] = str(pyinstaller_args)
+    env["ARCHIVE_MEMBER"] = archive_member
     tool_args = tmp_path / "tool-args.txt"
     github_output = tmp_path / "github-output.txt"
     env["BUILD_TOOL_ARGS"] = str(tool_args)
@@ -422,6 +448,11 @@ exit 2
         text=True,
     )
 
+    if archive_member.startswith(("meshtastic.tests", "meshtastic/tests/")):
+        assert result.returncode != 0
+        assert "Standalone archive contains meshtastic.tests" in result.stderr
+        assert not github_output.exists()
+        return
     assert result.returncode == 0, result.stderr
     commands = tool_args.read_text(encoding="utf-8").splitlines()
     if legacy_lock:
@@ -434,6 +465,9 @@ exit 2
     else:
         assert commands[0] == "sync --locked --extra cli"
         assert all(command.startswith("run --locked") for command in commands[1:])
+    assert any(
+        "pyi-archive_viewer --recursive --brief" in command for command in commands
+    )
     assert github_output.read_text(encoding="utf-8") == (
         f"primary={PRIMARY_CLI_NAME}\n"
     )
@@ -442,6 +476,21 @@ exit 2
     assert args[metadata_index + 1] == DISTRIBUTION_NAME
     name_index = args.index("-n")
     assert args[name_index + 1] == PRIMARY_CLI_NAME
+    hook_index = args.index("--additional-hooks-dir")
+    assert not Path(args[hook_index + 1]).exists()
+    hook_source = (tmp_path / "hook-meshtastic.py").read_text(encoding="utf-8")
+    assert 'is_module_or_submodule(name, "meshtastic.tests")' in hook_source
+    assert 'collect_submodules("meshtastic.interfaces")' in hook_source
+    excluded_index = args.index("--exclude-module")
+    assert args[excluded_index + 1] == "meshtastic.tests"
+    assert "--collect-all" not in args
+    assert "--collect-submodules" not in args
+    assert [
+        args[index + 1] for index, arg in enumerate(args) if arg == "--add-data"
+    ] == [
+        "meshtastic/py.typed:meshtastic",
+        "meshtastic/_runtime_compatibility.json:meshtastic",
+    ]
     assert sorted(entry.name for entry in (tmp_path / "dist").iterdir()) == [
         PRIMARY_CLI_NAME
     ]

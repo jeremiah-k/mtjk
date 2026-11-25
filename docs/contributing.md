@@ -213,8 +213,9 @@ It checks wheel RECORD/metadata/entry-points contents, protobuf roundtrips and
 the `meshtastic.protobuf` namespace plus its compatibility facade, offline CLI
 surfaces (`--version`, `--help`, `--list-fields`, `--describe-field`), and a
 real Feather read plus `mesh-analysis --no-server --slog` run in the analysis
-cells. Any failure exits nonzero with the failing phase, artifact, profile,
-and command.
+cells. It also rejects a wheel that packages `meshtastic/tests` members: built
+wheels ship the product only. Any failure exits nonzero with the failing
+phase, artifact, profile, and command.
 
 Prerequisites: a `python3` with the `venv` module, `pip`, network access for
 dependency resolution, and `pip install build` for the interpreter that runs
