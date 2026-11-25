@@ -361,9 +361,19 @@ def _write_fake_standalone(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("legacy_lock", [False, True])
+@pytest.mark.parametrize(
+    "archive_member",
+    [
+        "meshtastic.cli.parser",
+        "meshtastic.tests",
+        "meshtastic.tests.test_smoke",
+        "meshtastic/tests/api_baselines/fixture.json",
+    ],
+)
 def test_standalone_build_copies_configured_distribution_metadata(
     tmp_path: Path,
     legacy_lock: bool,
+    archive_member: str,
 ) -> None:
     """The frozen executable must carry distribution metadata and product modules only."""
     product_package = tmp_path / "meshtastic"
@@ -411,6 +421,10 @@ if [[ $1 == run && $2 == pyinstaller ]]; then
   : > 'dist/{PRIMARY_CLI_NAME}'
   exit 0
 fi
+if [[ $1 == run && $2 == pyi-archive_viewer ]]; then
+  printf '%s\n' "${{ARCHIVE_MEMBER}}"
+  exit 0
+fi
 exit 2
 """,
         encoding="utf-8",
@@ -419,6 +433,7 @@ exit 2
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
     env["PYINSTALLER_ARGS"] = str(pyinstaller_args)
+    env["ARCHIVE_MEMBER"] = archive_member
     tool_args = tmp_path / "tool-args.txt"
     github_output = tmp_path / "github-output.txt"
     env["BUILD_TOOL_ARGS"] = str(tool_args)
@@ -433,6 +448,11 @@ exit 2
         text=True,
     )
 
+    if archive_member.startswith(("meshtastic.tests", "meshtastic/tests/")):
+        assert result.returncode != 0
+        assert "Standalone archive contains meshtastic.tests" in result.stderr
+        assert not github_output.exists()
+        return
     assert result.returncode == 0, result.stderr
     commands = tool_args.read_text(encoding="utf-8").splitlines()
     if legacy_lock:
@@ -445,6 +465,9 @@ exit 2
     else:
         assert commands[0] == "sync --locked --extra cli"
         assert all(command.startswith("run --locked") for command in commands[1:])
+    assert any(
+        "pyi-archive_viewer --recursive --brief" in command for command in commands
+    )
     assert github_output.read_text(encoding="utf-8") == (
         f"primary={PRIMARY_CLI_NAME}\n"
     )

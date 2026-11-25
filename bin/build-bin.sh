@@ -54,6 +54,14 @@ PY
 	"${product_data[@]}" \
 	meshtastic/__main__.py
 
+# Inspect the actual frozen archive, not just the collection arguments. The
+# recursive listing includes embedded PYZ modules as well as packaged data.
+archive_members="$("${PROJECT_RUN[@]}" pyi-archive_viewer --recursive --brief "dist/${primary_cli}")"
+if grep -Eq '(^|[[:space:]])meshtastic([./\\])tests([./\\]|$)' <<<"${archive_members}"; then
+	echo "Standalone archive contains meshtastic.tests; refusing product-only build." >&2
+	exit 1
+fi
+
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
 	printf 'primary=%s\n' "${primary_cli}" >>"${GITHUB_OUTPUT}"
 fi
