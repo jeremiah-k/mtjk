@@ -39,6 +39,8 @@ from meshtastic.interfaces.ble.lifecycle_shutdown_runtime import (
     BLEShutdownLifecycleCoordinator,
 )
 from meshtastic.interfaces.ble.ports import _BLESessionStatePort
+# COMPAT_STABLE_SHIM: Re-export legacy receive service name for compatibility.
+from meshtastic.interfaces.ble.receive_compat_service import BLEReceiveRecoveryService
 from meshtastic.interfaces.ble.session_state import _session_state_for
 from meshtastic.interfaces.ble.utils import (
     _sleep,
@@ -1146,12 +1148,5 @@ class BLEReceiveRecoveryController:
             cooldown,
         )
 
-
-# COMPAT_STABLE_SHIM: Re-export legacy receive service name for compatibility.
-# Lazy module resolution preserves the receive-service compatibility cycle without
-# a non-top-level import statement.
-BLEReceiveRecoveryService = _load_runtime_module(
-    "meshtastic.interfaces.ble.receive_compat_service"
-).BLEReceiveRecoveryService
 
 __all__ = ["BLEReceiveRecoveryController", "BLEReceiveRecoveryService"]
