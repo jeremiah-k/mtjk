@@ -124,3 +124,34 @@ def test_legacy_status_service_delegates_to_same_static_signature(
         iface, True, publishing_thread=publishing_thread
     )
     publish.assert_called_once_with(iface, True, publishing_thread=publishing_thread)
+
+
+@pytest.mark.unit
+def test_legacy_status_service_publishes_on_supplied_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retained shim publishes the legacy topic on the caller's queue."""
+    from queue import Queue
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from meshtastic import mesh_interface
+    from meshtastic.interfaces.ble.compatibility_service import (
+        BLECompatibilityEventService,
+    )
+
+    iface = MagicMock()
+    publishing_thread = SimpleNamespace(queue=Queue())
+    publish = MagicMock()
+    monkeypatch.setattr(mesh_interface, "pub", SimpleNamespace(sendMessage=publish))
+
+    BLECompatibilityEventService.publish_connection_status_legacy(
+        iface, True, publishing_thread=publishing_thread
+    )
+
+    publish.assert_not_called()
+    callback = publishing_thread.queue.get_nowait()
+    callback()
+    publish.assert_called_once_with(
+        "meshtastic.connection.status", interface=iface, connected=True
+    )

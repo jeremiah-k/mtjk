@@ -839,103 +839,12 @@ class BLECompatibilityEventService:
         None
             Publication is best-effort; failures are logged and suppressed.
         """
-        mesh_iface_module = _load_runtime_module("meshtastic.mesh_interface")
-        mesh_pub: Any = getattr(mesh_iface_module, "pub", None)
-        if mesh_pub is None:
-            logger.debug("Skipping connection status publish: mesh pub is unavailable")
-            return
-
-        def _publish_status() -> None:
-            try:
-                mesh_pub.sendMessage(
-                    "meshtastic.connection.status", interface=iface, connected=connected
-                )
-            except Exception:  # noqa: BLE001 - best-effort publish path
-                logger.debug(
-                    "Error publishing %s status via mesh_pub.sendMessage",
-                    "connect" if connected else "disconnect",
-                    exc_info=True,
-                )
-
-        def _is_iface_closing() -> bool:
-            try:
-                closed = _get_declared_member(iface, "_closed", False)
-                if closed is True:
-                    return True
-                state_manager = _get_declared_member(iface, "_state_manager")
-                if state_manager is None:
-                    return False
-                return _LifecycleStateAccess(state_manager).is_closing()
-            except Exception:  # noqa: BLE001 - status publication is best effort
-                _log_ble_failure(
-                    _BLEFailureDisposition.COMPATIBILITY_FALLBACK,
-                    "Error probing interface closing state during status publication",
-                )
-                return False
-
-        def _publish_status_async(reason: str) -> bool:
-            if _is_iface_closing():
-                logger.debug(
-                    "Skipping connection status publish during shutdown: %s.",
-                    reason,
-                )
-                return False
-
-            def _async_publish() -> None:
-                try:
-                    _publish_status()
-                except (
-                    Exception
-                ):  # noqa: BLE001 - async fallback must remain best effort
-                    logger.debug(
-                        "Error in async fallback connection status publish.",
-                        exc_info=True,
-                    )
-
-            try:
-                Thread(
-                    target=_async_publish,
-                    name="ble-compat-status-publish",
-                    daemon=True,
-                ).start()
-            except Exception:  # noqa: BLE001 - async fallback must remain best effort
-                logger.debug(
-                    "Error starting async fallback connection status publish.",
-                    exc_info=True,
-                )
-                return False
-            logger.debug(
-                "Queued async fallback connection status publish: %s.",
-                reason,
-            )
-            return True
-
-        if publishing_thread is None:
-            logger.debug(
-                "Publishing thread is unavailable; using async fallback publish."
-            )
-            _publish_status_async("publishing thread unavailable")
-            return
-
-        try:
-            queued = BLECompatibilityEventService._enqueue_publish_callback(
-                publishing_thread,
-                _publish_status,
-                prefer_non_blocking=True,
-            )
-            if not queued:
-                logger.debug(
-                    "Publish queue is unavailable; using async fallback publish."
-                )
-                _publish_status_async("publish queue unavailable")
-                return
-        except Exception:  # noqa: BLE001 - best-effort queueing path
-            logger.debug(
-                "Error queuing connection status publish via publishingThread.queueWork",
-                exc_info=True,
-            )
-            _publish_status_async("enqueue failure")
-            return
+        publisher = BLECompatibilityEventPublisher(
+            iface, publishing_thread_provider=lambda: publishing_thread
+        )
+        publisher._publish_connection_status_on_thread(  # noqa: SLF001
+            connected=connected, publishing_thread=publishing_thread
+        )
 
     # COMPAT_STABLE_SHIM: retained for existing callers during service migration.
     @staticmethod
