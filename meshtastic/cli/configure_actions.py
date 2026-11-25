@@ -21,6 +21,7 @@ from typing import Any, NamedTuple, NoReturn
 from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.util
+from meshtastic._command_scope import _get_command_scope
 from meshtastic._deadline import (
     _DeadlineExpired,
     _operation_deadline,
@@ -436,9 +437,13 @@ def _post_configure_reconnect_and_verify(
                     if interface.isConnected.is_set():
                         logger.info("Device reconnected.")
                         break
-                    if cli_runtime._is_serial_reconnect_client(
-                        interface
-                    ) and cli_runtime._serial_should_reconnect(interface):
+                    # Embedded commands may wait for their owner to reconnect,
+                    # but must never reopen the caller-owned transport.
+                    if (
+                        _get_command_scope(interface) is None
+                        and cli_runtime._is_serial_reconnect_client(interface)
+                        and cli_runtime._serial_should_reconnect(interface)
+                    ):
                         cli_runtime._poll_serial_reconnect(interface)
                     else:
                         time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))

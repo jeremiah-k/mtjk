@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import threading
+import time
 from types import SimpleNamespace
 from typing import NoReturn
 from unittest.mock import MagicMock, call
@@ -16,8 +17,9 @@ from meshtastic.cli import (
     dispatch,
     messaging_service_actions,
     preference_runtime,
-    set_actions,
 )
+from meshtastic.cli import runtime as cli_runtime
+from meshtastic.cli import set_actions
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
 from meshtastic.configure_verify import (
     ConfigureReconnectResult,
@@ -517,3 +519,37 @@ def test_row_number_is_display_only() -> None:
 
     with pytest.raises(RuntimeError, match="Unknown --sort field 'N'"):
         _validate_cli_sort_field(MagicMock(), "N", cli_exit=_exit)
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_serial_recovery_respects_transport_ownership(
+    monkeypatch: pytest.MonkeyPatch, embedded: bool
+) -> None:
+    node = _node()
+    interface = _interface(node)
+    interface.isConnected.clear()
+    monkeypatch.setattr(
+        configure_actions,
+        "_get_command_scope",
+        lambda _: object() if embedded else None,
+    )
+    monkeypatch.setattr(cli_runtime, "_is_serial_reconnect_client", lambda _: True)
+    monkeypatch.setattr(cli_runtime, "_serial_should_reconnect", lambda _: True)
+    reconnect = MagicMock(side_effect=lambda _: interface.isConnected.set())
+    monkeypatch.setattr(cli_runtime, "_poll_serial_reconnect", reconnect)
+    # For an embedded command, the application independently restores the link.
+    monkeypatch.setattr(
+        "meshtastic.cli.configure_actions.time",
+        SimpleNamespace(
+            monotonic=time.monotonic,
+            sleep=lambda _: interface.isConnected.set(),
+        ),
+    )
+    result = configure_actions._post_configure_reconnect_and_verify(
+        interface, timeout=1, node_dest="^local"
+    )
+    assert result == ConfigureReconnectResult.VERIFIED
+    if embedded:
+        reconnect.assert_not_called()
+    else:
+        reconnect.assert_called_once_with(interface)
