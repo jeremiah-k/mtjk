@@ -474,8 +474,13 @@ owned (including setup and teardown) raises `Tunnel.TunnelError`; close the
 existing tunnel before opening a replacement. The `mt_config.tunnel_instance`
 attribute and its historical alias continue to expose the active instance.
 Assigning that attribute is not a substitute for closing or constructing a
-Tunnel. Receive callbacks keep their existing signature and only forward
-packets from the bound interface.
+Tunnel and cannot transfer ownership or redirect receive dispatch. Closing
+an initializing tunnel requests cancellation; its constructor retains the
+slot until rollback finishes. Closing an active tunnel wakes idle TUN reads,
+retires receive dispatch, and admits no further sends. If a reader or an
+admitted send does not drain within shutdown, the slot remains reserved
+until it finishes. Receive callbacks keep their existing signature and only
+forward packets from the bound interface.
 
 ### BLE and Related Exports
 

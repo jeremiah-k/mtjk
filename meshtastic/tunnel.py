@@ -73,7 +73,11 @@ def onTunnelReceive(packet: dict[str, Any], interface: Any) -> None:
     """
     logger.debug("in onTunnelReceive()")
     with _tunnel_lock:
-        tunnel_instance = mt_config.tunnel_instance
+        tunnel_instance = _tunnel_owner
+        if tunnel_instance is not None and (
+            tunnel_instance._initializing or tunnel_instance._stop_event.is_set()
+        ):
+            tunnel_instance = None
     if tunnel_instance is None:
         logger.warning("Received tunnel packet but no active tunnel instance is set.")
         return
@@ -179,7 +183,11 @@ class Tunnel:
         self._subscribed = False
         self._stop_event = threading.Event()
         self._rx_thread: threading.Thread | None = None
+        self._initializing = True
+        self._ready_event = threading.Event()
         self._closing = False
+        self._cleanup_complete = False
+        self._active_sends = 0
         self.tun: LinuxTunDevice | None = None
 
         if platform.system() != "Linux":
@@ -202,13 +210,13 @@ class Tunnel:
         logger.info("Starting IP to mesh tunnel. Mesh members:")
 
         global _tunnel_owner  # pylint: disable=global-statement
-        with _tunnel_lock:
-            if _tunnel_owner is not None or mt_config.tunnel_instance is not None:
-                raise Tunnel.TunnelError(
-                    "Only one active Tunnel is supported per process"
-                )
-            _tunnel_owner = self
         try:
+            with _tunnel_lock:
+                if _tunnel_owner is not None:
+                    raise Tunnel.TunnelError(
+                        "Only one active Tunnel is supported per process"
+                    )
+                _tunnel_owner = self
             myAddr = self._node_num_to_ip(my_info.my_node_num)
 
             if self.iface.nodes:
@@ -232,6 +240,9 @@ class Tunnel:
                 self.tun.up()
                 self.tun.ifconfig(address=myAddr, netmask=netmask, mtu=TUN_MTU)
 
+            if self._stop_event.is_set():
+                raise Tunnel.TunnelError("Tunnel closed during initialization")
+
             # The reservation prevents another constructor or teardown from
             # touching this subscription. Keep pubsub hooks outside the lock.
             # Mark intent first in case subscribe partially succeeds then raises.
@@ -245,7 +256,7 @@ class Tunnel:
             else:
                 logger.debug("starting TUN reader, our IP address is %s", myAddr)
                 self._rx_thread = threading.Thread(
-                    target=self._tun_reader, args=(), daemon=True
+                    target=self._run_reader, args=(), daemon=True
                 )
                 self._rx_thread.start()
 
@@ -256,8 +267,10 @@ class Tunnel:
                 if self._stop_event.is_set():
                     raise Tunnel.TunnelError("Tunnel closed during initialization")
                 mt_config.tunnel_instance = self
+                self._initializing = False
+                self._ready_event.set()
         except BaseException:
-            self.close()
+            self._retire()
             raise
 
     def onReceive(self, packet: dict[str, Any]) -> None:
@@ -386,6 +399,17 @@ class Tunnel:
 
         return ignore
 
+    def _run_reader(self) -> None:
+        """Wait for publication, then retire the reader's ownership on exit."""
+        try:
+            self._ready_event.wait()
+            if not self._stop_event.is_set():
+                self._tun_reader()
+        finally:
+            with _tunnel_lock:
+                self._rx_thread = None
+                self._release_if_drained_locked()
+
     def _tun_reader(self) -> None:
         """Background thread that reads IP packets from the TUN device and forwards them to the mesh.
 
@@ -405,8 +429,7 @@ class Tunnel:
                     break
                 logger.exception("TUN reader terminating due to read failure")
                 break
-            # Closing a Linux TUN device need not wake a blocked read. A
-            # retired reader must discard any packet returned after shutdown.
+            # A retired reader must discard any packet returned during shutdown.
             if self._stop_event.is_set():
                 break
             # logger.debug(f"IP packet received on TUN interface, type={type(p)}")
@@ -490,60 +513,101 @@ class Tunnel:
                 ipstr(dest_addr),
                 nodeId,
             )
-            self.iface.sendData(p, nodeId, portnums_pb2.IP_TUNNEL_APP, wantAck=False)
+            # Admit the send under the same lock that retires the owner. Do
+            # not hold that lock across transport I/O (which may reenter close).
+            with _tunnel_lock:
+                if (
+                    _tunnel_owner is not self
+                    or self._initializing
+                    or self._stop_event.is_set()
+                ):
+                    return
+                self._active_sends += 1
+            try:
+                self.iface.sendData(
+                    p, nodeId, portnums_pb2.IP_TUNNEL_APP, wantAck=False
+                )
+            finally:
+                with _tunnel_lock:
+                    self._active_sends -= 1
+                    self._release_if_drained_locked()
         else:
             logger.warning(
                 "Dropping packet because no node found for destIP=%s",
                 ipstr(dest_addr),
             )
 
-    def close(self) -> None:
-        """Close tunnel resources.
-
-        Retires the active subscription, closes the TUN device, and waits a
-        bounded time for the reader. The process slot is reserved until this
-        cleanup completes. A reader still blocked in native I/O discards any
-        packet returned after shutdown. Repeated or stale closes are no-ops.
-        """
+    def _release_if_drained_locked(self) -> None:
+        """Release only after cleanup, reader exit and admitted sends finish."""
         global _tunnel_owner  # pylint: disable=global-statement
+        if (
+            _tunnel_owner is self
+            and self._cleanup_complete
+            and not self._active_sends
+            and (self._rx_thread is None or not self._rx_thread.is_alive())
+        ):
+            self._rx_thread = None
+            _tunnel_owner = None
+
+    def close(self) -> None:
+        """Cancel setup or retire an active tunnel.
+
+        Setup owns its rollback until publication. A timed-out reader or an
+        admitted transport send retains the process slot until it drains;
+        closing never permits overlapping tunnel owners.
+        """
+        with _tunnel_lock:
+            if _tunnel_owner is not self:
+                return
+            self._stop_event.set()
+            if self._initializing:
+                return
+        self._retire()
+
+    def _retire(self) -> None:
+        """Clean up the reserved instance, including failed construction."""
         with _tunnel_lock:
             if _tunnel_owner is not self or self._closing:
                 return
             self._closing = True
             self._stop_event.set()
-            # The slot stays reserved until teardown completes, but no new
-            # inbound packet can discover this instance through the singleton.
-            owns_subscription = self._subscribed and (
-                mt_config.tunnel_instance is self or mt_config.tunnel_instance is None
-            )
-            if mt_config.tunnel_instance is self:
-                mt_config.tunnel_instance = None
+            self._ready_event.set()
+            # The public singleton is a compatibility mirror, not ownership.
+            # Even a caller overwriting it cannot orphan our subscription.
+            mt_config.tunnel_instance = None
+            owns_subscription = self._subscribed
             self._subscribed = False
             device = self.tun
             self.tun = None
             thread = self._rx_thread
         try:
-            if owns_subscription:
-                with suppress(Exception):
-                    pub.unsubscribe(onTunnelReceive, TUNNEL_TOPIC)
-            if device is not None:
+            try:
+                if owns_subscription:
+                    with suppress(Exception):
+                        pub.unsubscribe(onTunnelReceive, TUNNEL_TOPIC)
+            finally:
+                # Preserve interruptions, but never skip native resource cleanup.
                 try:
-                    device.close()
-                except Exception:
-                    logger.exception("Error closing TUN device")
-            if (
-                thread is not None
-                and thread is not threading.current_thread()
-                and thread.is_alive()
-            ):
-                thread.join(timeout=RX_THREAD_JOIN_TIMEOUT)
-                if thread.is_alive():
-                    logger.warning("TUN reader thread did not terminate within timeout")
+                    if device is not None:
+                        try:
+                            device.close()
+                        except Exception:
+                            logger.exception("Error closing TUN device")
+                finally:
+                    if (
+                        thread is not None
+                        and thread is not threading.current_thread()
+                        and thread.is_alive()
+                    ):
+                        thread.join(timeout=RX_THREAD_JOIN_TIMEOUT)
+                        if thread.is_alive():
+                            logger.warning(
+                                "TUN reader still active; retaining tunnel ownership"
+                            )
         finally:
             with _tunnel_lock:
-                self._rx_thread = None
-                _tunnel_owner = None
-                self._closing = False
+                self._cleanup_complete = True
+                self._release_if_drained_locked()
 
     # COMPAT_STABLE_SHIM: backward-compatible aliases for existing callers/tests.
     def _shouldFilterPacket(self, p: bytes) -> bool:

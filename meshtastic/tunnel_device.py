@@ -22,6 +22,7 @@ import os
 import platform
 import struct
 import subprocess
+import threading
 from types import ModuleType
 from typing import Final
 
@@ -78,6 +79,10 @@ IFNAMSIZ: Final[int] = 16
 DEFAULT_MTU: Final[int] = 1500
 # One os.read() returns a single packet; buffer for the largest IPv4 datagram.
 MAX_IP_PACKET_SIZE: Final[int] = 65535
+# Idle read retry interval. Polling caps the added latency of the first packet
+# after an idle period at this bound, in exchange for reads that close() can
+# wake promptly without a blocking syscall or an extra descriptor.
+_READ_RETRY_SECONDS: Final[float] = 0.05
 
 
 def _require_asm_generic_ioctl() -> None:
@@ -121,10 +126,11 @@ class LinuxTunDevice:
     used (``up``/``ifconfig``/``read``/``write``/``close``) so it can serve
     as a drop-in replacement.
 
-    Note that a blocking :meth:`read` is not interrupted by :meth:`close`
-    called from another thread (close does not reliably wake a blocked
-    reader on Linux). The tunnel keeps its reader on a daemon thread with a
-    join timeout, matching the historical PyTap2-based shutdown behavior.
+    The descriptor is nonblocking. Reads retain their blocking API by waiting
+    on a close-aware event between attempts; close wakes an idle reader.
+    Writes do not block on a full kernel queue; they report
+    ``BlockingIOError`` instead. Descriptor lookup and I/O are serialized
+    with close to prevent fd reuse.
     """
 
     def __init__(self, *, name: str | None = None, mtu: int = DEFAULT_MTU) -> None:
@@ -155,7 +161,9 @@ class LinuxTunDevice:
         self.mtu = mtu
         self.name = ""
         self._fd: int | None = None
-        fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR)
+        self._io_lock = threading.Lock()
+        self._closed = threading.Event()
+        fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR | os.O_NONBLOCK)
         try:
             # Preserve PyTap2's naming contract: a supplied name is a prefix
             # and the kernel chooses the numeric suffix ("mesh" -> "mesh0").
@@ -169,16 +177,16 @@ class LinuxTunDevice:
                 IFF_TUN | IFF_NO_PI,
             )
             resolved = fcntl.ioctl(fd, TUNSETIFF, request)
+            self.name = resolved[:IFNAMSIZ].split(b"\x00", 1)[0].decode("ascii")
+            logger.debug("Opened TUN interface %s (mtu=%d)", self.name, self.mtu)
+            self._fd = fd
         except BaseException:
             os.close(fd)
             raise
-        self.name = resolved[:IFNAMSIZ].split(b"\x00", 1)[0].decode("ascii")
-        self._fd = fd
-        logger.debug("Opened TUN interface %s (mtu=%d)", self.name, self.mtu)
 
     def _open_fd(self) -> int:
         """Return the device file descriptor or raise if already closed."""
-        if self._fd is None:
+        if self._closed.is_set() or self._fd is None:
             raise OSError("TUN device is closed")
         return self._fd
 
@@ -247,7 +255,13 @@ class LinuxTunDevice:
         OSError
             If the device is closed or the read fails.
         """
-        return os.read(self._open_fd(), MAX_IP_PACKET_SIZE)
+        while True:
+            with self._io_lock:
+                try:
+                    return os.read(self._open_fd(), MAX_IP_PACKET_SIZE)
+                except BlockingIOError:
+                    pass
+            self._closed.wait(_READ_RETRY_SECONDS)
 
     def write(self, data: bytes) -> None:
         """Write one raw IP packet to the TUN device.
@@ -262,11 +276,15 @@ class LinuxTunDevice:
         OSError
             If the device is closed or the write fails.
         """
-        os.write(self._open_fd(), data)
+        with self._io_lock:
+            os.write(self._open_fd(), data)
 
     def close(self) -> None:
         """Close the device file descriptor. Idempotent."""
-        if self._fd is not None:
-            os.close(self._fd)
-            self._fd = None
-            logger.debug("Closed TUN interface %s", self.name)
+        self._closed.set()
+        with self._io_lock:
+            if self._fd is not None:
+                fd = self._fd
+                self._fd = None
+                os.close(fd)
+                logger.debug("Closed TUN interface %s", self.name)

@@ -35,8 +35,10 @@ def _tunnel_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None
     monkeypatch.setattr("meshtastic.tunnel.platform.system", lambda: "Linux")
     assert mt_config.tunnel_instance is None
     yield
-    if mt_config.tunnel_instance is not None:
-        mt_config.tunnel_instance.close()
+    owner = tunnel_module._tunnel_owner
+    if owner is not None:
+        owner.close()
+    assert tunnel_module._tunnel_owner is None
 
 
 def test_callback_routes_only_to_the_bound_interface() -> None:
@@ -181,20 +183,28 @@ def test_close_during_construction_leaves_slot_reusable() -> None:
     device.ifconfig.side_effect = configure
     with (
         patch("meshtastic.tunnel.LinuxTunDevice", return_value=device),
+        patch("meshtastic.tunnel.pub.subscribe") as subscribe,
+        patch("meshtastic.tunnel.pub.unsubscribe") as unsubscribe,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
         future = pool.submit(Tunnel, _interface(no_proto=False))
         try:
             assert configuring.wait(_WAIT)
-            constructing = getattr(tunnel_module, "_tunnel_owner", None)
-            if constructing is not None:
-                constructing.close()
+            constructing = tunnel_module._tunnel_owner
+            assert constructing is not None
+            constructing.close()
             assert mt_config.tunnel_instance is None
+            with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+                Tunnel(_interface())
         finally:
             release.set()
         with pytest.raises(Tunnel.TunnelError, match="closed during initialization"):
             future.result(_WAIT)
+        subscribe.assert_not_called()
+        unsubscribe.assert_not_called()
+        device.close.assert_called_once_with()
     assert mt_config.tunnel_instance is None
+    assert tunnel_module._tunnel_owner is None
     tunnel = Tunnel(_interface())
     tunnel.close()
 
@@ -302,14 +312,14 @@ def test_retired_reader_discards_late_native_read() -> None:
         try:
             assert reading.wait(_WAIT)
             tunnel.close()
+            with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+                Tunnel(_interface())
+            release.set()
+            reader.join(_WAIT)
+            assert not reader.is_alive()
+            iface.sendData.assert_not_called()
             replacement = Tunnel(_interface())
-            try:
-                release.set()
-                reader.join(_WAIT)
-                assert not reader.is_alive()
-                iface.sendData.assert_not_called()
-            finally:
-                replacement.close()
+            replacement.close()
         finally:
             release.set()
             tunnel.close()
@@ -334,3 +344,158 @@ def test_pubsub_subscription_survives_stale_close() -> None:
             device.write.assert_called_once_with(_PACKET["decoded"]["payload"])
     finally:
         tunnel.close()
+
+
+@pytest.mark.parametrize("attribute", ["tunnel_instance", "tunnelInstance"])
+def test_public_alias_cannot_displace_owner(attribute: str) -> None:
+    """Writable compatibility state is not the subscription owner."""
+    owner = Tunnel(_interface())
+    other = Mock()
+    with (
+        patch.object(mt_config, "_warn_compat_alias_once"),
+        patch("meshtastic.tunnel.pub.unsubscribe") as unsubscribe,
+        patch.object(owner, "onReceive") as receive,
+    ):
+        setattr(mt_config, attribute, other)
+        onTunnelReceive(_PACKET, owner.iface)
+        receive.assert_called_once_with(_PACKET)
+        other.onReceive.assert_not_called()
+        owner.close()
+        unsubscribe.assert_called_once_with(onTunnelReceive, TUNNEL_TOPIC)
+        assert mt_config.tunnel_instance is None
+    replacement = Tunnel(_interface())
+    replacement.close()
+
+
+def test_interrupted_unsubscribe_still_closes_device() -> None:
+    owner = Tunnel(_interface())
+    device = MagicMock()
+    owner.tun = device
+    with patch("meshtastic.tunnel.pub.unsubscribe", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            owner.close()
+    device.close.assert_called_once_with()
+    assert tunnel_module._tunnel_owner is None
+    replacement = Tunnel(_interface())
+    replacement.close()
+
+
+def test_reader_cannot_send_before_publication() -> None:
+    """The reader starts only after its receive target has been published."""
+    iface = _interface(no_proto=False)
+    device = MagicMock()
+    observed = threading.Event()
+    owners = []
+
+    def read() -> bytes:
+        owners.append(mt_config.tunnel_instance)
+        observed.set()
+        raise OSError("end of synthetic input")
+
+    device.read.side_effect = read
+    with patch("meshtastic.tunnel.LinuxTunDevice", return_value=device):
+        owner = Tunnel(iface)
+        try:
+            assert observed.wait(_WAIT)
+            assert owners == [owner]
+        finally:
+            owner.close()
+
+
+@pytest.mark.parametrize("checkpoint", ["lookup", "send"])
+def test_reader_send_admission_and_retirement(checkpoint: str) -> None:
+    """Pause before admission or inside transport I/O; never overlap owners."""
+    reached = threading.Event()
+    release = threading.Event()
+    device = MagicMock()
+    iface = _interface(no_proto=False)
+    packet = b"\x45" + b"\0" * 15 + b"\x0a\x73\xff\xff"
+    device.read.return_value = packet
+
+    def lookup(*_args: object) -> str:
+        if checkpoint == "lookup":
+            reached.set()
+            assert release.wait(_WAIT)
+        return "^all"
+
+    def send(*_args: object, **_kwargs: object) -> None:
+        reached.set()
+        assert release.wait(_WAIT)
+
+    iface.sendData.side_effect = send
+    with (
+        patch("meshtastic.tunnel.LinuxTunDevice", return_value=device),
+        patch.object(Tunnel, "_should_filter_packet", return_value=False),
+        patch.object(Tunnel, "_ip_to_node_id", side_effect=lookup),
+        patch("meshtastic.tunnel.RX_THREAD_JOIN_TIMEOUT", 0.01),
+    ):
+        owner = Tunnel(iface)
+        reader = owner._rx_thread
+        assert reader is not None
+        try:
+            assert reached.wait(_WAIT)
+            owner.close()
+            with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+                Tunnel(_interface())
+            release.set()
+            reader.join(_WAIT)
+            assert not reader.is_alive()
+            assert iface.sendData.call_count == (checkpoint == "send")
+            replacement = Tunnel(_interface())
+            replacement.close()
+        finally:
+            release.set()
+            owner.close()
+            reader.join(_WAIT)
+
+
+def test_direct_compatibility_send_retains_slot_until_drained() -> None:
+    """SendPacket callers outside the reader follow the same admission rules."""
+    entered = threading.Event()
+    release = threading.Event()
+    iface = _interface()
+    owner = Tunnel(iface)
+
+    def send(*_args: object, **_kwargs: object) -> None:
+        entered.set()
+        assert release.wait(_WAIT)
+
+    iface.sendData.side_effect = send
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(owner.sendPacket, b"\x00\x00\xff\xff", b"packet")
+        try:
+            assert entered.wait(_WAIT)
+            owner.close()
+            with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+                Tunnel(_interface())
+        finally:
+            release.set()
+        future.result(_WAIT)
+    owner.sendPacket(b"\x00\x00\xff\xff", b"late")
+    iface.sendData.assert_called_once()
+    replacement = Tunnel(_interface())
+    replacement.close()
+
+
+def test_interruption_after_reservation_rolls_back_owner() -> None:
+    """An interruption as the reservation lock exits must not strand the slot."""
+    lock = threading.Lock()
+    interrupted = False
+
+    class InterruptOnce:
+        def __enter__(self) -> None:
+            lock.acquire()
+
+        def __exit__(self, *_exc: object) -> None:
+            nonlocal interrupted
+            lock.release()
+            if not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt
+
+    with patch.object(tunnel_module, "_tunnel_lock", InterruptOnce()):
+        with pytest.raises(KeyboardInterrupt):
+            Tunnel(_interface())
+    assert tunnel_module._tunnel_owner is None
+    replacement = Tunnel(_interface())
+    replacement.close()
