@@ -32,7 +32,7 @@ done
 # every discovered test module to PyInstaller as a hidden import.
 hook_dir="$(mktemp -d)"
 trap 'rm -rf -- "${hook_dir}"' EXIT
-cat > "${hook_dir}/hook-meshtastic.py" <<'PY'
+cat >"${hook_dir}/hook-meshtastic.py" <<'PY'
 from PyInstaller.utils.hooks import collect_submodules, is_module_or_submodule
 
 hiddenimports = collect_submodules(
