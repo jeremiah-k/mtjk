@@ -451,7 +451,9 @@ class Tunnel:
                 try:
                     self._send_packet(dest_addr, p)
                 except Exception:
-                    logger.warning("TUN packet could not be sent to the mesh", exc_info=True)
+                    logger.warning(
+                        "TUN packet could not be sent to the mesh", exc_info=True
+                    )
 
     def _ip_to_node_id(self, ip_addr: bytes) -> str | None:
         """Convert a 4-byte IP address to the corresponding mesh node ID.
