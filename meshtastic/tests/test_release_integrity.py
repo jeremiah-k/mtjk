@@ -457,6 +457,7 @@ exit 2
     assert not Path(args[hook_index + 1]).exists()
     hook_source = (tmp_path / "hook-meshtastic.py").read_text(encoding="utf-8")
     assert 'is_module_or_submodule(name, "meshtastic.tests")' in hook_source
+    assert 'collect_submodules("meshtastic.interfaces")' in hook_source
     excluded_index = args.index("--exclude-module")
     assert args[excluded_index + 1] == "meshtastic.tests"
     assert "--collect-all" not in args

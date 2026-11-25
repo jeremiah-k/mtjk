@@ -39,6 +39,8 @@ hiddenimports = collect_submodules(
     "meshtastic",
     filter=lambda name: not is_module_or_submodule(name, "meshtastic.tests"),
 )
+# pkgutil's walk from meshtastic skips this implicit namespace package.
+hiddenimports += collect_submodules("meshtastic.interfaces")
 PY
 
 "${PROJECT_RUN[@]}" pyinstaller \
