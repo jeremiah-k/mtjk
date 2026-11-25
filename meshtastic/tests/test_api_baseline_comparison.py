@@ -17,6 +17,7 @@ The baselines are stored in:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -713,24 +714,109 @@ class TestUpstreamBaselineRefreshWorkflow:
         assert '-f title="${pr_title}"' in workflow
         assert '-F body=@"${pr_body_file}"' in workflow
 
-    def test_refresh_serializes_runs_and_retires_obsolete_same_repo_pr(self) -> None:
-        """A stale bot PR must not survive a provenance-only regeneration."""
+    def test_refresh_wires_pr_selection_to_close_and_refresh(self) -> None:
+        """Close only the selected bot PR and protect human-authored PRs."""
         project_root = Path(__file__).resolve().parents[2]
-        workflow = (
-            project_root / ".github" / "workflows" / "sync-upstream-master.yml"
-        ).read_text(encoding="utf-8")
-
-        assert "group: upstream-api-baseline-refresh" in workflow
-        assert "cancel-in-progress: false" in workflow
-        assert "--json number,isCrossRepository,headRefName,author" in workflow
-        assert "select(.isCrossRepository == false" in workflow
-        assert '.headRefName == "bot/upstream-baseline"' in workflow
-        assert '.author.login == "github-actions[bot]"' in workflow
-        assert (
-            "steps.compare.outputs.surface_changed == 'false'"
-            " && steps.existing-pr.outputs.number != ''" in workflow
+        workflow = yaml.safe_load(
+            (project_root / ".github/workflows/sync-upstream-master.yml").read_text(
+                encoding="utf-8"
+            )
         )
-        assert 'gh pr close "$OPEN_PR_NUMBER"' in workflow
+        assert workflow["concurrency"] == {
+            "group": "upstream-api-baseline-refresh",
+            "cancel-in-progress": False,
+        }
+        steps = workflow["jobs"]["sync-upstream-master"]["steps"]
+        close = next(
+            step
+            for step in steps
+            if step["name"] == "Close obsolete baseline refresh PR"
+        )
+        refresh = next(
+            step
+            for step in steps
+            if step["name"].startswith("Open baseline refresh PR")
+        )
+        assert close["if"] == (
+            "steps.compare.outputs.surface_changed == 'false'"
+            " && steps.existing-pr.outputs.number != ''"
+        )
+        assert refresh["if"] == (
+            "steps.compare.outputs.surface_changed == 'true'"
+            " && steps.existing-pr.outputs.blocked == 'false'"
+        )
+        for step in (close, refresh):
+            assert (
+                step["env"]["OPEN_PR_NUMBER"]
+                == "${{ steps.existing-pr.outputs.number }}"
+            )
+
+    @pytest.mark.parametrize(
+        ("changes", "number", "blocked"),
+        [
+            ({}, "796", "false"),
+            (
+                {"author": {"login": "github-actions[bot]", "is_bot": True}},
+                "796",
+                "false",
+            ),
+            ({"author": {"login": "maintainer", "is_bot": False}}, "", "true"),
+            ({"isCrossRepository": True}, "", "false"),
+            ({"headRefName": "other-branch"}, "", "false"),
+            ({"baseRefName": "master"}, "", "false"),
+        ],
+    )
+    def test_existing_pr_step_uses_github_author_metadata(
+        self,
+        tmp_path: Path,
+        changes: dict[str, object],
+        number: str,
+        blocked: str,
+    ) -> None:
+        """Run the checked-in filter against GitHub CLI's actual author shape."""
+        bash = shutil.which("bash")
+        if bash is None or shutil.which("jq") is None:
+            pytest.skip("requires Bash and jq")
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load(
+            (project_root / ".github/workflows/sync-upstream-master.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        steps = workflow["jobs"]["sync-upstream-master"]["steps"]
+        run = next(step["run"] for step in steps if step.get("id") == "existing-pr")
+        output = tmp_path / "output"
+        pull_request = {
+            "number": 796,
+            "isCrossRepository": False,
+            "headRefName": "bot/upstream-baseline",
+            "baseRefName": "develop",
+            "author": {"login": "app/github-actions", "is_bot": True},
+            **changes,
+        }
+        subprocess.run(
+            [
+                bash,
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                'gh() { printf "%s\\n" "$PULL_REQUESTS"; }\n' + run,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(output),
+                "PULL_REQUESTS": json.dumps([pull_request]),
+            },
+        )
+        assert output.read_text(encoding="utf-8").splitlines() == [
+            f"number={number}",
+            f"blocked={blocked}",
+        ]
 
     @pytest.mark.parametrize("change_surface", [False, True])
     def test_compare_step_ignores_provenance_but_detects_signature_change(
