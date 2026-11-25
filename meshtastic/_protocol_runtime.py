@@ -5,6 +5,7 @@ handler names. Internal consumers should import this module directly so packet
 processing does not depend on :mod:`meshtastic` package-root implementation.
 """
 
+import base64 as _base64
 import copy as _copy
 import logging
 from typing import Any as _Any
@@ -113,75 +114,108 @@ def _packet_debug_summary(as_dict: dict[str, _Any]) -> dict[str, _Any]:
     }
 
 
+def _redact_admin_key_fields(
+    fields: dict[str, _Any], *, protobuf_json: bool = False
+) -> dict[str, _Any]:
+    """Copy a decoded admin mapping and redact either passkey spelling."""
+    redacted = dict(fields)
+    for key in ("sessionPasskey", "session_passkey"):
+        if key not in redacted:
+            continue
+        if isinstance(redacted[key], (bytes, bytearray, memoryview)):
+            redacted[key] = REDACTED_BYTES
+        elif protobuf_json and isinstance(redacted[key], str):
+            redacted[key] = _base64.b64encode(REDACTED_BYTES).decode("ascii")
+        else:
+            redacted[key] = REDACTED_TEXT
+    return redacted
+
+
+def _redact_admin_object(raw_admin: _Any) -> _Any:
+    """Retain compatible object-shaped payloads when a detached copy is safe."""
+    try:
+        redacted = _copy.deepcopy(raw_admin)
+        if redacted is not raw_admin:
+            try:
+                redacted.session_passkey = REDACTED_BYTES
+            except Exception:  # noqa: BLE001 - legacy read-only payload objects
+                del redacted.session_passkey
+            if getattr(redacted, "session_passkey", REDACTED_BYTES) == REDACTED_BYTES:
+                return redacted
+    except Exception:  # noqa: BLE001 - fail closed on uncopyable legacy objects
+        logger.debug("Could not redact legacy admin payload object; using sentinel")
+    return {"session_passkey": REDACTED_BYTES}
+
+
 def _sanitize_last_received(as_dict: dict[str, _Any]) -> dict[str, _Any]:
     """Return a node-cache-safe packet copy for ``node['lastReceived']``.
 
-    Keeps historical packet structure for compatibility while redacting
-    ``decoded.admin.raw.session_passkey`` when the admin payload is a mapping. If
-    ``decoded.admin`` has an unknown non-mapping shape, the whole admin payload is
-    replaced with :data:`REDACTED_TEXT` rather than caching potentially sensitive
-    data.
+    Keep the packet structure while redacting each representation of the admin
+    session passkey. Rebuild serialized payloads from the sanitized protobuf;
+    if decoding failed, omit opaque payload bytes from the cache instead.
+    The original packet remains available to response and publication callbacks.
     """
     sanitized = dict(as_dict)
-    decoded = sanitized.get("decoded")
-    if not isinstance(decoded, dict):
+    decoded = as_dict.get("decoded")
+    outer_raw = as_dict.get("raw")
+    raw_is_admin = (
+        isinstance(outer_raw, mesh_pb2.MeshPacket)
+        and outer_raw.HasField("decoded")
+        and outer_raw.decoded.portnum == portnums_pb2.ADMIN_APP
+    )
+    decoded_is_admin = isinstance(decoded, dict) and (
+        "admin" in decoded
+        or decoded.get("portnum") in ("ADMIN_APP", portnums_pb2.ADMIN_APP)
+    )
+    if not (raw_is_admin or decoded_is_admin):
         return sanitized
-    if "admin" not in decoded:
-        return sanitized
-    decoded_sanitized = dict(decoded)
-    admin_payload = decoded.get("admin")
-    if isinstance(admin_payload, dict):
-        admin_sanitized = dict(admin_payload)
-        raw_admin = admin_payload.get("raw")
-        if isinstance(raw_admin, dict):
-            raw_sanitized_dict = dict(raw_admin)
-            if "session_passkey" in raw_sanitized_dict:
-                raw_sanitized_dict["session_passkey"] = (
-                    REDACTED_BYTES
-                    if isinstance(
-                        raw_sanitized_dict["session_passkey"],
-                        (bytes, bytearray, memoryview),
-                    )
-                    else REDACTED_TEXT
-                )
-            admin_sanitized["raw"] = raw_sanitized_dict
-        elif hasattr(raw_admin, "session_passkey"):
-            raw_sanitized_obj: _Any | None
-            try:
-                raw_sanitized_obj = _copy.deepcopy(raw_admin)
-            except Exception:  # noqa: BLE001 - preserve packet flow on odd payloads
-                logger.debug(
-                    "deepcopy failed during admin payload redaction; using sentinel payload",
-                    exc_info=True,
-                )
-                raw_sanitized_obj = None
-            if raw_sanitized_obj is None:
-                admin_sanitized["raw"] = {"session_passkey": REDACTED_BYTES}
-            else:
-                try:
-                    raw_sanitized_obj.session_passkey = REDACTED_BYTES
-                except Exception:  # noqa: BLE001 - best effort redaction only
-                    logger.debug(
-                        "session_passkey assignment redaction failed; forcing fallback redaction",
-                        exc_info=True,
-                    )
-                    redaction_applied = False
-                    try:
-                        delattr(raw_sanitized_obj, "session_passkey")
-                        redaction_applied = True
-                    except Exception:  # noqa: BLE001 - final fallback below
-                        redaction_applied = False
-                    admin_sanitized["raw"] = (
-                        raw_sanitized_obj
-                        if redaction_applied
-                        else {"session_passkey": REDACTED_BYTES}
-                    )
-                else:
-                    admin_sanitized["raw"] = raw_sanitized_obj
-        decoded_sanitized["admin"] = admin_sanitized
-    else:
-        decoded_sanitized["admin"] = REDACTED_TEXT
-    sanitized["decoded"] = decoded_sanitized
+
+    # An opaque or malformed admin payload cannot safely be retained. Only a
+    # successfully sanitized AdminMessage may supply replacement wire bytes.
+    payload = b""
+    if isinstance(decoded, dict):
+        decoded_sanitized = dict(decoded)
+        admin_payload = decoded.get("admin")
+        if isinstance(admin_payload, dict):
+            raw_admin = admin_payload.get("raw")
+            admin_sanitized = _redact_admin_key_fields(
+                admin_payload,
+                protobuf_json=isinstance(raw_admin, admin_pb2.AdminMessage),
+            )
+            if isinstance(raw_admin, admin_pb2.AdminMessage):
+                redacted_admin = admin_pb2.AdminMessage()
+                redacted_admin.CopyFrom(raw_admin)
+                # Keep an omitted key omitted; do not invent a credential field.
+                if redacted_admin.session_passkey:
+                    redacted_admin.session_passkey = REDACTED_BYTES
+                admin_sanitized["raw"] = redacted_admin
+                payload = redacted_admin.SerializeToString()
+            elif isinstance(raw_admin, dict):
+                admin_sanitized["raw"] = _redact_admin_key_fields(raw_admin)
+            elif hasattr(raw_admin, "session_passkey"):
+                admin_sanitized["raw"] = _redact_admin_object(raw_admin)
+            elif "raw" in admin_sanitized:
+                admin_sanitized["raw"] = REDACTED_TEXT
+            decoded_sanitized["admin"] = admin_sanitized
+        elif "admin" in decoded:
+            decoded_sanitized["admin"] = REDACTED_TEXT
+        if "payload" in decoded:
+            decoded_sanitized["payload"] = payload
+        sanitized["decoded"] = decoded_sanitized
+    elif "decoded" in as_dict:
+        sanitized["decoded"] = REDACTED_TEXT
+
+    if isinstance(outer_raw, mesh_pb2.MeshPacket):
+        redacted_packet = mesh_pb2.MeshPacket()
+        redacted_packet.CopyFrom(outer_raw)
+        if redacted_packet.HasField("decoded"):
+            redacted_packet.decoded.payload = payload
+        else:
+            # An inconsistent outer representation may carry opaque data.
+            redacted_packet.ClearField("encrypted")
+        sanitized["raw"] = redacted_packet
+    elif "raw" in as_dict:
+        sanitized["raw"] = REDACTED_TEXT
     return sanitized
 
 

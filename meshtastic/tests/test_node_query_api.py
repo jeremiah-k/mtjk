@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from meshtastic import __main__ as cli_main
-from meshtastic._protocol_runtime import _on_admin_receive
+from meshtastic._protocol_runtime import REDACTED_BYTES, _on_admin_receive
 from meshtastic.cli.context import ActionOutcome, CliContext
 from meshtastic.cli.dispatch import _dispatch_connected
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
@@ -247,7 +247,11 @@ def test_json_omits_cached_admin_packet_bodies(
     record = document["nodes"][0]
     assert record["lastReceived"] == {"from": 2, "to": 1, "rxTime": 40}
     assert "adminSessionPassKey" not in record
-    assert result.nodes[0]["lastReceived"]["decoded"]["payload"] == payload
+    cached_admin = admin_pb2.AdminMessage.FromString(
+        result.nodes[0]["lastReceived"]["decoded"]["payload"]
+    )
+    assert cached_admin.session_passkey == REDACTED_BYTES
+    assert cached_admin.get_config_response.network.wifi_psk == "test-network-password"
     assert result.nodes[0]["adminSessionPassKey"] == b"test-session-key"
     assert admin.session_passkey == b"test-session-key"
 
