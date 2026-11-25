@@ -14,6 +14,7 @@ from meshtastic.cli import (
     channel_contact_actions,
     configure_actions,
     dispatch,
+    messaging_service_actions,
     preference_runtime,
     set_actions,
 )
@@ -76,6 +77,26 @@ def test_channel_check_never_logs_psk(caplog: pytest.LogCaptureFixture) -> None:
         assert channel_contact_actions.check_channel(SimpleNamespace(localNode=node), 0)
     assert "secret-psk-sentinel" not in caplog.text
     assert "Channel 0 enabled: True" in caplog.text
+
+
+@pytest.mark.parametrize("option", ["--show-fields", "--sort"])
+def test_node_query_validation_fails_closed_when_exit_returns(option: str) -> None:
+    """Fatal node-query errors must stop dispatch with a returning exit seam."""
+    interface = SimpleNamespace(nodesByNum={})
+    cli_exit = MagicMock()
+    field = "definitely_not_a_node_field"
+    with pytest.raises(AssertionError):
+        if option == "--show-fields":
+            messaging_service_actions._validate_cli_show_fields(
+                interface, [field], cli_exit=cli_exit
+            )
+        else:
+            messaging_service_actions._validate_cli_sort_field(
+                interface, field, cli_exit=cli_exit
+            )
+    assert cli_exit.call_count == 1
+    assert option in cli_exit.call_args.args[0]
+    assert cli_exit.call_args.args[1] == 1
 
 
 def _interface(node: MagicMock) -> MagicMock:

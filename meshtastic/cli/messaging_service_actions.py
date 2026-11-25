@@ -739,7 +739,8 @@ def _validate_cli_show_fields(
             break_long_words=False,
             break_on_hyphens=False,
         )
-        cli_exit(
+        _terminate_cli(
+            cli_exit,
             "Unknown --show-fields value(s): "
             f"{', '.join(invalid)}.\nAvailable fields:\n{choices}",
             1,
@@ -769,7 +770,8 @@ def _validate_cli_sort_field(
             break_long_words=False,
             break_on_hyphens=False,
         )
-        cli_exit(
+        _terminate_cli(
+            cli_exit,
             f"Unknown --sort field '{sort_field}'.\nAvailable fields:\n{choices}",
             1,
         )
