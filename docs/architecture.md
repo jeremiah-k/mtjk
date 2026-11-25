@@ -156,8 +156,10 @@ The shared deferred publication worker preserves FIFO delivery. Callback
 exceptions (including callback-local `SystemExit` and `KeyboardInterrupt`) are
 logged without retrying the callback or terminating the worker. If the worker
 itself has exited unexpectedly, the next submission or explicit stop attempts
-to recover a single worker to drain the existing queue. An explicit successful
-stop remains terminal. Subscribers should return promptly: a slow subscriber
+to recover a single worker to drain the existing queue. Shutdown remains
+terminal for new submissions; if the worker fails during shutdown, `join()`
+reports an incomplete drain and another `stop()` can recover the same pending
+queue without adding another sentinel. Subscribers should return promptly: a slow subscriber
 can delay later events across interfaces, and the publication queue is not
 bounded by default.
 

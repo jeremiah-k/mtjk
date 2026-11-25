@@ -172,3 +172,132 @@ def test_concurrent_producers_and_stop_respect_admission_boundary() -> None:
     finally:
         executor.stop()
         assert executor.join(_WAIT)
+
+
+def test_broken_logging_handler_cannot_kill_publisher() -> None:
+    """Exception reporting is not allowed to become another callback failure."""
+    executor = DeferredExecution("broken-logging")
+    completed = threading.Event()
+
+    def fail() -> None:
+        raise ValueError("callback failed")
+
+    try:
+        with patch(
+            "meshtastic.util.logger.exception",
+            side_effect=RuntimeError("handler failed"),
+        ):
+            executor.queueWork(fail)
+            executor.queueWork(completed.set)
+            executor.stop()
+            assert executor.join(_WAIT)
+        assert completed.is_set()
+    finally:
+        executor.stop()
+        assert executor.join(_WAIT)
+
+
+def test_broken_logging_handler_still_reports_to_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Swallowed logging-handler failures still reach the operator on stderr."""
+    executor = DeferredExecution("broken-logging-stderr")
+    completed = threading.Event()
+
+    def fail() -> None:
+        raise ValueError("callback failed")
+
+    try:
+        with patch(
+            "meshtastic.util.logger.exception",
+            side_effect=RuntimeError("handler failed"),
+        ):
+            executor.queueWork(fail)
+            executor.queueWork(completed.set)
+            executor.stop()
+            assert executor.join(_WAIT)
+        assert completed.is_set()
+        assert "Unexpected error in deferred execution" in capsys.readouterr().err
+    finally:
+        executor.stop()
+        assert executor.join(_WAIT)
+
+
+def test_stop_can_recover_worker_that_fails_during_terminal_drain() -> None:
+    """A dead thread is not evidence that its accepted callbacks drained."""
+    executor = DeferredExecution._create_lazy("drain-failure")
+    entered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+
+    def fail_during_drain() -> None:
+        entered.set()
+        assert release.wait(_WAIT)
+        raise RuntimeError("queue infrastructure failure")
+
+    try:
+        with patch.object(executor, "_run", fail_during_drain):
+            executor.queueWork(completed.set)
+            assert entered.wait(_WAIT)
+            executor.stop()
+            release.set()
+            assert not executor.join(_WAIT)
+            assert not completed.is_set()
+        assert not executor._queue_work_non_blocking(lambda: None)
+        executor.stop()
+        assert executor.join(_WAIT)
+        assert completed.is_set()
+    finally:
+        release.set()
+        executor.stop()
+        assert executor.join(_WAIT)
+
+
+def test_restart_logging_can_reenter_admission() -> None:
+    """A user logging handler can enqueue without deadlocking the stop lock."""
+    executor = DeferredExecution._create_lazy("reentrant-logging")
+    completed = threading.Event()
+    with patch.object(executor, "_run", lambda: None):
+        executor.queueWork(lambda: None)
+        assert executor.join(_WAIT)
+    try:
+        with patch(
+            "meshtastic.util.logger.error",
+            side_effect=lambda *_args: executor.queueWork(completed.set),
+        ):
+            executor.queueWork(lambda: None)
+        executor.stop()
+        assert executor.join(_WAIT)
+        assert completed.is_set()
+    finally:
+        executor.stop()
+        assert executor.join(_WAIT)
+
+
+def test_interrupted_thread_start_cannot_leave_unowned_consumer() -> None:
+    """A native launch followed by an interruption must not consume queued work."""
+    executor = DeferredExecution._create_lazy("interrupted-start")
+    original_start = threading.Thread.start
+    launched: list[threading.Thread] = []
+    completed = threading.Event()
+
+    def start_then_interrupt(thread: threading.Thread) -> None:
+        original_start(thread)
+        launched.append(thread)
+        raise KeyboardInterrupt
+
+    try:
+        with patch.object(threading.Thread, "start", start_then_interrupt):
+            with pytest.raises(KeyboardInterrupt):
+                executor.queueWork(completed.set)
+        assert executor.thread is None
+        launched[0].join(_WAIT)
+        assert not launched[0].is_alive()
+        assert not completed.is_set()
+        executor.queueWork(completed.set)
+        executor.stop()
+        assert executor.join(_WAIT)
+        assert completed.is_set()
+    finally:
+        executor.stop()
+        assert executor.join(_WAIT)

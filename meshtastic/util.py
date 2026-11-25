@@ -666,6 +666,7 @@ class DeferredExecution:
     _SHUTDOWN = object()
     queue: Queue[Any]
     _shutdown: bool
+    _drained: threading.Event
     _stop_lock: threading.Lock
     _thread_name: str
     thread: threading.Thread | None
@@ -699,6 +700,7 @@ class DeferredExecution:
         """Initialize queue/worker state with an explicit startup policy."""
         self.queue: Queue[Any] = Queue()
         self._shutdown = False
+        self._drained = threading.Event()
         self._stop_lock = threading.Lock()
         self._thread_name = name
         self.thread = None
@@ -706,34 +708,85 @@ class DeferredExecution:
             with self._stop_lock:
                 self._ensure_started_locked()
 
-    def _ensure_started_locked(self) -> None:
-        """Ensure a single live daemon worker while ``_stop_lock`` is held."""
-        if self._shutdown:
-            return
-        if self.thread is not None:
-            if self.thread.is_alive():
-                return
-            logger.error(
-                "Deferred execution worker %s exited; restarting", self._thread_name
-            )
-        # This thread must be daemonized, otherwise it prevents clients from exiting.
-        thread = threading.Thread(
-            target=self._run, args=(), name=self._thread_name, daemon=True
-        )
-        thread.start()
-        self.thread = thread
+    def _ensure_started_locked(self) -> bool:
+        """Start one worker under ``_stop_lock``; return whether it replaced one."""
+        if self.thread is not None and self.thread.is_alive():
+            return False
+        replacing = self.thread is not None
+        # A start interrupted after launching a native thread must not leave
+        # an untracked consumer. Release the gate only after recording ownership.
+        ready = threading.Event()
+        admitted = False
+
+        def run() -> None:
+            ready.wait()
+            if admitted:
+                try:
+                    self._run()
+                except BaseException:  # noqa: BLE001 - infrastructure failure
+                    self._report_worker_failure("Deferred execution worker failed")
+
+        thread = threading.Thread(target=run, name=self._thread_name, daemon=True)
+        try:
+            thread.start()
+            self.thread = thread
+            admitted = True
+        finally:
+            ready.set()
+        return replacing
+
+    @staticmethod
+    def _report_to_stderr(message: str) -> None:
+        """Emit a failure line to stderr when the logging handlers are broken."""
+        try:
+            if logging.raiseExceptions:
+                sys.stderr.write(f"{message}\n")
+        except Exception:  # noqa: BLE001 - stderr reporting must never raise
+            pass
+
+    @staticmethod
+    def _report_worker_failure(message: str) -> None:
+        """Never let a broken logging handler terminate the worker."""
+        try:
+            logger.exception(message)
+        except BaseException:  # noqa: BLE001 - isolate broken logging handlers
+            DeferredExecution._report_to_stderr(message)
+
+    def _report_restart(self, replacing: bool) -> None:
+        if replacing:
+            try:
+                # Logging handlers may enqueue work; never call them under
+                # the non-reentrant admission lock.
+                logger.error(
+                    "Deferred execution worker %s exited; restarting", self._thread_name
+                )
+            except Exception:
+                # Report-only path: isolate logging-handler failures from the
+                # caller. BaseException (for example KeyboardInterrupt) still
+                # propagates on this caller thread.
+                DeferredExecution._report_to_stderr(
+                    f"Deferred execution worker {self._thread_name} exited; restarting"
+                )
+
+    def _accepts_work(self) -> bool:
+        """Treat only explicit shutdown as terminal for work admission."""
+        with self._stop_lock:
+            return not self._shutdown
 
     def _queue_work_non_blocking(self, runnable: Callable[[], Any]) -> bool:
         """Atomically start the worker and enqueue work without blocking."""
         with self._stop_lock:
             if self._shutdown:
                 return False
-            self._ensure_started_locked()
+            replacing = self._ensure_started_locked()
             try:
                 self.queue.put_nowait(runnable)
             except Full:
-                return False
-            return True
+                queued = False
+            else:
+                queued = True
+        self._report_restart(replacing)
+        return queued
 
     def queueWork(self, runnable: Callable[[], Any]) -> None:
         """Enqueue a callable to be executed by the background worker thread.
@@ -752,28 +805,33 @@ class DeferredExecution:
         with self._stop_lock:
             if self._shutdown:
                 return
-            self._ensure_started_locked()
+            replacing = self._ensure_started_locked()
             self.queue.put(runnable)
+        self._report_restart(replacing)
 
     def stop(self) -> None:
         """Signal the worker thread to shut down gracefully.
 
         Enqueues a sentinel value after all work accepted before this call. The
         worker drains those pending items in FIFO order and exits when it reaches
-        the sentinel. This method is safe to call multiple times and is a no-op if
-        shutdown has already started. If a replacement worker cannot be
-        started to drain pending work, the startup exception propagates and
-        shutdown may be retried.
+        the sentinel. Repeated calls never admit new work or enqueue another
+        sentinel; they can recover a worker that failed during terminal drain.
+        If replacement startup fails, the exception propagates and shutdown may
+        be retried.
         """
+        replacing = False
         with self._stop_lock:
             if self._shutdown:
-                return
-            if self.thread is not None:
-                # Recover a failed worker before publishing the terminal
-                # boundary so previously accepted work can still drain.
-                self._ensure_started_locked()
-                self.queue.put(self._SHUTDOWN)
-            self._shutdown = True
+                if not self._drained.is_set():
+                    replacing = self._ensure_started_locked()
+            else:
+                if self.thread is not None:
+                    replacing = self._ensure_started_locked()
+                    self.queue.put(self._SHUTDOWN)
+                else:
+                    self._drained.set()
+                self._shutdown = True
+        self._report_restart(replacing)
 
     def join(self, timeout: float | None = None) -> bool:
         """Wait for the worker thread to finish.
@@ -789,14 +847,19 @@ class DeferredExecution:
         Returns
         -------
         bool
-            True if the thread finished within the timeout, False otherwise.
+            True if the thread finished within the timeout and, after stop,
+            the shutdown sentinel was reached; False otherwise.
         """
         with self._stop_lock:
             thread = self.thread
         if thread is not None:
             thread.join(timeout)
-            return not thread.is_alive()
-        return True
+        with self._stop_lock:
+            return (
+                self.thread is thread
+                and (thread is None or not thread.is_alive())
+                and (not self._shutdown or self._drained.is_set())
+            )
 
     def _run(self) -> None:
         """Continuously executes callables retrieved from the internal work queue.
@@ -813,6 +876,7 @@ class DeferredExecution:
             except Empty:
                 continue
             if o is self._SHUTDOWN:
+                self._drained.set()
                 break
             try:
                 o()
@@ -820,7 +884,7 @@ class DeferredExecution:
                 # SystemExit, KeyboardInterrupt and other callback failures
                 # belong to the callback, not the process-wide publisher.
                 # Never replay a failed callback: its side effects are unknown.
-                logger.exception("Unexpected error in deferred execution")
+                self._report_worker_failure("Unexpected error in deferred execution")
 
 
 def removeKeysFromDict(
