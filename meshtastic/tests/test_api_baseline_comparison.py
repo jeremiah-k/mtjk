@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -711,6 +712,89 @@ class TestUpstreamBaselineRefreshWorkflow:
         assert "pulls/${open_pr_number}" in workflow
         assert '-f title="${pr_title}"' in workflow
         assert '-F body=@"${pr_body_file}"' in workflow
+
+    def test_refresh_serializes_runs_and_retires_obsolete_same_repo_pr(self) -> None:
+        """A stale bot PR must not survive a provenance-only regeneration."""
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            project_root / ".github" / "workflows" / "sync-upstream-master.yml"
+        ).read_text(encoding="utf-8")
+
+        assert "group: upstream-api-baseline-refresh" in workflow
+        assert "cancel-in-progress: false" in workflow
+        assert "--json number,isCrossRepository,headRefName,author" in workflow
+        assert "select(.isCrossRepository == false" in workflow
+        assert '.headRefName == "bot/upstream-baseline"' in workflow
+        assert '.author.login == "github-actions[bot]"' in workflow
+        assert (
+            "steps.compare.outputs.surface_changed == 'false'"
+            " && steps.existing-pr.outputs.number != ''" in workflow
+        )
+        assert 'gh pr close "$OPEN_PR_NUMBER"' in workflow
+
+    @pytest.mark.parametrize("change_surface", [False, True])
+    def test_compare_step_ignores_provenance_but_detects_signature_change(
+        self, tmp_path: Path, change_surface: bool
+    ) -> None:
+        """Execute the workflow's real comparison against a local committed baseline."""
+        project_root = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load(
+            (project_root / ".github/workflows/sync-upstream-master.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        steps = workflow["jobs"]["sync-upstream-master"]["steps"]
+        run = next(step["run"] for step in steps if step.get("id") == "compare")
+        # Execute the actual heredoc without requiring Bash on test runners.
+        lines = run.splitlines()
+        assert lines[0] == "python3 <<'PY'" and lines[-1] == "PY"
+        comparison = "\n".join(lines[1:-1])
+        baseline = tmp_path / "baseline.json"
+        old = {"provenance": {"sha": "old"}, "node_methods": {"method": "(self)"}}
+        baseline.write_text(json.dumps(old), encoding="utf-8")
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "add", "baseline.json"],
+            [
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "baseline",
+            ],
+        ):
+            subprocess.run(command, cwd=tmp_path, check=True, timeout=30)
+        new = {
+            "provenance": {"sha": "new"},
+            "node_methods": {"method": "(self, arg)" if change_surface else "(self)"},
+        }
+        baseline.write_text(json.dumps(new), encoding="utf-8")
+        output = tmp_path / "output.txt"
+        subprocess.run(
+            [sys.executable, "-c", comparison],
+            cwd=tmp_path,
+            check=True,
+            timeout=30,
+            env={
+                **os.environ,
+                "BASELINE_FILE": "baseline.json",
+                "RUNNER_TEMP": str(tmp_path),
+                "GITHUB_OUTPUT": str(output),
+            },
+        )
+        assert (
+            output.read_text(encoding="utf-8")
+            == f"surface_changed={str(change_surface).lower()}\n"
+        )
+        summary = tmp_path / "surface-summary.txt"
+        assert summary.exists() == change_surface
+        if change_surface:
+            assert "~ node_methods.method: (self) -> (self, arg)" in summary.read_text(
+                encoding="utf-8"
+            )
 
     def test_refresh_pr_skipped_on_provenance_only_change(self) -> None:
         """The refresh PR step must be gated on an API-surface-only comparison."""
