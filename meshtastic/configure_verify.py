@@ -184,6 +184,37 @@ def _is_string_field(field_desc: Any) -> bool:
     )
 
 
+def _verify_repeated_message_elements(
+    yaml_elements: list[Any],
+    device_elements: list[Any],
+    field_path: str,
+) -> list[str]:
+    """Compare requested repeated-message elements against device messages.
+
+    Repeated message fields cannot be compared element-wise as whole values:
+    protobuf message objects never compare equal to plain dicts. Each
+    requested mapping is verified field-by-field against the corresponding
+    device message, preserving element order.
+    """
+    if len(yaml_elements) != len(device_elements):
+        return [field_path]
+    mismatches: list[str] = []
+    for index, (yaml_element, device_message) in enumerate(
+        zip(yaml_elements, device_elements, strict=True)
+    ):
+        if isinstance(yaml_element, dict) and hasattr(device_message, "DESCRIPTOR"):
+            mismatches.extend(
+                _verify_requested_fields(
+                    yaml_element,
+                    device_message,
+                    f"{field_path}[{index}]",
+                )
+            )
+            continue
+        mismatches.append(f"{field_path}[{index}]")
+    return mismatches
+
+
 def _verify_requested_fields(
     yaml_dict: dict[str, Any],
     proto_message: Any,
@@ -196,7 +227,8 @@ def _verify_requested_fields(
     For leaf values, enum strings are resolved to their numeric form and
     non-enum strings are coerced via ``meshtastic.util.fromStr()``.
     Repeated fields are compared as lists; non-repeated fields that
-    receive a list use only the first element.
+    receive a list use only the first element. Repeated message fields
+    are compared field-by-field per element.
 
     Parameters
     ----------
@@ -242,9 +274,18 @@ def _verify_requested_fields(
                     if isinstance(yaml_value, (list, tuple))
                     else [yaml_value]
                 )
-                coerced = [_coerce_element(field_desc, el) for el in yaml_list]
-                if list(coerced) != list(actual):
-                    mismatches.append(f"{section_path}.{snake_key}")
+                if field_desc.message_type is not None:
+                    mismatches.extend(
+                        _verify_repeated_message_elements(
+                            list(yaml_list),
+                            list(actual),
+                            f"{section_path}.{snake_key}",
+                        )
+                    )
+                else:
+                    coerced = [_coerce_element(field_desc, el) for el in yaml_list]
+                    if list(coerced) != list(actual):
+                        mismatches.append(f"{section_path}.{snake_key}")
             else:
                 scalar: Any = yaml_value
                 if field_desc.enum_type is not None and isinstance(yaml_value, str):

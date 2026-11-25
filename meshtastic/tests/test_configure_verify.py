@@ -11,7 +11,13 @@ from meshtastic.configure_verify import (
     _verify_channel_url_match,
     _verify_requested_fields,
 )
-from meshtastic.protobuf import apponly_pb2, channel_pb2, config_pb2, localonly_pb2
+from meshtastic.protobuf import (
+    apponly_pb2,
+    channel_pb2,
+    config_pb2,
+    localonly_pb2,
+    module_config_pb2,
+)
 
 
 @pytest.mark.unit
@@ -206,6 +212,76 @@ def test_verify_fields_repeated_match() -> None:
         )
         == []
     )
+
+
+@pytest.mark.unit
+def test_verify_fields_repeated_message_match_compared_field_by_field() -> None:
+    """Stored repeated message fields verify against mapping requests.
+
+    Protobuf message elements never compare equal to plain dicts, so the
+    requested mappings must be verified per field, per element.
+    """
+    proto = module_config_pb2.ModuleConfig.MeshBeaconConfig()
+    first = proto.broadcast_targets.add()
+    first.channel_index = 2
+    first.preset = config_pb2.Config.LoRaConfig.ModemPreset.LONG_FAST
+    first.region = config_pb2.Config.LoRaConfig.RegionCode.US
+    second = proto.broadcast_targets.add()
+    second.channel_index = 0
+    second.preset = config_pb2.Config.LoRaConfig.ModemPreset.MEDIUM_TURBO
+    second.region = config_pb2.Config.LoRaConfig.RegionCode.US
+
+    requested = {
+        "broadcastTargets": [
+            {"channelIndex": 2, "preset": "LONG_FAST", "region": "US"},
+            {"channelIndex": 0, "preset": "MEDIUM_TURBO", "region": "US"},
+        ]
+    }
+    assert _verify_requested_fields(requested, proto, "mesh_beacon") == []
+
+
+@pytest.mark.unit
+def test_verify_fields_repeated_message_mismatch_reports_element_field() -> None:
+    """A differing sub-field inside one element reports the indexed path."""
+    proto = module_config_pb2.ModuleConfig.MeshBeaconConfig()
+    first = proto.broadcast_targets.add()
+    first.channel_index = 3
+    first.preset = config_pb2.Config.LoRaConfig.ModemPreset.LONG_FAST
+    first.region = config_pb2.Config.LoRaConfig.RegionCode.US
+    second = proto.broadcast_targets.add()
+    second.channel_index = 0
+    second.preset = config_pb2.Config.LoRaConfig.ModemPreset.MEDIUM_TURBO
+    second.region = config_pb2.Config.LoRaConfig.RegionCode.US
+
+    requested = {
+        "broadcastTargets": [
+            {"channelIndex": 2, "preset": "LONG_FAST", "region": "US"},
+            {"channelIndex": 0, "preset": "MEDIUM_TURBO", "region": "US"},
+        ]
+    }
+    assert _verify_requested_fields(requested, proto, "mesh_beacon") == [
+        "mesh_beacon.broadcast_targets[0].channel_index"
+    ]
+
+
+@pytest.mark.unit
+def test_verify_fields_repeated_message_length_mismatch_reports_field() -> None:
+    """A different element count reports the whole repeated field path."""
+    proto = module_config_pb2.ModuleConfig.MeshBeaconConfig()
+    only = proto.broadcast_targets.add()
+    only.channel_index = 2
+    only.preset = config_pb2.Config.LoRaConfig.ModemPreset.LONG_FAST
+    only.region = config_pb2.Config.LoRaConfig.RegionCode.US
+
+    requested = {
+        "broadcastTargets": [
+            {"channelIndex": 2, "preset": "LONG_FAST", "region": "US"},
+            {"channelIndex": 0, "preset": "MEDIUM_TURBO", "region": "US"},
+        ]
+    }
+    assert _verify_requested_fields(requested, proto, "mesh_beacon") == [
+        "mesh_beacon.broadcast_targets"
+    ]
 
 
 @pytest.mark.unit
@@ -525,6 +601,8 @@ def test_repeated_enum_list_coercion() -> None:
     field_desc = MagicMock()
     field_desc.is_repeated = True
     field_desc.enum_type = enum_type_mock
+    # Real enum-typed field descriptors carry no message type.
+    field_desc.message_type = None
 
     sub_msg = MagicMock()
     sub_msg.DESCRIPTOR.fields_by_name = {"my_field": field_desc}
@@ -547,6 +625,8 @@ def test_repeated_enum_list_mismatch() -> None:
     field_desc = MagicMock()
     field_desc.is_repeated = True
     field_desc.enum_type = enum_type_mock
+    # Real enum-typed field descriptors carry no message type.
+    field_desc.message_type = None
 
     sub_msg = MagicMock()
     sub_msg.DESCRIPTOR.fields_by_name = {"my_field": field_desc}
