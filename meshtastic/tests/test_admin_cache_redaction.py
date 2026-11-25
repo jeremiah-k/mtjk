@@ -2,6 +2,7 @@
 
 import base64
 import copy
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -211,3 +212,26 @@ def test_legacy_object_with_no_effective_redaction_is_replaced(
     cached = _sanitize_last_received(packet)
     assert cached["decoded"]["admin"]["raw"] == {"session_passkey": REDACTED_BYTES}
     assert raw.session_passkey == _KEY
+
+
+def test_legacy_object_redacts_both_passkey_spellings() -> None:
+    """The native spelling cannot be redacted while leaving its camelCase alias."""
+    raw = SimpleNamespace(session_passkey=_KEY, sessionPasskey=_KEY, other=42)
+    cached = _sanitize_last_received({"decoded": {"admin": {"raw": raw}}})
+    assert cached["decoded"]["admin"]["raw"] == SimpleNamespace(
+        session_passkey=REDACTED_BYTES, sessionPasskey=REDACTED_BYTES, other=42
+    )
+    assert raw.session_passkey == raw.sessionPasskey == _KEY
+
+
+def test_legacy_object_with_failing_attribute_access_is_not_cached() -> None:
+    """A throwing property must fail closed rather than abort cache processing."""
+
+    class UnreadableKey:
+        @property
+        def session_passkey(self) -> bytes:
+            raise RuntimeError("unreadable property")
+
+    raw = UnreadableKey()
+    cached = _sanitize_last_received({"decoded": {"admin": {"raw": raw}}})
+    assert cached["decoded"]["admin"]["raw"] == {"session_passkey": REDACTED_BYTES}

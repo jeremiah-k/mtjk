@@ -134,13 +134,24 @@ def _redact_admin_key_fields(
 def _redact_admin_object(raw_admin: _Any) -> _Any:
     """Retain compatible object-shaped payloads when a detached copy is safe."""
     try:
+        fields = tuple(
+            key
+            for key in ("sessionPasskey", "session_passkey")
+            if hasattr(raw_admin, key)
+        )
+        if not fields:
+            return REDACTED_TEXT
         redacted = _copy.deepcopy(raw_admin)
         if redacted is not raw_admin:
-            try:
-                redacted.session_passkey = REDACTED_BYTES
-            except Exception:  # noqa: BLE001 - legacy read-only payload objects
-                del redacted.session_passkey
-            if getattr(redacted, "session_passkey", REDACTED_BYTES) == REDACTED_BYTES:
+            for key in fields:
+                try:
+                    setattr(redacted, key, REDACTED_BYTES)
+                except Exception:  # noqa: BLE001 - legacy read-only payload objects
+                    delattr(redacted, key)
+            if all(
+                getattr(redacted, key, REDACTED_BYTES) == REDACTED_BYTES
+                for key in fields
+            ):
                 return redacted
     except Exception:  # noqa: BLE001 - fail closed on uncopyable legacy objects
         logger.debug("Could not redact legacy admin payload object; using sentinel")
@@ -192,10 +203,8 @@ def _sanitize_last_received(as_dict: dict[str, _Any]) -> dict[str, _Any]:
                 payload = redacted_admin.SerializeToString()
             elif isinstance(raw_admin, dict):
                 admin_sanitized["raw"] = _redact_admin_key_fields(raw_admin)
-            elif hasattr(raw_admin, "session_passkey"):
-                admin_sanitized["raw"] = _redact_admin_object(raw_admin)
             elif "raw" in admin_sanitized:
-                admin_sanitized["raw"] = REDACTED_TEXT
+                admin_sanitized["raw"] = _redact_admin_object(raw_admin)
             decoded_sanitized["admin"] = admin_sanitized
         elif "admin" in decoded:
             decoded_sanitized["admin"] = REDACTED_TEXT
