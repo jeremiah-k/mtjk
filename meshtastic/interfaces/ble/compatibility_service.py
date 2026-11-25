@@ -106,6 +106,7 @@ class BLECompatibilityEventPublisher:
         string because BLE module import must not depend on the runtime
         publish-queue state of that module at import time.
         """
+
         def _available(candidate: object | None) -> bool:
             # A stopped executor still owns its terminal drain.
             return (for_flush and isinstance(candidate, DeferredExecution)) or (
