@@ -707,9 +707,15 @@ class DeferredExecution:
                 self._ensure_started_locked()
 
     def _ensure_started_locked(self) -> None:
-        """Start the daemon worker exactly once while ``_stop_lock`` is held."""
-        if self.thread is not None or self._shutdown:
+        """Ensure a single live daemon worker while ``_stop_lock`` is held."""
+        if self._shutdown:
             return
+        if self.thread is not None:
+            if self.thread.is_alive():
+                return
+            logger.error(
+                "Deferred execution worker %s exited; restarting", self._thread_name
+            )
         # This thread must be daemonized, otherwise it prevents clients from exiting.
         thread = threading.Thread(
             target=self._run, args=(), name=self._thread_name, daemon=True
@@ -732,8 +738,9 @@ class DeferredExecution:
     def queueWork(self, runnable: Callable[[], Any]) -> None:
         """Enqueue a callable to be executed by the background worker thread.
 
-        Work accepted before :meth:`stop` is guaranteed to run before the worker
-        exits. Work submitted after shutdown begins is ignored, preserving the
+        Work accepted before :meth:`stop` is attempted in FIFO order before the
+        worker exits normally. Callback failures are logged and do not stop the
+        worker. Work submitted after shutdown begins is ignored, preserving the
         historical non-raising behavior while making the shutdown boundary
         deterministic.
 
@@ -754,14 +761,19 @@ class DeferredExecution:
         Enqueues a sentinel value after all work accepted before this call. The
         worker drains those pending items in FIFO order and exits when it reaches
         the sentinel. This method is safe to call multiple times and is a no-op if
-        shutdown has already started.
+        shutdown has already started. If a replacement worker cannot be
+        started to drain pending work, the startup exception propagates and
+        shutdown may be retried.
         """
         with self._stop_lock:
             if self._shutdown:
                 return
-            self._shutdown = True
             if self.thread is not None:
+                # Recover a failed worker before publishing the terminal
+                # boundary so previously accepted work can still drain.
+                self._ensure_started_locked()
                 self.queue.put(self._SHUTDOWN)
+            self._shutdown = True
 
     def join(self, timeout: float | None = None) -> bool:
         """Wait for the worker thread to finish.
@@ -779,28 +791,35 @@ class DeferredExecution:
         bool
             True if the thread finished within the timeout, False otherwise.
         """
-        if self.thread is not None:
-            self.thread.join(timeout)
-            return not self.thread.is_alive()
+        with self._stop_lock:
+            thread = self.thread
+        if thread is not None:
+            thread.join(timeout)
+            return not thread.is_alive()
         return True
 
     def _run(self) -> None:
         """Continuously executes callables retrieved from the internal work queue.
 
-        Runs an infinite loop that takes callables from ``self.queue`` and invokes
-        them. Exceptions raised by queued work are logged and processing continues.
-        The loop exits only when it consumes the shutdown sentinel, ensuring work
-        accepted before :meth:`stop` is drained first.
+        Callables retrieved from ``self.queue`` are attempted in FIFO order.
+        Exceptions from a callable, including callback-local termination signals,
+        are logged without retrying the callable. Normal exit occurs at the
+        shutdown sentinel; infrastructure failure is recovered on the next
+        admission or stop if a replacement worker can be started.
         """
         while True:
             try:
                 o = self.queue.get(timeout=_DEFERRED_QUEUE_POLL_TIMEOUT_SECONDS)
-                if o is self._SHUTDOWN:
-                    break
-                o()
             except Empty:
                 continue
-            except Exception:
+            if o is self._SHUTDOWN:
+                break
+            try:
+                o()
+            except BaseException:  # noqa: BLE001 - isolate arbitrary subscriber code
+                # SystemExit, KeyboardInterrupt and other callback failures
+                # belong to the callback, not the process-wide publisher.
+                # Never replay a failed callback: its side effects are unknown.
                 logger.exception("Unexpected error in deferred execution")
 
 
