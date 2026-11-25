@@ -153,10 +153,18 @@ def _build_configure_interface(
     target_node.requestConfig = MagicMock(side_effect=_request_config_side_effect)
     target_node.setFixedPosition = MagicMock()
 
+    def _wait_for_config_side_effect() -> None:
+        # A completed reload delivers the device's sections to the cache.
+        target_local.Clear()
+        target_local.CopyFrom(device_local)
+        target_module.Clear()
+        target_module.CopyFrom(device_module)
+
     iface = create_autospec(SerialInterface, instance=True)
     iface.devPath = "/dev/mock"
     iface.isConnected = threading.Event()
     iface.isConnected.set()
+    iface.waitForConfig = MagicMock(side_effect=_wait_for_config_side_effect)
     iface.__enter__ = MagicMock(return_value=iface)
     iface.__exit__ = MagicMock(return_value=None)
     iface.getNode.return_value = target_node

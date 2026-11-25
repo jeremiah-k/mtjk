@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from typing import Any, cast
 import meshtastic.util
 from meshtastic.cli.context import CliContext, CliExit, _terminate_cli
 from meshtastic.protobuf import channel_pb2, config_pb2
+
+logger = logging.getLogger(__name__)
 
 MAX_CHANNEL_NAME_LENGTH: int = 10
 
@@ -30,6 +33,7 @@ class ChannelContactHooks:
     is_local_destination: Callable[[Any, str], bool]
     modem_preset_shorthands: tuple[tuple[tuple[str, ...], str, str, str], ...]
     qr_render: Callable[[str], str] | None = None
+    result_print: Callable[[str], None] | None = None
 
 
 def _handle_contact_import(context: CliContext) -> None:
@@ -402,6 +406,7 @@ def _handle_channel_contact_display(
     args = context.args
     interface = context.interface
 
+    result_print = hooks.result_print or hooks.cli_print
     if args.qr or args.qr_all:
         context.outcome.close_now = True
         url = interface.getNode(args.dest, True, **context.get_node_kwargs).getURL(
@@ -416,7 +421,7 @@ def _handle_channel_contact_display(
             url,
             description=description,
             qr_render=hooks.qr_render,
-            cli_print=hooks.cli_print,
+            cli_print=result_print,
         )
 
     if args.contact_qr:
@@ -430,5 +435,33 @@ def _handle_channel_contact_display(
             url,
             description="Contact URL",
             qr_render=hooks.qr_render,
-            cli_print=hooks.cli_print,
+            cli_print=result_print,
         )
+
+
+def check_channel(interface: Any, channel_index: int) -> bool:
+    """Determine whether the local node has the channel at the given index enabled."""
+    if hasattr(type(interface.localNode), "getChannelCopyByChannelIndex"):
+        channel = interface.localNode.getChannelCopyByChannelIndex(channel_index)
+    else:
+        channel = interface.localNode.getChannelByChannelIndex(channel_index)
+    enabled = bool(channel and channel.role != channel_pb2.Channel.Role.DISABLED)
+    logger.debug("Channel %s enabled: %s", channel_index, enabled)
+    return enabled
+
+
+def _print_channel_field_choices(
+    settings: Any, pref_name: str, *, cli_print: Callable[[str], None] = print
+) -> None:
+    """Print available channel-setting fields after an unknown --ch-set name."""
+    cli_print(f"{settings.__class__.__name__} does not have an attribute {pref_name}.")
+    cli_print("Choices are...")
+    for field in settings.DESCRIPTOR.fields:
+        if field.name != "module_settings":
+            cli_print(field.name)
+            continue
+        cli_print(f"{field.name}:")
+        if field.message_type is None:
+            continue
+        for sub_field in sorted(field.message_type.fields, key=lambda item: item.name):
+            cli_print(f"    {field.name}.{sub_field.name}")

@@ -1,13 +1,15 @@
 """Regression tests for loading --set config sections before atomic preflight."""
 
 from types import SimpleNamespace
+from typing import NoReturn
 from unittest.mock import MagicMock
 
 import pytest
 from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.__main__ as main_module
-from meshtastic.__main__ import (
+import meshtastic.cli.set_actions as cli_set_actions
+from meshtastic.cli.set_actions import (
     _ensure_set_sections_loaded,
     _normalize_set_entries,
     _resolve_set_target,
@@ -15,6 +17,11 @@ from meshtastic.__main__ import (
 from meshtastic.node import Node
 from meshtastic.protobuf import localonly_pb2
 from meshtastic.tcp_interface import TCPInterface
+
+
+def _refusing_exit(message: str, return_value: int = 1) -> NoReturn:
+    """Fail the test if a section load refuses instead of exiting the runner."""
+    raise AssertionError(f"unexpected cli_exit: {message!r} ({return_value})")
 
 
 def _config_node() -> MagicMock:
@@ -67,6 +74,7 @@ def test_loaded_default_section_is_not_requested_again(
     _ensure_set_sections_loaded(
         node,
         _normalize_set_entries(((pref_name, "true"),)),
+        cli_exit=_refusing_exit,
     )
 
     node.requestConfig.assert_not_called()
@@ -85,6 +93,7 @@ def test_missing_section_is_requested_once_for_multiple_entries() -> None:
                 ("lora.tx_power", "10"),
             )
         ),
+        cli_exit=_refusing_exit,
     )
 
     node.requestConfig.assert_called_once()
@@ -99,6 +108,7 @@ def test_unknown_nested_field_does_not_trigger_device_read() -> None:
     _ensure_set_sections_loaded(
         node,
         _normalize_set_entries((("lora.not_a_field", "1"),)),
+        cli_exit=_refusing_exit,
     )
 
     node.requestConfig.assert_not_called()
@@ -117,6 +127,7 @@ def test_request_can_populate_section_before_preflight_snapshot() -> None:
     _ensure_set_sections_loaded(
         node,
         _normalize_set_entries((("lora.ignore_incoming", "456"),)),
+        cli_exit=_refusing_exit,
     )
 
     assert list(node.localConfig.lora.ignore_incoming) == [123]
@@ -143,6 +154,9 @@ def test_handle_set_loads_sections_before_invoking_preflight(
     def inspect_preflight(
         target_node: MagicMock,
         _entries: list[tuple[str, object]],
+        *,
+        cli_exit: object = None,
+        cli_print: object = None,
     ) -> bool:
         """Record the current LoRa ignore-incoming values observed during preflight.
 
@@ -164,7 +178,7 @@ def test_handle_set_loads_sections_before_invoking_preflight(
         return False
 
     node.requestConfig.side_effect = populate_lora
-    monkeypatch.setattr(main_module, "_preflight_set_entries", inspect_preflight)
+    monkeypatch.setattr(cli_set_actions, "_preflight_set_entries", inspect_preflight)
 
     main_module._handle_set_command(interface, args, {})
 

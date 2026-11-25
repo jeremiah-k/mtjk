@@ -416,13 +416,14 @@ def test_preflight_exception_redacts_secret_value_across_runtime_messages(
     with (
         patch("meshtastic.tcp_interface.TCPInterface", return_value=interface),
         patch(
-            "meshtastic.__main__.setPref",
+            "meshtastic.cli.set_actions._set_pref",
             side_effect=TypeError(f"{secret!r} has type str"),
-        ),
+        ) as set_pref_mock,
     ):
         with pytest.raises(SystemExit) as exc_info:
             main()
 
+    assert set_pref_mock.call_args.args[1:3] == ("bluetooth.fixed_pin", secret)
     assert _is_secret_pref("bluetooth.fixed_pin")
     assert exc_info.value.code == 1
     node.writeConfig.assert_not_called()

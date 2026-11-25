@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import IO, NoReturn
 
+from meshtastic import mt_config
+
 _CURRENT_INVOCATION: contextvars.ContextVar[CliInvocation | None] = (
     contextvars.ContextVar("cli_invocation", default=None)
 )
@@ -55,6 +57,28 @@ def activate_invocation(invocation: CliInvocation) -> Iterator[CliInvocation]:
 def get_current_invocation() -> CliInvocation | None:
     """Return the active CLI invocation, if execution is invocation-scoped."""
     return _CURRENT_INVOCATION.get()
+
+
+def current_camel_case() -> bool:
+    """Return the active naming mode with the legacy ``mt_config`` fallback."""
+    invocation = get_current_invocation()
+    return invocation.camel_case if invocation is not None else mt_config.camel_case
+
+
+def current_channel_index() -> int | None:
+    """Return the invocation-selected channel index with the legacy fallback."""
+    invocation = get_current_invocation()
+    return (
+        invocation.channel_index if invocation is not None else mt_config.channel_index
+    )
+
+
+def set_current_channel_index(value: int) -> None:
+    """Update invocation-owned channel selection and mirror the compatibility global."""
+    invocation = get_current_invocation()
+    if invocation is not None:
+        invocation.channel_index = value
+    mt_config.channel_index = value
 
 
 _CURRENT_OUTPUT: contextvars.ContextVar[Callable[[str], None] | None] = (

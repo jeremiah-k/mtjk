@@ -671,7 +671,7 @@ def test_close_failed_settings_transaction_does_not_retry_failed_commit() -> Non
     node = MagicMock()
     cli_print = MagicMock()
     configure_actions._close_failed_settings_transaction(
-        _hooks(cli_print=cli_print), node, commit_attempted=True
+        node, commit_attempted=True, cli_print=cli_print
     )
     node.commitSettingsTransaction.assert_not_called()
     assert "state is unknown" in str(cli_print.call_args)
@@ -684,7 +684,7 @@ def test_close_failed_settings_transaction_reports_close_failure() -> None:
     node.commitSettingsTransaction.side_effect = RuntimeError("commit")
     cli_print = MagicMock()
     configure_actions._close_failed_settings_transaction(
-        _hooks(cli_print=cli_print), node, commit_attempted=False
+        node, commit_attempted=False, cli_print=cli_print
     )
     assert node.commitSettingsTransaction.call_count == 1
     assert "open transaction" in str(cli_print.call_args)

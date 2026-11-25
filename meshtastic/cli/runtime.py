@@ -6,6 +6,7 @@ import logging
 import time
 
 import meshtastic.serial_interface
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.mesh_interface import MeshInterface
 
 logger = logging.getLogger(__name__)
@@ -75,12 +76,14 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
     # Wait for the old reader thread to exit before reconnecting
     rx_thread = getattr(client, "_rxThread", None)
     if rx_thread is not None and rx_thread.is_alive():
-        rx_thread.join(timeout=SERIAL_RX_THREAD_JOIN_TIMEOUT_SECONDS)
+        rx_thread.join(
+            timeout=_remaining_timeout(SERIAL_RX_THREAD_JOIN_TIMEOUT_SECONDS)
+        )
         if rx_thread.is_alive():
             logger.warning(
                 "Reader thread is still alive after join timeout; delaying reconnect."
             )
-            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+            time.sleep(_remaining_timeout(SERIAL_RECONNECT_RETRY_SECONDS))
             return
 
     try:
@@ -89,7 +92,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
             logger.info("Serial reconnected.")
         else:
             logger.debug("Reconnect returned but interface is not live yet.")
-            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+            time.sleep(_remaining_timeout(SERIAL_RECONNECT_RETRY_SECONDS))
     except Exception as exc:
         # Route all exceptions through the serial retry classifier when available.
         # Unconditionally retry OS/connection errors; conditionally retry
@@ -106,7 +109,7 @@ def _poll_serial_reconnect(client: MeshInterface) -> None:
 
         if retryable:
             logger.debug("Reconnect attempt failed (retryable): %s", exc)
-            time.sleep(SERIAL_RECONNECT_RETRY_SECONDS)
+            time.sleep(_remaining_timeout(SERIAL_RECONNECT_RETRY_SECONDS))
         else:
             raise
 

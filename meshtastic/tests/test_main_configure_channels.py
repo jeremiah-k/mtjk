@@ -25,6 +25,7 @@ from meshtastic.__main__ import (
     onReceive,
     traverseConfig,
 )
+from meshtastic.cli import configure_actions as cli_configure_actions
 
 # from ..ble_interface import BLEInterface
 from ..node import Node
@@ -234,7 +235,7 @@ def test_main_configure_applies_mixed_case_and_security_encodings(
     target_module = localonly_pb2.LocalModuleConfig()
     iface, target_node = _build_configure_interface(target_local, target_module)
     monkeypatch.setattr(
-        main_module,
+        cli_configure_actions,
         "_post_configure_reconnect_and_verify",
         MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
     )
@@ -323,7 +324,7 @@ def test_main_configure_accepts_display_use_12h_alias_spellings(
         target_local, localonly_pb2.LocalModuleConfig()
     )
     monkeypatch.setattr(
-        main_module,
+        cli_configure_actions,
         "_post_configure_reconnect_and_verify",
         MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
     )
@@ -1591,12 +1592,12 @@ def test_main_export_config_and_configure_round_trip_nonstandard(
     monkeypatch.setattr("time.sleep", lambda _: None)
     _patch_fast_monotonic(monkeypatch)
     monkeypatch.setattr(
-        main_module,
+        cli_configure_actions,
         "_post_configure_reconnect_and_verify",
         MagicMock(return_value=main_module._ConfigureReconnectResult.VERIFIED),
     )
     monkeypatch.setattr(
-        "meshtastic.__main__._post_seturl_stability_check",
+        "meshtastic.cli.configure_actions._post_seturl_stability_check",
         lambda *a, **k: True,
     )
     configure_iface.waitForConfig = MagicMock()

@@ -67,7 +67,7 @@ def _inject_reconnect_result(
 ) -> MagicMock:
     """Drive the reconnect-verification seam through the ConfigureHooks wiring."""
     hook = MagicMock(return_value=result)
-    monkeypatch.setattr(main_module, "_post_configure_reconnect_and_verify", hook)
+    monkeypatch.setattr(configure_actions, "_post_configure_reconnect_and_verify", hook)
     return hook
 
 

@@ -758,13 +758,13 @@ def test_send_failure_propagates_and_leaves_no_pending_state() -> None:
             timeout_sec=5.0,
         )
 
-    # The engine stopped at the failing section: the later section was not
-    # sent and its cache was not cleared. Nothing was enrolled anywhere.
+    # The engine stopped at the failing section and sent nothing. Every
+    # requested section is invalidated before the first request, so a
+    # staged value cannot stand in for device state. Nothing was enrolled.
     assert node.sent_admin == []
     assert node.legacy_requests == []
     assert node.localConfig.HasField("lora") is False
-    assert node.localConfig.HasField("device")
-    assert node.localConfig.device.role == 1
+    assert node.localConfig.HasField("device") is False
 
     # No lingering operation state: a healthy verification still completes.
     lora = config_pb2.Config.LoRaConfig()

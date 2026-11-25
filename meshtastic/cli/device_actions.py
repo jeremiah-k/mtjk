@@ -634,11 +634,17 @@ def _handle_device_actions(context: CliContext, hooks: DeviceActionHooks) -> Non
             lat, lon, alt
         )
 
-    if args.set_owner or args.set_owner_short or args.set_is_unmessageable is not None:
+    if (
+        args.set_owner is not None
+        or args.set_owner_short is not None
+        or args.set_is_unmessageable is not None
+    ):
         outcome.close_now = True
         outcome.wait_for_ack_nak = True
-        long_name = args.set_owner.strip() if args.set_owner else None
-        short_name = args.set_owner_short.strip() if args.set_owner_short else None
+        long_name = args.set_owner.strip() if args.set_owner is not None else None
+        short_name = (
+            args.set_owner_short.strip() if args.set_owner_short is not None else None
+        )
         if long_name is not None and not long_name:
             _terminate_cli(
                 hooks.cli_exit,
@@ -677,7 +683,7 @@ def _handle_device_actions(context: CliContext, hooks: DeviceActionHooks) -> Non
     _handle_content_updates(context, hooks)
     _handle_position_fields(context, hooks)
 
-    if args.set_ham:
+    if args.set_ham is not None:
         ham_id = args.set_ham.strip()
         if not ham_id:
             _terminate_cli(

@@ -21,10 +21,16 @@ from typing import Any, NamedTuple, NoReturn
 from google.protobuf.descriptor import FieldDescriptor
 
 import meshtastic.util
-from meshtastic._deadline import _remaining_timeout
+from meshtastic._command_scope import _get_command_scope
+from meshtastic._deadline import (
+    _DeadlineExpired,
+    _operation_deadline,
+    _remaining_timeout,
+)
 from meshtastic.cli import config_io as _config_io
 from meshtastic.cli import configure_values
 from meshtastic.cli import preference_runtime as cli_preference_runtime
+from meshtastic.cli import runtime as cli_runtime
 from meshtastic.cli.config_preview import (
     PREVIEW_CURRENT_NOT_SET,
     PREVIEW_NO_CHANGES_MESSAGE,
@@ -47,6 +53,7 @@ from meshtastic.configure_verify import (
 )
 from meshtastic.configure_verify import _device_lora_config as _device_lora_config
 from meshtastic.configure_verify import _flatten_leaf_paths as _flatten_leaf_paths
+from meshtastic.configure_verify import _invalidate_requested_config_sections
 from meshtastic.configure_verify import _is_repeated_field as _is_repeated_field
 from meshtastic.configure_verify import _parse_channel_set as _parse_channel_set
 from meshtastic.configure_verify import (
@@ -377,10 +384,8 @@ def _post_configure_reconnect_and_verify(
     interface : MeshInterface
         Connected interface observed for disconnect/reconnect.
     timeout : float
-        Reboot-recovery budget in seconds, covering the fixed reboot probe
-        and the post-disconnect reconnect wait. It does not bound the
-        config reload: ``waitForConfig()`` applies its own internal
-        wait/retry timing.
+        Shared reboot-recovery budget in seconds for probing, reconnecting,
+        and managed configuration reload waits.
     node_dest : str
         Destination whose configuration is reloaded and verified.
     verify_channel_url : str | None
@@ -397,90 +402,122 @@ def _post_configure_reconnect_and_verify(
     ConfigureReconnectResult
         Reconnect, reload, and requested-value verification outcome.
     """
-    start_time = time.monotonic()
-    deadline = start_time + timeout
-    pre_op_config_id = getattr(interface, "configId", None)
+    try:
+        with _operation_deadline(timeout):
+            start_time = time.monotonic()
+            deadline = start_time + timeout
+            pre_op_config_id = getattr(interface, "configId", None)
+            # Full config download does not clear every protobuf section itself. Invalidate
+            # the touched sections before any recovery request so a staged value cannot
+            # stand in for a device response, even when the initial readback send failed.
+            local_node = getattr(interface, "localNode", None)
+            if local_node is not None:
+                _invalidate_requested_config_sections(
+                    local_node,
+                    config_fields=verify_config_fields,
+                    module_config_fields=verify_module_config_fields,
+                )
 
-    probe_deadline = min(start_time + CONFIG_REBOOT_PROBE_SECONDS, deadline)
-    logger.debug(
-        "Probing for reboot indication up to %.1fs (configId or isConnected)...",
-        max(probe_deadline - time.monotonic(), 0.0),
-    )
-    while time.monotonic() < probe_deadline:
-        if not interface.isConnected.is_set():
-            logger.info("Device disconnected (reboot indication received).")
-            break
-        if getattr(interface, "configId", None) != pre_op_config_id:
-            logger.info("Device rebooted (generation counter advanced).")
-            break
-        time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
+            probe_deadline = min(start_time + CONFIG_REBOOT_PROBE_SECONDS, deadline)
+            logger.debug(
+                "Probing for reboot indication up to %.1fs (configId or isConnected)...",
+                max(probe_deadline - time.monotonic(), 0.0),
+            )
+            while time.monotonic() < probe_deadline:
+                if not interface.isConnected.is_set():
+                    logger.info("Device disconnected (reboot indication received).")
+                    break
+                if getattr(interface, "configId", None) != pre_op_config_id:
+                    logger.info("Device rebooted (generation counter advanced).")
+                    break
+                time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
 
-    if not interface.isConnected.is_set():
-        while time.monotonic() < deadline:
-            if interface.isConnected.is_set():
-                logger.info("Device reconnected.")
-                break
-            time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
+            if not interface.isConnected.is_set():
+                while time.monotonic() < deadline:
+                    if interface.isConnected.is_set():
+                        logger.info("Device reconnected.")
+                        break
+                    # Embedded commands may wait for their owner to reconnect,
+                    # but must never reopen the caller-owned transport.
+                    if (
+                        _get_command_scope(interface) is None
+                        and cli_runtime._is_serial_reconnect_client(interface)
+                        and cli_runtime._serial_should_reconnect(interface)
+                    ):
+                        cli_runtime._poll_serial_reconnect(interface)
+                    else:
+                        time.sleep(_remaining_timeout(CONFIG_POLL_INTERVAL_SECONDS))
 
-    if not interface.isConnected.is_set():
-        logger.warning(
-            "Device did not reconnect within %.1fs after configure commit. "
-            "Configuration may still be applying.",
-            timeout,
-        )
-        return ConfigureReconnectResult.RECONNECT_FAILED
+            if not interface.isConnected.is_set():
+                logger.warning(
+                    "Device did not reconnect within %.1fs after configure commit. "
+                    "Configuration may still be applying.",
+                    timeout,
+                )
+                return ConfigureReconnectResult.RECONNECT_FAILED
 
-    if getattr(interface, "configId", None) == pre_op_config_id:
-        start_config = getattr(interface, "_start_config", None)
-        if callable(start_config):
+            if getattr(interface, "configId", None) == pre_op_config_id:
+                start_config = getattr(interface, "_start_config", None)
+                if callable(start_config):
+                    try:
+                        start_config()
+                    except Exception:
+                        logger.warning(
+                            "Failed to request a fresh config generation after reconnect; "
+                            "waiting for config completion anyway.",
+                            exc_info=True,
+                        )
+                    else:
+                        logger.debug(
+                            "No reboot observed via generation counter; "
+                            "requested fresh full config via want_config_id."
+                        )
+
             try:
-                start_config()
+                _remaining_timeout(timeout)
+                interface.waitForConfig()
+                _remaining_timeout(timeout)
+                logger.info("Device config reloaded after reboot.")
             except Exception:
                 logger.warning(
-                    "Failed to request a fresh config generation after reconnect; "
-                    "waiting for config completion anyway.",
+                    "Device reconnected but config reload failed; "
+                    "configuration may still be applying.",
                     exc_info=True,
                 )
-            else:
-                logger.debug(
-                    "No reboot observed via generation counter; "
-                    "requested fresh full config via want_config_id."
+                return ConfigureReconnectResult.CONFIG_RELOAD_FAILED
+
+            has_verification = (
+                verify_channel_url
+                or verify_config_fields
+                or verify_module_config_fields
+            )
+            if not has_verification:
+                return ConfigureReconnectResult.VERIFIED
+
+            try:
+                result = _verify_post_reconnect_config(
+                    interface,
+                    node_dest,
+                    verify_channel_url=verify_channel_url,
+                    verify_config_fields=verify_config_fields,
+                    verify_module_config_fields=verify_module_config_fields,
+                    verify_channel_url_against_state=verify_channel_url_against_state,
                 )
+            except Exception:
+                logger.warning(
+                    "Post-reconnect verification failed unexpectedly.",
+                    exc_info=True,
+                )
+                return ConfigureReconnectResult.VERIFICATION_INCOMPLETE
 
-    try:
-        interface.waitForConfig()
-        logger.info("Device config reloaded after reboot.")
-    except Exception:
-        logger.warning(
-            "Device reconnected but config reload failed; "
-            "configuration may still be applying.",
-            exc_info=True,
+            _remaining_timeout(timeout)
+            return result
+    except _DeadlineExpired:
+        return (
+            ConfigureReconnectResult.CONFIG_RELOAD_FAILED
+            if interface.isConnected.is_set()
+            else ConfigureReconnectResult.RECONNECT_FAILED
         )
-        return ConfigureReconnectResult.CONFIG_RELOAD_FAILED
-
-    has_verification = (
-        verify_channel_url or verify_config_fields or verify_module_config_fields
-    )
-    if not has_verification:
-        return ConfigureReconnectResult.VERIFIED
-
-    try:
-        result = _verify_post_reconnect_config(
-            interface,
-            node_dest,
-            verify_channel_url=verify_channel_url,
-            verify_config_fields=verify_config_fields,
-            verify_module_config_fields=verify_module_config_fields,
-            verify_channel_url_against_state=verify_channel_url_against_state,
-        )
-    except Exception:
-        logger.warning(
-            "Post-reconnect verification failed unexpectedly.",
-            exc_info=True,
-        )
-        return ConfigureReconnectResult.VERIFICATION_INCOMPLETE
-
-    return result
 
 
 def _post_seturl_stability_check(
@@ -786,17 +823,17 @@ def _apply_configure_channel_url(
 
 
 def _close_failed_settings_transaction(
-    hooks: ConfigureHooks,
     target_node: Any,
     *,
     commit_attempted: bool,
+    cli_print: Callable[[str], None],
 ) -> None:
     """Best-effort close an open settings transaction after a configuration failure.
 
     Parameters
     ----------
-    hooks : ConfigureHooks
-        CLI reporting hooks used to surface partial-application risk.
+    cli_print : Callable[[str], None]
+        Reporter used to surface partial-application risk.
     target_node : Any
         Node whose settings transaction was opened.
     commit_attempted : bool
@@ -811,13 +848,24 @@ def _close_failed_settings_transaction(
     the normal commit itself failed, final device-side state is unknown and a
     second commit is intentionally not sent.
     """
+
+    def warn(message: str) -> None:
+        # An application output sink may itself be the reason for the failure.
+        # It must not prevent the best-effort device-side cleanup.
+        try:
+            cli_print(f"WARNING: {message}")
+        except Exception:
+            logger.warning(
+                "Could not report settings transaction failure", exc_info=True
+            )
+
     if commit_attempted:
         message = (
             "Settings transaction commit failed; device transaction state is unknown "
             "and configuration may be partially applied."
         )
         logger.warning(message)
-        hooks.cli_print(f"WARNING: {message}")
+        warn(message)
         return
 
     message = (
@@ -825,19 +873,21 @@ def _close_failed_settings_transaction(
         "to close it. Any writes already accepted may be committed."
     )
     logger.warning(message)
-    hooks.cli_print(f"WARNING: {message}")
     try:
-        target_node.commitSettingsTransaction()
-    except Exception:
-        logger.warning(
-            "Failed to close settings transaction after configure failure; "
-            "device transaction may remain open.",
-            exc_info=True,
-        )
-        hooks.cli_print(
-            "WARNING: Could not close the failed settings transaction; the device "
-            "may still have an open transaction."
-        )
+        warn(message)
+    finally:
+        try:
+            target_node.commitSettingsTransaction()
+        except Exception:
+            logger.warning(
+                "Failed to close settings transaction after configure failure; "
+                "device transaction may remain open.",
+                exc_info=True,
+            )
+            warn(
+                "Could not close the failed settings transaction; the device "
+                "may still have an open transaction."
+            )
 
 
 def _decode_configure_document(
@@ -1403,9 +1453,9 @@ def _apply_settings_transaction(
         target_node.commitSettingsTransaction()
     except BaseException:
         _close_failed_settings_transaction(
-            hooks,
             target_node,
             commit_attempted=commit_attempted,
+            cli_print=hooks.cli_print,
         )
         raise
 

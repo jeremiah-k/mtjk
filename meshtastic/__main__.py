@@ -3,7 +3,6 @@
 # pylint: disable=R0917,C0302
 
 import argparse
-import binascii
 import contextlib
 import getpass  # noqa: F401  # pylint: disable=unused-import  # compatibility seam
 import importlib
@@ -12,7 +11,6 @@ import os
 import platform
 import signal
 import sys
-import textwrap
 import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -27,7 +25,6 @@ import meshtastic.cli.bootstrap as cli_bootstrap
 import meshtastic.cli.channel_contact_actions as cli_channel_contact_actions
 import meshtastic.cli.config_io as cli_config_io
 import meshtastic.cli.config_preview as cli_config_preview
-import meshtastic.cli.config_readiness as cli_config_readiness
 import meshtastic.cli.configure_actions as cli_configure_actions
 import meshtastic.cli.device_actions as cli_device_actions
 import meshtastic.cli.dispatch as cli_dispatch
@@ -35,32 +32,25 @@ import meshtastic.cli.invocation as cli_invocation
 import meshtastic.cli.messaging_service_actions as cli_messaging_service_actions
 import meshtastic.cli.notification_rendering as cli_notification_rendering
 import meshtastic.cli.preference_runtime as cli_preference_runtime
-import meshtastic.cli.qr as cli_qr
 import meshtastic.cli.runtime as cli_runtime
+import meshtastic.cli.set_actions as cli_set_actions
 import meshtastic.cli.values as cli_values
 import meshtastic.ota
 import meshtastic.serial_interface
 import meshtastic.tcp_interface
 import meshtastic.util
-from meshtastic import _self_signal, _topics, mt_config, remote_hardware
+from meshtastic import _self_signal, _topics, mt_config
 from meshtastic._branding import (
     PRIMARY_CLI_NAME,
     PROJECT_ISSUE_URL,
     _format_cli_version,
 )
-from meshtastic._command_scope import _get_command_scope
 
 # COMPAT_STABLE_SHIM: LOCAL_ADDR remains importable from meshtastic.__main__.
 # pylint: disable=unused-import
 from meshtastic._core_constants import BROADCAST_ADDR  # noqa: F401
 from meshtastic._core_constants import LOCAL_ADDR  # noqa: F401
-from meshtastic._deadline import _remaining_timeout
-from meshtastic.cli.config_preview import (
-    PREVIEW_CURRENT_NOT_SET as _PREVIEW_CURRENT_NOT_SET,
-)
-from meshtastic.cli.config_preview import ConfigSnapshotCopies as _ConfigSnapshotCopies
-from meshtastic.cli.config_preview import render_preview_value as _render_preview_value
-from meshtastic.cli.context import ActionOutcome, CliContext, _terminate_cli
+from meshtastic.cli.context import ActionOutcome, CliContext
 
 # COMPAT_STABLE_SHIM: Preserve legacy imports from meshtastic.cli.parser.
 # pylint: disable=unused-import,useless-import-alias
@@ -78,6 +68,13 @@ from meshtastic.cli.values import is_local_destination as _is_local_destination
 from meshtastic.cli.values import (  # noqa: F401,W0611 - legacy __main__ compatibility export
     looks_like_integer_literal as _looks_like_integer_literal,
 )
+
+# COMPAT_STABLE_SHIM: lockdown auth seams remain importable from
+# meshtastic.__main__ for historical callers.
+from meshtastic.lockdown import build_lockdown_auth  # noqa: F401
+from meshtastic.lockdown import read_lockdown_passphrase_file  # noqa: F401
+from meshtastic.lockdown import send_lockdown_auth  # noqa: F401
+from meshtastic.lockdown import validate_lockdown_passphrase  # noqa: F401
 
 # black and isort disagree on these three statements: isort's line-length math
 # excludes the noqa comment (so it collapses the statement to one line) while
@@ -102,18 +99,7 @@ from meshtastic.configure_verify import (  # noqa: F401 - legacy __main__ compat
 )
 from meshtastic.host_port import parseHostAndPort
 from meshtastic.interfaces.ble.interface import BLEInterface
-from meshtastic.key_verification import (
-    buildKeyVerificationAdmin,
-    sendKeyVerification,
-)
-from meshtastic.lockdown import (
-    build_lockdown_auth,
-    read_lockdown_passphrase_file,
-    send_lockdown_auth,
-    validate_lockdown_passphrase,
-)
 from meshtastic.mesh_interface import MeshInterface
-from meshtastic.mesh_interface_runtime import node_data
 from meshtastic.protobuf import (  # noqa: F401 - legacy __main__ compatibility export
     admin_pb2,
     channel_pb2,
@@ -123,7 +109,6 @@ from meshtastic.protobuf import (  # noqa: F401 - legacy __main__ compatibility 
     portnums_pb2,
 )
 from meshtastic.version import (
-    INSTALL_UPGRADE_HINT,
     PROJECT_DISPLAY_NAME,
     get_active_version,
 )
@@ -346,25 +331,18 @@ def _current_invocation_args() -> argparse.Namespace | None:
 
 
 def _current_camel_case() -> bool:
-    """Return the active naming mode with legacy-global fallback."""
-    invocation = cli_invocation.get_current_invocation()
-    return invocation.camel_case if invocation is not None else mt_config.camel_case
+    """Compatibility wrapper returning the active naming mode."""
+    return cli_invocation.current_camel_case()
 
 
 def _current_channel_index() -> int | None:
-    """Return the invocation-selected channel index with legacy fallback."""
-    invocation = cli_invocation.get_current_invocation()
-    return (
-        invocation.channel_index if invocation is not None else mt_config.channel_index
-    )
+    """Compatibility wrapper returning the invocation-selected channel index."""
+    return cli_invocation.current_channel_index()
 
 
 def _set_current_channel_index(value: int) -> None:
-    """Update invocation-owned channel selection and mirror the compatibility global."""
-    invocation = cli_invocation.get_current_invocation()
-    if invocation is not None:
-        invocation.channel_index = value
-    mt_config.channel_index = value
+    """Compatibility wrapper updating the invocation-selected channel index."""
+    cli_invocation.set_current_channel_index(value)
 
 
 def _set_current_logfile(value: IO[str] | None) -> None:
@@ -743,13 +721,8 @@ def onConnection(interface: MeshInterface, topic: Any = pub.AUTO_TOPIC) -> None:
 
 
 def checkChannel(interface: MeshInterface, channelIndex: int) -> bool:
-    """Determine whether the local node has the channel at the given index enabled."""
-    if hasattr(type(interface.localNode), "getChannelCopyByChannelIndex"):
-        ch = interface.localNode.getChannelCopyByChannelIndex(channelIndex)
-    else:
-        ch = interface.localNode.getChannelByChannelIndex(channelIndex)
-    logger.debug("ch:%s", ch)
-    return bool(ch and ch.role != channel_pb2.Channel.Role.DISABLED)
+    """Compatibility wrapper for the cli channel-enabled check."""
+    return cli_channel_contact_actions.check_channel(interface, channelIndex)
 
 
 _normalize_pref_name = cli_preference_runtime.normalize_pref_name
@@ -779,12 +752,6 @@ class _DescriptorLike(Protocol):
         """Return fields declared by this message descriptor."""
 
 
-class _NamedConfigType(Protocol):
-    """Protocol for config section objects exposing a `name` attribute."""
-
-    name: str
-
-
 _is_secret_pref = cli_preference_runtime.is_secret_pref
 _redact_pref_value = cli_preference_runtime.redact_pref_value
 
@@ -796,159 +763,10 @@ def getPref(
     allow_secrets: bool = False,
     cli_print: Callable[[str], None] = print,
 ) -> bool:
-    """Retrieve and display a node configuration preference or populated section fields.
-
-    Parameters
-    ----------
-    node : Any
-        Node exposing local and module configuration data and configuration requests.
-    comp_name : str
-        Preference path or configuration section name to retrieve.
-    allow_secrets : bool
-        Whether sensitive preference values may be displayed without redaction.
-    cli_print : Callable[[str], None]
-        Sink receiving each output line. Defaults to ``print`` so standalone CLI
-        behavior is unchanged; dispatch passes its ``cli_print`` hook so embedded
-        consumers can capture preference output.
-
-    Returns
-    -------
-    bool
-        ``True`` if the preference exists and values were displayed (or its
-        request was skipped under ``noProto``),
-        ``False`` if it was not found.
-    """
-
-    def _print_setting(
-        config_type: _NamedConfigType,
-        uni_name: str,
-        pref_value: str | list[str],
-        *,
-        repeated: bool,
-        secret_name: str,
-    ) -> None:
-        """Send a preference value to the supplied output sink and debug log.
-
-        When `repeated` is True, `pref_value` is treated as an iterable and
-            each element is converted to a string; otherwise the single value is
-            converted to a string. Output is formatted as "<section>.<name>: <value>".
-
-        Parameters
-        ----------
-        config_type : _NamedConfigType
-            Object with a `name` attribute identifying the configuration section.
-        uni_name : str
-            The preference name within the configuration section.
-        pref_value : str | list[str]
-            The preference value to print; an iterable when `repeated` is True.
-        repeated : bool
-            If True, treat `pref_value` as a sequence and print the list of stringified values.
-        secret_name : str
-            Canonical snake_case field name used to determine whether to redact.
-        """
-        if repeated:
-            display_value: str | list[str] = [
-                (
-                    meshtastic.util.toStr(v)
-                    if allow_secrets
-                    else _redact_pref_value(secret_name, meshtastic.util.toStr(v))
-                )
-                for v in pref_value
-            ]
-            log_value: str | list[str] = [
-                _redact_pref_value(secret_name, meshtastic.util.toStr(v))
-                for v in pref_value
-            ]
-        else:
-            raw_display = meshtastic.util.toStr(pref_value)
-            display_value = (
-                raw_display
-                if allow_secrets
-                else _redact_pref_value(secret_name, raw_display)
-            )
-            log_value = _redact_pref_value(secret_name, raw_display)
-        cli_print(f"{str(config_type.name)}.{uni_name}: {str(display_value)}")
-        logger.debug("%s.%s: %s", config_type.name, uni_name, log_value)
-
-    comp_name = _normalize_pref_name(comp_name)
-    name = splitCompoundName(comp_name)
-    wholeField = name[0] == name[1]  # We want the whole field
-
-    camel_name = meshtastic.util.snake_to_camel(name[1])
-    # Note: protobufs has the keys in snake_case, so snake internally
-    snake_name = meshtastic.util.camel_to_snake(name[1])
-    uni_name = camel_name if _current_camel_case() else snake_name
-    logger.debug("snake_name:%s camel_name:%s", snake_name, camel_name)
-    logger.debug("use camel:%s", _current_camel_case())
-
-    # First validate the input
-    localConfig = node.localConfig
-    moduleConfig = node.moduleConfig
-    found: bool = False
-    config = localConfig
-    config_type = None
-    pref = None
-    for config in [localConfig, moduleConfig]:
-        objDesc = config.DESCRIPTOR
-        config_type = objDesc.fields_by_name.get(name[0])
-        pref = None
-        if config_type:
-            pref = config_type.message_type.fields_by_name.get(snake_name)
-            if pref is not None or wholeField:
-                found = True
-                break
-
-    if not found:
-        cli_print(
-            f"{localConfig.__class__.__name__} and {moduleConfig.__class__.__name__} do not have an attribute {uni_name}."
-        )
-        cli_print("Choices are...")
-        printConfig(localConfig, cli_print=cli_print)
-        printConfig(moduleConfig, cli_print=cli_print)
-        return False
-
-    # Check if we need to request the config
-    if config_type is None:
-        return False
-
-    if not config.HasField(config_type.name):
-        node.requestConfig(config_type)
-        if getattr(node, "noProto", False):
-            return True
-        if not config.HasField(config_type.name):
-            cli_config_readiness.wait_for_config_sections(node, [(config, config_type)])
-        if not config.HasField(config_type.name):
-            raise MeshInterface.MeshInterfaceError(
-                f"Timed out waiting for the {config_type.name} configuration"
-                " section from the device; no preference values were received."
-            )
-
-    if pref is not None or wholeField:
-        # read the value
-        config_values = getattr(config, config_type.name)
-        if not wholeField:
-            if pref is None:
-                return False
-            pref_value = getattr(config_values, pref.name)
-            repeated = _is_repeated_field(pref)
-            _print_setting(
-                config_type,
-                uni_name,
-                pref_value,
-                repeated=repeated,
-                secret_name=f"{config_type.name}.{snake_name}",
-            )
-        else:
-            for field in config_values.ListFields():
-                repeated = _is_repeated_field(field[0])
-                _print_setting(
-                    config_type,
-                    field[0].name,
-                    field[1],
-                    repeated=repeated,
-                    secret_name=f"{config_type.name}.{field[0].name}",
-                )
-    return True
+    """Compatibility wrapper for preference retrieval and display."""
+    return cli_preference_runtime.get_pref(
+        node, comp_name, allow_secrets=allow_secrets, cli_print=cli_print
+    )
 
 
 splitCompoundName = cli_preference_runtime.split_compound_name
@@ -976,21 +794,7 @@ _resolve_pref = cli_preference_runtime.resolve_pref
 _protobuf_field_type_label = cli_preference_runtime.protobuf_field_type_label
 
 
-def _print_channel_field_choices(
-    settings: Any, pref_name: str, *, cli_print: Callable[[str], None] = print
-) -> None:
-    """Print available channel-setting fields after an unknown --ch-set name."""
-    cli_print(f"{settings.__class__.__name__} does not have an attribute {pref_name}.")
-    cli_print("Choices are...")
-    for field in settings.DESCRIPTOR.fields:
-        if field.name != "module_settings":
-            cli_print(field.name)
-            continue
-        cli_print(f"{field.name}:")
-        if field.message_type is None:
-            continue
-        for sub_field in sorted(field.message_type.fields, key=lambda item: item.name):
-            cli_print(f"    {field.name}.{sub_field.name}")
+_print_channel_field_choices = cli_channel_contact_actions._print_channel_field_choices
 
 
 def _reject_pref_value(
@@ -1052,280 +856,15 @@ def _handle_ota_update(
     )
 
 
-MODULE_PREFIX_SEGMENT = "module"
-MODULE_PREFIX_HINT = (
-    "Preference paths are written without a 'module.' prefix; module sections"
-    " resolve directly (for example, 'mesh_beacon.flags')."
-)
+MODULE_PREFIX_SEGMENT = cli_set_actions.MODULE_PREFIX_SEGMENT
+MODULE_PREFIX_HINT = cli_set_actions.MODULE_PREFIX_HINT
 
+_module_prefix_strip_hint = cli_set_actions._module_prefix_strip_hint
+_print_set_field_choices = cli_set_actions._print_set_field_choices
+_format_set_preflight_exception = cli_set_actions._format_set_preflight_exception
+_render_preview_current_value = cli_set_actions._render_preview_current_value
 
-def _module_prefix_strip_hint(pref_name: str) -> str | None:
-    """Return a hint when an unknown preference path carries a 'module.' prefix."""
-    first_segment = pref_name.split(".", maxsplit=1)[0].strip().lower()
-    if first_segment != MODULE_PREFIX_SEGMENT:
-        return None
-    stripped = pref_name.split(".", maxsplit=1)[1] if "." in pref_name else ""
-    if stripped:
-        return f"{MODULE_PREFIX_HINT} Did you mean '{stripped}'?"
-    return MODULE_PREFIX_HINT
-
-
-def _print_set_field_choices(
-    node: Any, pref_names: Sequence[str], *, cli_print: Callable[[str], None] = print
-) -> None:
-    """Print historical field-not-found guidance for one or more --set names.
-
-    Parameters
-    ----------
-    node : Any
-        Node whose local and module configuration schemas provide the choices.
-    pref_names : Sequence[str]
-        Unknown preference names to identify before printing choices.
-    cli_print : Callable[[str], None]
-        Sink receiving each output line; defaults to ``print``.
-    """
-    names = list(dict.fromkeys(pref_names))
-    for pref_name in names:
-        cli_print(
-            f"{node.localConfig.__class__.__name__} and "
-            f"{node.moduleConfig.__class__.__name__} do not have an attribute {pref_name}."
-        )
-        hint = _module_prefix_strip_hint(pref_name)
-        if hint is not None:
-            cli_print(hint)
-    cli_print("Choices are...")
-    printConfig(node.localConfig, cli_print=cli_print)
-    printConfig(node.moduleConfig, cli_print=cli_print)
-
-
-def _normalize_set_entries(
-    set_entries: Sequence[Sequence[Any] | None],
-) -> list[tuple[str, Any]]:
-    """Normalize argparse --set entries into explicit name/value pairs.
-
-    Parameters
-    ----------
-    set_entries : Sequence[Sequence[Any] | None]
-        Parsed ``--set`` entries, each containing at least a field name and value.
-        Any additional elements are ignored for compatibility with the historical
-        ``item[0]``/``item[1]`` parsing contract.
-
-    Returns
-    -------
-    list[tuple[str, Any]]
-        Normalized ``(field_name, value)`` pairs with incomplete entries omitted.
-    """
-    return [
-        (str(item[0]), item[1])
-        for item in set_entries
-        if item is not None and len(item) >= 2
-    ]
-
-
-def _format_set_preflight_exception(pref_name: str, exc: Exception) -> str:
-    """Format a preflight exception without exposing secret preference values.
-
-    Parameters
-    ----------
-    pref_name : str
-        Canonical preference path whose validation raised ``exc``.
-    exc : Exception
-        Validation exception raised by the protobuf/runtime conversion path.
-
-    Returns
-    -------
-    str
-        Safe error detail suitable for the aggregated CLI failure message.
-    """
-    if isinstance(exc, _PreferenceValueError):
-        return str(exc)
-    if _is_secret_pref(pref_name):
-        return (
-            f"{pref_name}: invalid value {_REDACTED_PREF_VALUE} ({type(exc).__name__})"
-        )
-    return f"{pref_name}: {exc}"
-
-
-def _resolve_set_target(
-    configs: Sequence[Any], pref_name: str
-) -> tuple[Any, FieldDescriptor] | None:
-    """Resolve the owning config message and root field for a normalized preference.
-
-    Parameters
-    ----------
-    configs : Sequence[Any]
-        Configuration wrapper messages to search in resolution order.
-    pref_name : str
-        Normalized dotted preference path.
-
-    Returns
-    -------
-    tuple[Any, FieldDescriptor] | None
-        Owning config wrapper and root field descriptor, or ``None`` when the
-        root field does not exist in any supplied configuration.
-    """
-    root_field = splitCompoundName(pref_name)[0]
-    for config in configs:
-        config_type = config.DESCRIPTOR.fields_by_name.get(root_field)
-        if config_type is not None:
-            return config, config_type
-    return None
-
-
-def _ensure_set_sections_loaded(
-    node: Any, set_entries: Sequence[tuple[str, Any]]
-) -> None:
-    """Request missing config sections and wait for them before preflight.
-
-    Parameters
-    ----------
-    node : Any
-        Target node whose cached local/module configuration will be validated.
-    set_entries : Sequence[tuple[str, Any]]
-        Parsed ``--set`` name/value entries. Names are normalized before resolution.
-
-    Notes
-    -----
-    Requests are deduplicated by config section. Protobuf message presence, not
-    ``ListFields()``, distinguishes an already-loaded default-valued section from
-    a section that has never been received. Unknown preference paths do not
-    trigger device reads. Requested sections share one bounded wait using the
-    node's existing timeout so the write and preview paths validate and render
-    against received state instead of protobuf defaults; a section that never
-    arrives exits before any validation, rendering, or write. ``noProto`` nodes
-    are never waited on because no response can arrive without protocol use.
-
-    The dedup/request/wait/abort policy itself lives in
-    :mod:`meshtastic.cli.config_readiness`, shared with the ``--configure``
-    paths; this wrapper only collects the section pairs implied by the parsed
-    ``--set`` entries.
-    """
-    configs = (node.localConfig, node.moduleConfig)
-    sections: list[tuple[Any, FieldDescriptor]] = []
-    for raw_pref_name, _raw_value in set_entries:
-        pref_name = _normalize_pref_name(raw_pref_name)
-        resolved = _resolve_set_target(configs, pref_name)
-        if resolved is None:
-            continue
-        config, config_type = resolved
-        if not _resolve_pref(config, pref_name):
-            continue
-        sections.append((config, config_type))
-    cli_config_readiness.ensure_config_sections_loaded(
-        node, sections, cli_exit=_cli_exit
-    )
-
-
-def _validate_set_entries_against_configs(
-    node: Any,
-    config_copies: Sequence[Any],
-    set_entries: Sequence[tuple[str, Any]],
-    *,
-    cli_print: Callable[[str], None] = print,
-) -> bool:
-    """
-    Validate --set entries against prepared configuration copies as one batch.
-
-    Parameters
-    ----------
-    node : Any
-        Node providing the cached configuration used for field-choice guidance.
-    config_copies : Sequence[Any]
-        Mutable protobuf copies that receive the validated assignments.
-    set_entries : Sequence[tuple[str, Any]]
-        Preference names and raw values to validate as one batch.
-
-    Returns
-    -------
-    bool
-        ``True`` if every entry is valid; ``False`` if an unknown field or semantic
-        validation failure rejects the batch.
-
-    Notes
-    -----
-    Shared by the normal ``--set`` preflight and the ``--dry-run`` preview so both
-    paths apply identical normalization, descriptor, metadata, and nanopb
-    validation semantics. Unknown fields print field-choice guidance, fatal value
-    errors aggregate into one ``_cli_exit``, and value rejections are reported
-    individually.
-    """
-    fatal_errors: list[str] = []
-    unknown_fields: list[str] = []
-    value_rejections: list[tuple[str, tuple[str, ...]]] = []
-    token = _CONFIGURE_PREFLIGHT_MODE.set(True)
-    try:
-        for raw_pref_name, raw_value in set_entries:
-            pref_name = _normalize_pref_name(raw_pref_name)
-            resolved = _resolve_set_target(config_copies, pref_name)
-            if resolved is None:
-                unknown_fields.append(pref_name)
-                continue
-            candidate, _config_type = resolved
-            if not _resolve_pref(candidate, pref_name):
-                unknown_fields.append(pref_name)
-                continue
-
-            validation_messages: list[str] = []
-            reporter_token = _PREF_VALIDATION_REPORTER.set(validation_messages.append)
-            try:
-                try:
-                    with _fatal_preference_value_errors():
-                        valid = setPref(candidate, pref_name, raw_value)
-                finally:
-                    _PREF_VALIDATION_REPORTER.reset(reporter_token)
-            except (TypeError, ValueError, OverflowError, binascii.Error) as exc:
-                fatal_errors.append(_format_set_preflight_exception(pref_name, exc))
-                continue
-            if not valid:
-                value_rejections.append((pref_name, tuple(validation_messages)))
-    finally:
-        _CONFIGURE_PREFLIGHT_MODE.reset(token)
-
-    if unknown_fields:
-        _print_set_field_choices(node, unknown_fields, cli_print=cli_print)
-
-    if fatal_errors:
-        detail_lines = [f"  - {error}" for error in fatal_errors]
-        for pref_name, messages in value_rejections:
-            detail_lines.append(f"  - {pref_name}: {_SET_VALUE_REJECTED_MESSAGE}")
-            detail_lines.extend(f"      {message}" for message in messages)
-        details = "\n".join(detail_lines)
-        _cli_exit(f"ERROR: --set batch rejected before applying changes:\n{details}")
-
-    for pref_name, messages in value_rejections:
-        if messages:
-            for message in messages:
-                _report_pref_validation(message)
-        else:
-            _report_pref_validation(f"{pref_name}: {_SET_VALUE_REJECTED_MESSAGE}")
-
-    return not (unknown_fields or value_rejections)
-
-
-def _preflight_set_entries(node: Any, set_entries: Sequence[tuple[str, Any]]) -> bool:
-    """
-    Validate all --set entries against configuration copies before applying changes.
-
-    Parameters
-    ----------
-    node : Any
-        Node providing the current local and module configuration.
-    set_entries : Sequence[tuple[str, Any]]
-        Preference names and raw values to validate as one batch.
-
-    Returns
-    -------
-    bool
-        ``True`` if every entry is valid; ``False`` if an unknown field or semantic
-        validation failure rejects the batch.
-    """
-    snapshot = _ConfigSnapshotCopies.from_node(node)
-    return _validate_set_entries_against_configs(
-        node,
-        (snapshot.local_config, snapshot.module_config),
-        set_entries,
-        cli_print=lambda message: _cli_print(message, force=True),
-    )
+LOCAL_SET_APPLY_VERIFY_SECONDS = cli_set_actions.LOCAL_SET_APPLY_VERIFY_SECONDS
 
 
 def _handle_set_command(
@@ -1333,164 +872,9 @@ def _handle_set_command(
     args: Any,
     getNode_kwargs: dict[str, Any],
 ) -> None:
-    """
-    Validate and apply a CLI ``--set`` batch without partial updates.
-
-    Parameters
-    ----------
-    interface : MeshInterface
-        Active interface used to resolve the target node.
-    args : Any
-        Parsed CLI arguments containing the ``--set`` entries and destination.
-    getNode_kwargs : dict[str, Any]
-        Additional keyword arguments forwarded to ``interface.getNode``.
-
-    Notes
-    -----
-    Invalid batches are rejected before modifying the device. Valid batches write
-    all affected configuration sections and use a transaction when multiple
-    sections are changed.
-    """
-    node = interface.getNode(args.dest, False, **getNode_kwargs)
-    set_entries = _normalize_set_entries(args.set)
-    _ensure_set_sections_loaded(node, set_entries)
-    if not _preflight_set_entries(node, set_entries):
-        if _get_command_scope(interface) is not None:
-            _cli_exit("Invalid --set preference batch", 2)
-        return
-
-    pre_write_config_id = getattr(interface, "configId", None)
-    live_configs = (node.localConfig, node.moduleConfig)
-    fields: set[str] = set()
-    for raw_pref_name, raw_value in set_entries:
-        normalized_pref_name = _normalize_pref_name(raw_pref_name)
-        resolved = _resolve_set_target(live_configs, normalized_pref_name)
-        if resolved is None:
-            _cli_exit(
-                "ERROR: --set field no longer resolves after successful preflight: "
-                f"{normalized_pref_name}."
-            )
-        config, config_type = resolved
-        try:
-            found = setPref(config, normalized_pref_name, raw_value)
-        except (TypeError, ValueError, OverflowError, binascii.Error) as exc:
-            detail = _format_set_preflight_exception(normalized_pref_name, exc)
-            _cli_exit(
-                f"ERROR: --set apply diverged after successful preflight:\n  - {detail}"
-            )
-        if not found:
-            _cli_exit(
-                "ERROR: --set apply diverged after successful preflight for "
-                f"{normalized_pref_name}."
-            )
-        fields.add(config_type.name)
-
-    if fields:
-        _cli_print("Writing modified preferences to device")
-        if len(fields) > 1:
-            _cli_print("Using a configuration transaction")
-            node.beginSettingsTransaction()
-        for field in fields:
-            _cli_print(f"Writing {field} configuration to device")
-            node.writeConfig(field)
-        if len(fields) > 1:
-            node.commitSettingsTransaction()
-            # Mirror the --configure path: give the device time to settle
-            # (and, if it reboots, to drop the link) before verifying.
-            time.sleep(_remaining_timeout(CONFIG_COMMIT_SETTLE_SECONDS))
-
-    local_node = getattr(interface, "localNode", None)
-    if fields and node is local_node and not getattr(node, "noProto", False):
-        # Freeze the staged requested values before verification clears and
-        # reloads the cached sections with fresh device state.
-        config_fields, module_config_fields = _freeze_set_expected_values(
-            node, set_entries
-        )
-        _verify_local_set_apply(
-            interface,
-            node,
-            node_dest=args.dest,
-            pre_write_config_id=pre_write_config_id,
-            config_fields=config_fields,
-            module_config_fields=module_config_fields,
-        )
-
-
-def _freeze_set_expected_values(
-    node: Any, set_entries: Sequence[tuple[str, Any]]
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Freeze the requested leaf values per section from the staged cache.
-
-    Parameters
-    ----------
-    node : Any
-        Local node whose cached configuration holds the staged assignments.
-    set_entries : Sequence[tuple[str, Any]]
-        Parsed ``--set`` name/value entries. Names are normalized before
-        resolution, matching the apply loop.
-
-    Returns
-    -------
-    tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
-        ``LocalConfig`` and ``LocalModuleConfig`` section mappings holding the
-        frozen requested values (plain scalars, lists for repeated fields, and
-        nested dicts for nested message paths).
-    """
-    config_fields: dict[str, dict[str, Any]] = {}
-    module_config_fields: dict[str, dict[str, Any]] = {}
-    for raw_pref_name, _raw_value in set_entries:
-        pref_name = _normalize_pref_name(raw_pref_name)
-        resolved = _resolve_set_target((node.localConfig, node.moduleConfig), pref_name)
-        if resolved is None:
-            continue
-        config, config_type = resolved
-        resolved_leaf = _resolve_set_leaf(config, pref_name)
-        if resolved_leaf is None:
-            continue
-        parts = splitCompoundName(pref_name)[1:]
-        if not parts:
-            continue
-        target, leaf_field = resolved_leaf
-        section_fields = (
-            config_fields if config is node.localConfig else module_config_fields
-        )
-        section_values = section_fields.setdefault(config_type.name, {})
-        cursor = section_values
-        for part in parts[:-1]:
-            nested = cursor.get(part)
-            if not isinstance(nested, dict):
-                nested = {}
-                cursor[part] = nested
-            cursor = nested
-        cursor[parts[-1]] = _read_set_leaf_value(target, leaf_field)
-    return config_fields, module_config_fields
-
-
-def _availability_changing_set_fields(
-    config_fields: dict[str, dict[str, Any]],
-    module_config_fields: dict[str, dict[str, Any]],
-) -> tuple[str, ...]:
-    """Return requested ``--set`` leaf paths that can interrupt node availability.
-
-    Parameters
-    ----------
-    config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalConfig`` values by section.
-    module_config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalModuleConfig`` values by section.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Dotted snake_case leaf paths (in request order, deduplicated) whose
-        write is in :data:`PREFS_WITH_AVAILABILITY_CHANGES`.
-    """
-    paths: list[str] = []
-    for fields in (config_fields, module_config_fields):
-        for section, values in fields.items():
-            paths.extend(_flatten_leaf_paths(section, values))
-    return tuple(
-        path for path in dict.fromkeys(paths) if path in PREFS_WITH_AVAILABILITY_CHANGES
+    """Compatibility wrapper for the cli ``--set`` apply pipeline."""
+    cli_set_actions._handle_set_command(
+        interface, args, getNode_kwargs, cli_exit=_cli_exit, cli_print=_cli_print
     )
 
 
@@ -1503,382 +887,28 @@ def _verify_local_set_apply(
     config_fields: dict[str, dict[str, Any]],
     module_config_fields: dict[str, dict[str, Any]],
 ) -> None:
-    """Verify fresh device state for a local ``--set`` batch; exit on failure.
-
-    Parameters
-    ----------
-    interface : MeshInterface
-        Connected interface observed for reboot/disconnect handling.
-    node : Any
-        Local node that received the ``--set`` writes.
-    node_dest : str
-        Destination string the node was resolved from; reused by the
-        reconnect-based fallback re-verification.
-    pre_write_config_id : int | None
-        Interface config-generation id captured before any writes. A changed
-        generation proves that a reboot/config restart occurred even when the
-        link reconnected before the readback budget expired.
-    config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalConfig`` values by section.
-    module_config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalModuleConfig`` values by section.
-
-    Notes
-    -----
-    Local config writes select no acknowledgment callback, so success is only
-    proven by freshly reloading the affected sections and comparing the
-    requested values against device state. Any non-verified outcome fails the
-    CLI instead of reporting an unqualified success; verification is skipped
-    entirely for ``noProto`` nodes by the caller. Send failures from the
-    verification request propagate out of the seam and map to a CLI error
-    here. When the readback budget expires because the device dropped the
-    link (a commit-triggered reboot), one bounded reconnect-based
-    re-verification using the existing ``--configure`` machinery gets the
-    final word; a connection-alive reload failure still fails immediately.
-
-    Region writes retain bounded readback and mismatch detection. If no fresh
-    response arrives, report an unverified send because provisioning or a
-    radio restart can interrupt availability.
-    """
-    try:
-        if not config_fields and not module_config_fields:
-            # Only requested sections are verifiable; an empty freeze would be
-            # vacuously VERIFIED, which proves nothing about the sent write.
-            raise ValueError("no requested sections were frozen for verification")
-        verification = verify_local_config_apply(
-            node,
-            config_fields=config_fields or None,
-            module_config_fields=module_config_fields or None,
-            timeout_sec=LOCAL_SET_APPLY_VERIFY_SECONDS,
-        )
-    except Exception as exc:
-        _terminate_cli(
-            _cli_exit,
-            "ERROR: local --set verification could not read fresh device state: "
-            f"{exc}. The requested change could not be verified.",
-        )
-    if verification.status == LocalApplyStatus.VERIFIED:
-        _cli_print("Verified: fresh device state matches the requested --set values.")
-        return
-    if (
-        verification.status == LocalApplyStatus.MISMATCH
-        or verification.mismatched_fields
-    ):
-        fields_text = ", ".join(verification.mismatched_fields)
-        _terminate_cli(
-            _cli_exit,
-            "ERROR: --set was sent, but fresh device state reports different "
-            f"values for: {fields_text}. The device did not apply the requested "
-            "value(s).",
-        )
-    availability_fields = _availability_changing_set_fields(
-        config_fields, module_config_fields
-    )
-    if verification.status == LocalApplyStatus.RELOAD_FAILED and availability_fields:
-        _cli_print(
-            "Region write may interrupt node availability ("
-            f"{', '.join(availability_fields)}); read-back verification was "
-            "unavailable. Requested changes were sent, not verified."
-        )
-        return
-    if verification.status == LocalApplyStatus.RELOAD_FAILED and (
-        _link_dropped(interface)
-        or _config_generation_changed(interface, pre_write_config_id)
-    ):
-        _verify_local_set_after_reconnect(
-            interface,
-            node_dest=node_dest,
-            config_fields=config_fields,
-            module_config_fields=module_config_fields,
-        )
-        return
-    if verification.status == LocalApplyStatus.RELOAD_FAILED:
-        sections_text = ", ".join(verification.missing_sections)
-        _terminate_cli(
-            _cli_exit,
-            "ERROR: --set was sent, but the device did not return the "
-            f"{sections_text} configuration section(s) within "
-            f"{LOCAL_SET_APPLY_VERIFY_SECONDS:g} seconds; the requested value(s) "
-            "could not be verified.",
-        )
-    _terminate_cli(
-        _cli_exit,
-        "ERROR: local --set verification returned an unrecognized outcome "
-        f"({verification.status!r}); the requested change could not be confirmed.",
-    )
-
-
-def _config_generation_changed(
-    interface: MeshInterface, previous_config_id: int | None
-) -> bool:
-    """Return whether the interface began a new config generation since the write.
-
-    A fast reboot can drop and restore the transport entirely within the local
-    readback budget. ``isConnected`` then looks healthy at the final check, but
-    ``configId`` still records the reboot/config restart and must trigger the
-    reconnect/full-config verification path. Interfaces without a generation
-    attribute preserve the historical link-state-only behavior.
-    """
-    return getattr(interface, "configId", previous_config_id) != previous_config_id
-
-
-def _link_dropped(interface: MeshInterface) -> bool:
-    """Return whether the interface link is currently down (possible reboot)."""
-    connected = getattr(interface, "isConnected", None)
-    if connected is None:
-        return False
-    return not connected.is_set()
-
-
-def _verify_local_set_after_reconnect(
-    interface: MeshInterface,
-    *,
-    node_dest: str,
-    config_fields: dict[str, dict[str, Any]],
-    module_config_fields: dict[str, dict[str, Any]],
-) -> None:
-    """Re-verify a local ``--set`` once over one bounded reconnect.
-
-    Parameters
-    ----------
-    interface : MeshInterface
-        Interface whose link dropped after the commit (reboot in progress).
-    node_dest : str
-        Destination string the local node was resolved from.
-    config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalConfig`` values by section.
-    module_config_fields : dict[str, dict[str, Any]]
-        Frozen requested ``LocalModuleConfig`` values by section.
-
-    Notes
-    -----
-    Reuses the ``--configure`` reconnect/verification machinery so a
-    commit-triggered device reboot gets the same tolerance as ``--configure``:
-    one bounded wait for reconnect, one config reload, and the same value
-    comparator over the frozen requested values.
-    """
-    reconnect_result = _post_configure_reconnect_and_verify(
+    """Compatibility wrapper for local ``--set`` apply verification."""
+    cli_set_actions._verify_local_set_apply(
         interface,
-        timeout=CONFIG_RECONNECT_WAIT_SECONDS,
+        node,
         node_dest=node_dest,
-        verify_config_fields=config_fields or None,
-        verify_module_config_fields=module_config_fields or None,
+        pre_write_config_id=pre_write_config_id,
+        config_fields=config_fields,
+        module_config_fields=module_config_fields,
+        cli_exit=_cli_exit,
+        cli_print=_cli_print,
     )
-    if reconnect_result == cli_configure_actions.ConfigureReconnectResult.VERIFIED:
-        _cli_print("Verified: fresh device state matches the requested --set values.")
-        return
-    _terminate_cli(
-        _cli_exit,
-        "ERROR: --set was sent, but the device dropped the link before the write "
-        "could be verified and the reconnect check failed "
-        f"({cli_configure_actions._configure_reconnect_message(reconnect_result)}). "
-        "The requested value(s) could not be verified.",
-    )
-
-
-def _resolve_set_leaf(
-    config: Any, pref_name: str
-) -> tuple[Any, FieldDescriptor] | None:
-    """Resolve the leaf parent message and descriptor for one preference path.
-
-    Parameters
-    ----------
-    config : Any
-        Configuration wrapper message to resolve the path against.
-    pref_name : str
-        Normalized dotted preference path.
-
-    Returns
-    -------
-    tuple[Any, FieldDescriptor] | None
-        Owning parent message and leaf field descriptor, or ``None`` when the
-        path does not resolve.
-    """
-    name_parts = splitCompoundName(pref_name)
-    parent, config_type = _walk_config_path(config, name_parts)
-    if config_type is None:
-        return None
-    if config_type.message_type is not None:
-        leaf_field = config_type.message_type.fields_by_name.get(name_parts[-1])
-    else:
-        leaf_field = config_type
-    if leaf_field is None:
-        return None
-    target = (
-        getattr(parent, config_type.name)
-        if config_type.message_type is not None
-        else parent
-    )
-    return target, leaf_field
-
-
-def _read_set_leaf_value(parent: Any, leaf_field: FieldDescriptor) -> Any:
-    """Read one preference value from its parent message, listifying repeated fields.
-
-    Parameters
-    ----------
-    parent : Any
-        Message owning the leaf field.
-    leaf_field : FieldDescriptor
-        Descriptor of the leaf field to read.
-
-    Returns
-    -------
-    Any
-        Scalar leaf value or a plain list for repeated fields.
-    """
-    value = getattr(parent, leaf_field.name)
-    if _is_repeated_field(leaf_field):
-        return list(value)
-    return value
-
-
-def _render_preview_current_value(pref_name: str, live_configs: Sequence[Any]) -> str:
-    """Render one preference's current value from the live cached configuration.
-
-    Parameters
-    ----------
-    pref_name : str
-        Normalized dotted preference path.
-    live_configs : Sequence[Any]
-        The node's cached local and module configuration messages.
-
-    Returns
-    -------
-    str
-        Rendered current value, ``not set`` for an unloaded section, with
-        secret-bearing paths redacted on every side.
-    """
-    resolved = _resolve_set_target(live_configs, pref_name)
-    if resolved is None:
-        return _PREVIEW_CURRENT_NOT_SET
-    live_config, config_type = resolved
-    try:
-        section_present = live_config.HasField(config_type.name)
-    except ValueError:
-        section_present = True
-    if not section_present:
-        return _PREVIEW_CURRENT_NOT_SET
-    resolved_leaf = _resolve_set_leaf(live_config, pref_name)
-    if resolved_leaf is None:
-        return _PREVIEW_CURRENT_NOT_SET
-    target, leaf_field = resolved_leaf
-    current_value = _read_set_leaf_value(target, leaf_field)
-    return _render_preview_value(pref_name, leaf_field, current_value)
-
-
-def _dedupe_set_entries_last_wins(
-    set_entries: Sequence[tuple[str, Any]],
-) -> list[tuple[str, Any]]:
-    """Collapse duplicate preference assignments, keeping the last value.
-
-    Parameters
-    ----------
-    set_entries : Sequence[tuple[str, Any]]
-        Normalized ``(field_name, value)`` pairs in batch order.
-
-    Returns
-    -------
-    list[tuple[str, Any]]
-        One entry per normalized preference path, in first-mention order,
-        carrying the last assigned value.
-    """
-    collapsed: dict[str, Any] = {}
-    for raw_pref_name, raw_value in set_entries:
-        collapsed[_normalize_pref_name(raw_pref_name)] = raw_value
-    return list(collapsed.items())
 
 
 def _preview_set_command(
     interface: MeshInterface,
     args: Any,
     get_node_kwargs: dict[str, Any],
-) -> _ConfigSnapshotCopies:
-    """
-    Preview a CLI ``--set`` batch without writing changes to the device.
-
-    Parameters
-    ----------
-    interface : MeshInterface
-        Active interface used to resolve the target node.
-    args : Any
-        Parsed CLI arguments containing the ``--set`` entries and destination.
-    get_node_kwargs : dict[str, Any]
-        Additional keyword arguments forwarded to ``interface.getNode``.
-
-    Returns
-    -------
-    ConfigSnapshotCopies
-        Deep copies of the node configuration carrying the previewed
-        assignments, chained into any later ``--configure`` preview.
-
-    Notes
-    -----
-    Read-only by construction: only missing-section read requests are issued
-    and awaited, validated assignments are applied to the returned protobuf
-    copies, and no
-    writes, transactions, or acknowledgments are ever performed. Invalid
-    batches report the same preflight errors as the normal path and exit
-    without any preview output. Validation considers every entry — including
-    superseded duplicates — so an invalid earlier assignment rejects the
-    preview exactly as the real batch would be rejected, while the rendered
-    plan collapses a duplicated preference path to one line with its last
-    assigned value.
-    """
-    node = interface.getNode(args.dest, False, **get_node_kwargs)
-    batch_entries = _normalize_set_entries(args.set)
-    _ensure_set_sections_loaded(node, batch_entries)
-    snapshot = _ConfigSnapshotCopies.from_node(node)
-    config_copies = (snapshot.local_config, snapshot.module_config)
-    if not _validate_set_entries_against_configs(
-        node,
-        config_copies,
-        batch_entries,
-        cli_print=lambda message: _cli_print(message, force=True),
-    ):
-        _cli_exit(
-            "ERROR: --set batch rejected during dry run; "
-            "no changes were written to the device."
-        )
-
-    # Validation sees every entry — including superseded duplicates — so an
-    # invalid earlier assignment rejects the preview exactly as it would the
-    # real batch. Only the rendered plan collapses to last-write-wins.
-    display_entries = _dedupe_set_entries_last_wins(batch_entries)
-    live_configs = (node.localConfig, node.moduleConfig)
-    _cli_print("Dry run: previewing --set batch without writing changes.")
-    sections: set[str] = set()
-    for raw_pref_name, _raw_value in display_entries:
-        pref_name = _normalize_pref_name(raw_pref_name)
-        resolved = _resolve_set_target(config_copies, pref_name)
-        if resolved is None:
-            _cli_exit(
-                "ERROR: --set field no longer resolves after successful preflight: "
-                f"{pref_name}."
-            )
-        candidate, config_type = resolved
-        resolved_leaf = _resolve_set_leaf(candidate, pref_name)
-        if resolved_leaf is None:
-            _cli_exit(
-                "ERROR: --set field no longer resolves after successful preflight: "
-                f"{pref_name}."
-            )
-        target, leaf_field = resolved_leaf
-        new_value = _read_set_leaf_value(target, leaf_field)
-        new_rendered = _render_preview_value(pref_name, leaf_field, new_value)
-        current_rendered = _render_preview_current_value(pref_name, live_configs)
-        sections.add(config_type.name)
-        _cli_print(
-            f"Would set {pref_name} = {new_rendered} (current: {current_rendered})"
-        )
-
-    if sections:
-        _cli_print("Would write modified preferences to device")
-        if len(sections) > 1:
-            _cli_print("Would use a configuration transaction")
-        for section in sections:
-            _cli_print(f"Would write {section} configuration to device")
-    return snapshot
+) -> cli_config_preview.ConfigSnapshotCopies:
+    """Compatibility wrapper for the cli ``--set`` dry-run preview."""
+    return cli_set_actions._preview_set_command(
+        interface, args, get_node_kwargs, cli_exit=_cli_exit, cli_print=_cli_print
+    )
 
 
 def _pace_configure_write(
@@ -1919,125 +949,29 @@ def _run_configure_preview(
 
 
 def _validate_cli_show_fields(interface: MeshInterface, show_fields: list[str]) -> None:
-    """Reject unavailable --show-fields values with a concrete choice list."""
-    nodes_by_num = getattr(interface, "nodesByNum", None)
-    observed_nodes = (
-        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    """Compatibility wrapper for ``--show-fields`` validation."""
+    cli_messaging_service_actions._validate_cli_show_fields(
+        interface, show_fields, cli_exit=_cli_exit
     )
-    available = node_data.get_known_field_paths(observed_nodes)
-    available_set = set(available)
-    invalid = [field for field in show_fields if field not in available_set]
-    if invalid:
-        choices = textwrap.fill(
-            ", ".join(available),
-            width=100,
-            initial_indent="  ",
-            subsequent_indent="  ",
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        _cli_exit(
-            "Unknown --show-fields value(s): "
-            f"{', '.join(invalid)}.\nAvailable fields:\n{choices}",
-            1,
-        )
 
 
 def _validate_cli_sort_field(interface: MeshInterface, sort_field: str) -> None:
-    """Reject unavailable --sort fields with a concrete choice list."""
-    nodes_by_num = getattr(interface, "nodesByNum", None)
-    observed_nodes = (
-        list(nodes_by_num.values()) if isinstance(nodes_by_num, dict) else []
+    """Compatibility wrapper for ``--sort`` field validation."""
+    cli_messaging_service_actions._validate_cli_sort_field(
+        interface, sort_field, cli_exit=_cli_exit
     )
-    available = [
-        *node_data.FIELD_ALIASES.keys(),
-        *node_data.get_known_field_paths(observed_nodes),
-    ]
-    resolved = node_data._resolve_field_alias(sort_field)
-    available_set = set(available)
-    if resolved not in available_set and sort_field not in available_set:
-        choices = textwrap.fill(
-            ", ".join(sorted(available_set)),
-            width=100,
-            initial_indent="  ",
-            subsequent_indent="  ",
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        _cli_exit(
-            f"Unknown --sort field '{sort_field}'.\nAvailable fields:\n{choices}",
-            1,
-        )
 
 
 def _build_connected_dispatch_hooks() -> cli_dispatch.DispatchHooks:
-    """Build connected-action hooks from historical ``__main__`` seams."""
-    device_hooks = cli_device_actions.DeviceActionHooks(
+    """Compatibility wrapper assembling connected dispatch hooks."""
+    return cli_dispatch._build_connected_dispatch_hooks(
         cli_exit=_cli_exit,
         cli_print=_cli_print,
-        set_pref=setPref,
-        is_local_destination=_is_local_destination,
-        send_local_factory_reset_and_wait=_send_local_factory_reset_and_wait,
-        post_factory_reset_ready_probe=_post_factory_reset_ready_probe,
-        handle_ota_update=_handle_ota_update,
-        build_lockdown_auth=build_lockdown_auth,
-        read_lockdown_passphrase_file=read_lockdown_passphrase_file,
-        send_lockdown_auth=send_lockdown_auth,
-        validate_lockdown_passphrase=validate_lockdown_passphrase,
-        build_key_verification_admin=buildKeyVerificationAdmin,
-        send_key_verification=sendKeyVerification,
-    )
-    channel_contact_hooks = cli_channel_contact_actions.ChannelContactHooks(
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        get_channel_index=_current_channel_index,
-        set_channel_index=_set_current_channel_index,
-        resolve_pref=_resolve_pref,
-        set_pref=setPref,
-        fatal_preference_value_errors=_fatal_preference_value_errors,
-        preference_value_error=_PreferenceValueError,
-        print_channel_field_choices=lambda settings, name: _print_channel_field_choices(
-            settings, name, cli_print=lambda message: _cli_print(message, force=True)
-        ),
-        is_local_destination=_is_local_destination,
-        modem_preset_shorthands=_MODEM_PRESET_SHORTHANDS,
-        qr_render=(cli_qr.renderTerminalQr if cli_qr.segno is not None else None),
-    )
-    configure_hooks = cli_configure_actions.ConfigureActionHooks(
-        handle_set_command=_handle_set_command,
-        export_profile=exportProfile,
-        handle_configure_command=_handle_configure_command,
-        export_config=exportConfig,
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        is_local_destination=_is_local_destination,
-        preview_set_command=_preview_set_command,
-        preview_configure_command=_run_configure_preview,
-    )
-    service_hooks = cli_messaging_service_actions.MessagingServiceHooks(
-        cli_exit=_cli_exit,
-        cli_print=_cli_print,
-        preference_print=lambda message: _cli_print(message, force=True),
-        get_channel_index=_current_channel_index,
-        check_channel=checkChannel,
-        remote_hardware_client=remote_hardware.RemoteHardwareClient,
-        get_pref=getPref,
-        validate_cli_show_fields=_validate_cli_show_fields,
-        validate_cli_sort_field=_validate_cli_sort_field,
-        newer_version=meshtastic.util.check_if_newer_version,
-        install_upgrade_hint=INSTALL_UPGRADE_HINT,
         powermon_available=lambda: have_powermon,
         powermon_error=lambda: powermon_exception,
+        get_meter=lambda: meter,
         log_set_factory=LogSet,
         power_stress_factory=PowerStress,
-        get_meter=lambda: meter,
-    )
-    return cli_dispatch.DispatchHooks(
-        cli_print=_cli_print,
-        device=device_hooks,
-        channel_contact=channel_contact_hooks,
-        configure=configure_hooks,
-        services=service_hooks,
         sleep=time.sleep,
     )
 

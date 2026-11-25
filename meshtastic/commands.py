@@ -17,10 +17,16 @@ from meshtastic._deadline import (
     _remaining_timeout,
     _validate_timeout,
 )
+from meshtastic.cli import dispatch as cli_dispatch
+from meshtastic.cli import preference_runtime as _cli_preference_runtime
 from meshtastic.cli.context import CliContext
 from meshtastic.cli.dispatch import _dispatch_connected
 from meshtastic.cli.invocation import CliInvocation, activate_invocation
-from meshtastic.cli.parser import parse_cli_args
+from meshtastic.cli.parser import (
+    EMBEDDED_ACTION_DESTS,
+    EMBEDDED_OPTION_DESTS,
+    parse_cli_args,
+)
 from meshtastic.configuration import _preference_path
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.node import Node
@@ -35,95 +41,7 @@ __all__ = (
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
-_ACTIONS = frozenset(
-    {
-        "get",
-        "set",
-        "begin_edit",
-        "commit_edit",
-        "get_canned_message",
-        "set_canned_message",
-        "get_ringtone",
-        "set_ringtone",
-        "ch_vlongslow",
-        "ch_longslow",
-        "ch_longmod",
-        "ch_longfast",
-        "ch_longturbo",
-        "ch_medslow",
-        "ch_medfast",
-        "ch_shortslow",
-        "ch_shortfast",
-        "ch_shortturbo",
-        "ch_preset",
-        "set_owner",
-        "set_owner_short",
-        "set_ham",
-        "set_is_unmessageable",
-        "setalt",
-        "setlat",
-        "setlon",
-        "remove_position",
-        "pos_fields",
-        "ch_add",
-        "ch_del",
-        "ch_set",
-        "ch_enable",
-        "ch_disable",
-        "qr",
-        "qr_all",
-        "contact_qr",
-        "info",
-        "show_region_presets",
-        "nodes",
-        "sendtext",
-        "traceroute",
-        "request_telemetry",
-        "request_position",
-        "reboot",
-        "reboot_ota",
-        "enter_dfu",
-        "shutdown",
-        "remove_node",
-        "set_favorite_node",
-        "remove_favorite_node",
-        "set_ignored_node",
-        "remove_ignored_node",
-        "reset_nodedb",
-        "set_time",
-        "backup_preferences",
-        "restore_preferences",
-        "remove_backup_preferences",
-        "toggle_muted_node",
-        "delete_file",
-        "send_input_event",
-        "request_connection_status",
-        "get_ui_config",
-    }
-)
-_OPTIONS = frozenset(
-    {
-        "dest",
-        "ch_index",
-        "channel_fetch_attempts",
-        "contact_verified",
-        "contact_ignore",
-        "show_fields",
-        "role",
-        "hwmodel",
-        "sort",
-        "limit",
-        "private",
-        "reply",
-        "ack",
-        "quiet",
-        "input_kb_char",
-        "input_touch_x",
-        "input_touch_y",
-        "help",
-        "version",
-    }
-)
+_EMBEDDED_DESTS = EMBEDDED_ACTION_DESTS | EMBEDDED_OPTION_DESTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,7 +160,7 @@ def _parser(output: Callable[[str], None]) -> tuple[_CommandParser, argparse.Nam
     # argparse has no public action-removal API. Remove actions from both parse
     # and help indexes so capability discovery, help and validation agree.
     for action in tuple(parser._actions):
-        if action.dest in _ACTIONS | _OPTIONS:
+        if action.dest in _EMBEDDED_DESTS:
             continue
         parser._remove_action(action)
         for option in action.option_strings:
@@ -256,7 +174,13 @@ def _parser(output: Callable[[str], None]) -> tuple[_CommandParser, argparse.Nam
 def getCommandCapabilities() -> CommandCapabilities:
     """Return accepted option spellings without opening a transport."""
     parser, _ = _parser(lambda _message: None)
-    return CommandCapabilities(1, tuple(sorted(parser._option_string_actions)))
+    # argparse keeps the action registry in a private attribute. Collect the
+    # accepted spellings from the surviving action definitions instead of the
+    # parse index, matching the minimal internal use in _parser.
+    option_strings = {
+        spelling for action in parser._actions for spelling in action.option_strings
+    }
+    return CommandCapabilities(1, tuple(sorted(option_strings)))
 
 
 def _fresh_get_pref(
@@ -267,10 +191,7 @@ def _fresh_get_pref(
     cli_print: Callable[[str], None] = print,
 ) -> bool:
     """Reuse CLI formatting and redaction over a fresh, detached section."""
-    # Load the standalone action bindings only when an invocation needs them.
-    import meshtastic.__main__ as entrypoint  # pylint: disable=import-outside-toplevel
-
-    comp_name = entrypoint._normalize_pref_name(comp_name)
+    comp_name = _cli_preference_runtime.normalize_pref_name(comp_name)
     try:
         module, fields = _preference_path(comp_name)
     except ValueError as exc:
@@ -279,7 +200,7 @@ def _fresh_get_pref(
         value = node.readPreference(comp_name, timeout=_remaining_timeout(math.inf))
         rendered = meshtastic.util.toStr(value)
         if not allow_secrets:
-            rendered = entrypoint._redact_pref_value(
+            rendered = _cli_preference_runtime.redact_pref_value(
                 ".".join(field.name for field in fields), rendered
             )
         cli_print(f"{comp_name}: {rendered}")
@@ -292,7 +213,7 @@ def _fresh_get_pref(
     else:
         response_config = node.readConfig(section, timeout=_remaining_timeout(math.inf))
         getattr(copied.localConfig, section).CopyFrom(getattr(response_config, section))
-    return entrypoint.getPref(
+    return _cli_preference_runtime.get_pref(
         copied, comp_name, allow_secrets=allow_secrets, cli_print=cli_print
     )
 
@@ -304,12 +225,12 @@ def _execute(
     capture: _OutputCapture,
 ) -> None:
     """Bind the standalone action implementation to embedded ownership rules."""
-    # Load the standalone action bindings only when an invocation needs them.
-    import meshtastic.__main__ as entrypoint  # pylint: disable=import-outside-toplevel
 
-    def report(message: str) -> None:
-        if not args.quiet:
-            capture._write(message)
+    def embedded_print(message: str, *, force: bool = False) -> None:
+        """Route the standalone CLI reporters into this invocation's capture."""
+        if not force and getattr(args, "quiet", False):
+            return
+        capture._write(message)
 
     def terminate(message: str, return_value: int = 1) -> NoReturn:
         raise _CommandExit(return_value, message)
@@ -318,7 +239,17 @@ def _execute(
         invocation.channel_index = value
 
     invocation.exit_handler = terminate
-    hooks = entrypoint._build_connected_dispatch_hooks()
+    # The embedded surface excludes the optional power-monitor and structured
+    # logging services, so their probes are supplied as neutral values.
+    hooks = cli_dispatch._build_connected_dispatch_hooks(
+        cli_exit=terminate,
+        cli_print=embedded_print,
+        powermon_available=lambda: False,
+        powermon_error=lambda: None,
+        get_meter=lambda: None,
+        log_set_factory=None,
+        power_stress_factory=None,
+    )
     hooks = replace(
         hooks,
         cli_print=capture._write,
@@ -327,20 +258,22 @@ def _execute(
             cli_print=(
                 capture._write
                 if args.get_ui_config or args.request_connection_status
-                else report
+                else embedded_print
             ),
             cli_exit=terminate,
         ),
         channel_contact=replace(
             hooks.channel_contact,
-            cli_print=report,
+            cli_print=embedded_print,
             cli_exit=terminate,
             set_channel_index=select_channel,
         ),
-        configure=replace(hooks.configure, cli_print=report, cli_exit=terminate),
+        configure=replace(
+            hooks.configure, cli_print=embedded_print, cli_exit=terminate
+        ),
         services=replace(
             hooks.services,
-            cli_print=report,
+            cli_print=embedded_print,
             preference_print=capture._write,
             cli_exit=terminate,
             newer_version=lambda: None,
@@ -424,7 +357,8 @@ def executeCommand(
             parser, defaults = _parser(capture._write)
             args = parser.parse_args(list(argv), namespace=defaults)
             if not any(
-                getattr(args, name) != parser.get_default(name) for name in _ACTIONS
+                getattr(args, name) != parser.get_default(name)
+                for name in EMBEDDED_ACTION_DESTS
             ):
                 raise _CommandExit(2, "Specify at least one supported command")
             args.dest = args.dest or BROADCAST_ADDR
