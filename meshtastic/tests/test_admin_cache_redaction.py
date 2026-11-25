@@ -2,12 +2,13 @@
 
 import base64
 import copy
-from types import SimpleNamespace
+import threading
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 from google.protobuf.json_format import MessageToDict
+from pubsub import pub
 
 from meshtastic import DECODE_ERROR_KEY, ResponseHandler
 from meshtastic._protocol_runtime import (
@@ -33,7 +34,9 @@ def _admin_packet(payload: bytes) -> mesh_pb2.MeshPacket:
     return packet
 
 
-def test_admin_receive_redacts_every_cached_representation() -> None:
+def test_admin_receive_redacts_every_cached_representation(
+    mock_interface: MeshInterface,
+) -> None:
     """Only the cache copy changes; request handlers and publication keep the wire packet."""
     admin = admin_pb2.AdminMessage(session_passkey=_KEY)
     admin.get_device_metadata_response.firmware_version = "2.7.11"
@@ -41,51 +44,61 @@ def test_admin_receive_redacts_every_cached_representation() -> None:
     original = copy.deepcopy(packet)
     callback = Mock()
 
-    with MeshInterface(noProto=True) as iface:
-        iface.nodesByNum = {}
-        iface.responseHandlers[17] = ResponseHandler(callback)
-        intents = iface._handle_packet_from_radio(packet, emit_publication=False)
-        node = iface._get_or_create_by_num(_SENDER)
-        cached = node["lastReceived"]
-        decoded = cached["decoded"]
-        redacted_admin = decoded["admin"]["raw"]
-        expected_admin = copy.deepcopy(admin)
-        expected_admin.session_passkey = REDACTED_BYTES
-        expected_packet = copy.deepcopy(original)
-        expected_packet.decoded.payload = expected_admin.SerializeToString()
+    iface = mock_interface
+    iface.nodesByNum = {}
+    received: list[dict[str, Any]] = []
+    published = threading.Event()
 
-        assert node["adminSessionPassKey"] == _KEY
-        assert redacted_admin == expected_admin
-        assert decoded["admin"]["sessionPasskey"] == base64.b64encode(
-            REDACTED_BYTES
-        ).decode("ascii")
-        assert (
-            decoded["admin"]["getDeviceMetadataResponse"]["firmwareVersion"] == "2.7.11"
-        )
-        assert admin_pb2.AdminMessage.FromString(decoded["payload"]) == expected_admin
-        assert cached["raw"] == expected_packet
-        assert cached["raw"] is not packet
-        assert _KEY not in cached["raw"].SerializeToString()
-        assert node["lastHeard"] == 123
+    def receive(packet: dict[str, Any], interface: MeshInterface) -> None:
+        if interface is iface:
+            received.append(packet)
+            published.set()
 
-        detached = iface.queryNodes()
-        assert detached.nodes[0]["lastReceived"]["raw"] == expected_packet
-        records = detached.toDict()["nodes"]
-        assert isinstance(records, list)
-        record = records[0]
-        assert isinstance(record, dict)
-        assert "adminSessionPassKey" not in record
-        last_received = record["lastReceived"]
-        assert isinstance(last_received, dict)
-        assert "raw" not in last_received
-        assert "decoded" not in last_received
+    iface.responseHandlers[17] = ResponseHandler(callback)
+    pub.subscribe(receive, "meshtastic.receive.admin")
+    try:
+        iface._handle_packet_from_radio(packet)
+        assert published.wait(5)
+    finally:
+        pub.unsubscribe(receive, "meshtastic.receive.admin")
+    node = iface._get_or_create_by_num(_SENDER)
+    cached = node["lastReceived"]
+    decoded = cached["decoded"]
+    redacted_admin = decoded["admin"]["raw"]
+    expected_admin = copy.deepcopy(admin)
+    expected_admin.session_passkey = REDACTED_BYTES
+    expected_packet = copy.deepcopy(original)
+    expected_packet.decoded.payload = expected_admin.SerializeToString()
+
+    assert node["adminSessionPassKey"] == _KEY
+    assert redacted_admin == expected_admin
+    assert decoded["admin"]["sessionPasskey"] == base64.b64encode(
+        REDACTED_BYTES
+    ).decode("ascii")
+    assert decoded["admin"]["getDeviceMetadataResponse"]["firmwareVersion"] == "2.7.11"
+    assert admin_pb2.AdminMessage.FromString(decoded["payload"]) == expected_admin
+    assert cached["raw"] == expected_packet
+    assert cached["raw"] is not packet
+    assert _KEY not in cached["raw"].SerializeToString()
+    assert node["lastHeard"] == 123
+
+    detached = iface.queryNodes()
+    assert detached.nodes[0]["lastReceived"]["raw"] == expected_packet
+    records = detached.toDict()["nodes"]
+    assert isinstance(records, list)
+    record = records[0]
+    assert isinstance(record, dict)
+    assert "adminSessionPassKey" not in record
+    last_received = record["lastReceived"]
+    assert isinstance(last_received, dict)
+    assert "raw" not in last_received
+    assert "decoded" not in last_received
 
     callback.assert_called_once()
     assert callback.call_args is not None
     callback_packet = callback.call_args.args[0]
-    assert len(intents) == 1
-    published = intents[0].payload["packet"]
-    for delivered in (callback_packet, published):
+    assert len(received) == 1
+    for delivered in (callback_packet, received[0]):
         assert delivered["decoded"]["admin"]["raw"] == admin
         assert delivered["decoded"]["admin"]["sessionPasskey"] == base64.b64encode(
             _KEY
@@ -95,42 +108,46 @@ def test_admin_receive_redacts_every_cached_representation() -> None:
     assert packet == original
 
 
-def test_malformed_admin_wire_payload_is_not_cached() -> None:
+def test_malformed_admin_wire_payload_is_not_cached(
+    mock_interface: MeshInterface,
+) -> None:
     """An undecodable payload may contain a key even when no AdminMessage was produced."""
     payload = admin_pb2.AdminMessage(session_passkey=_KEY).SerializeToString() + b"\x80"
     packet = _admin_packet(payload)
     original = copy.deepcopy(packet)
-    with MeshInterface(noProto=True) as iface:
-        iface.nodesByNum = {}
-        node = iface._get_or_create_by_num(_SENDER)
-        node["adminSessionPassKey"] = b"previous-key"
-        callback = Mock()
-        iface.responseHandlers[17] = ResponseHandler(callback)
-        intents = iface._handle_packet_from_radio(packet, emit_publication=False)
-        cached = node["lastReceived"]
-        assert cached["decoded"]["admin"][DECODE_ERROR_KEY].startswith("decode-failed:")
-        assert cached["decoded"]["payload"] == b""
-        assert cached["raw"].decoded.payload == b""
-        assert cached["raw"].id == original.id
-        assert node["adminSessionPassKey"] == b"previous-key"
-        # The legacy untyped response handler still receives the decode-error
-        # packet. Sanitizing the cache must not change correlation semantics.
-        callback.assert_called_once()
-        assert callback.call_args is not None
-        assert callback.call_args.args[0]["decoded"]["payload"] == payload
+    iface = mock_interface
+    iface.nodesByNum = {}
+    node = iface._get_or_create_by_num(_SENDER)
+    node["adminSessionPassKey"] = b"previous-key"
+    callback = Mock()
+    iface.responseHandlers[17] = ResponseHandler(callback)
+    intents = iface._handle_packet_from_radio(packet, emit_publication=False)
+    cached = node["lastReceived"]
+    assert cached["decoded"]["admin"][DECODE_ERROR_KEY].startswith("decode-failed:")
+    assert cached["decoded"]["payload"] == b""
+    assert cached["raw"].decoded.payload == b""
+    assert cached["raw"].id == original.id
+    assert node["adminSessionPassKey"] == b"previous-key"
+    # The legacy untyped response handler still receives the decode-error
+    # packet. Sanitizing the cache must not change correlation semantics.
+    callback.assert_called_once()
+    assert callback.call_args is not None
+    assert callback.call_args.args[0]["decoded"]["payload"] == payload
     assert packet == original
     assert intents[0].payload["packet"]["decoded"]["payload"] == payload
 
 
-def test_admin_without_passkey_retains_payload_and_omission() -> None:
+def test_admin_without_passkey_retains_payload_and_omission(
+    mock_interface: MeshInterface,
+) -> None:
     """Non-secret admin requests keep their wire content without inventing a key."""
     admin = admin_pb2.AdminMessage(get_device_metadata_request=True)
     packet = _admin_packet(admin.SerializeToString())
-    with MeshInterface(noProto=True) as iface:
-        iface.nodesByNum = {}
-        iface._handle_packet_from_radio(packet, emit_publication=False)
-        node = iface._get_or_create_by_num(_SENDER)
-        cached = node["lastReceived"]
+    iface = mock_interface
+    iface.nodesByNum = {}
+    iface._handle_packet_from_radio(packet, emit_publication=False)
+    node = iface._get_or_create_by_num(_SENDER)
+    cached = node["lastReceived"]
     assert "sessionPasskey" not in cached["decoded"]["admin"]
     assert cached["decoded"]["admin"]["raw"] == admin
     assert cached["raw"] == packet
@@ -186,52 +203,45 @@ def test_non_admin_packet_keeps_existing_shallow_copy_contract() -> None:
     assert cached["decoded"] is packet["decoded"]
 
 
-@pytest.mark.parametrize("copy_returns_self", [True, False])
-def test_legacy_object_with_no_effective_redaction_is_replaced(
-    copy_returns_self: bool,
-) -> None:
-    """A failed or non-detached legacy object copy must not retain the key."""
+def test_legacy_object_with_shared_passkey_storage_is_not_mutated() -> None:
+    """A separate wrapper may still share its credential storage with the live packet."""
 
-    class ReadOnlyKey:
+    class LegacyAdmin:
+        def __init__(self, keys: list[bytes]) -> None:
+            self._keys = keys
+
         @property
         def session_passkey(self) -> bytes:
-            """Return a synthetic immutable key."""
-            return _KEY
+            return self._keys[0]
 
         @session_passkey.setter
         def session_passkey(self, value: bytes) -> None:
-            """Simulate a setter that accepts but ignores redaction."""
-            _ = value
+            self._keys[0] = value
 
-        def __deepcopy__(self, memo: dict[int, Any]) -> "ReadOnlyKey":
-            _ = memo
-            return self if copy_returns_self else ReadOnlyKey()
+        def __deepcopy__(self, _memo: dict[int, Any]) -> "LegacyAdmin":
+            return LegacyAdmin(self._keys)
 
-    raw = ReadOnlyKey()
-    packet: dict[str, Any] = {"decoded": {"admin": {"raw": raw}}}
+    raw = LegacyAdmin([_KEY])
+    packet: dict[str, Any] = {
+        "decoded": {"admin": {"raw": raw}, "payload": _KEY},
+    }
     cached = _sanitize_last_received(packet)
     assert cached["decoded"]["admin"]["raw"] == {"session_passkey": REDACTED_BYTES}
+    assert cached["decoded"]["payload"] == b""
     assert raw.session_passkey == _KEY
 
 
-def test_legacy_object_redacts_both_passkey_spellings() -> None:
-    """The native spelling cannot be redacted while leaving its camelCase alias."""
-    raw = SimpleNamespace(session_passkey=_KEY, sessionPasskey=_KEY, other=42)
-    cached = _sanitize_last_received({"decoded": {"admin": {"raw": raw}}})
-    assert cached["decoded"]["admin"]["raw"] == SimpleNamespace(
-        session_passkey=REDACTED_BYTES, sessionPasskey=REDACTED_BYTES, other=42
-    )
-    assert raw.session_passkey == raw.sessionPasskey == _KEY
-
-
-def test_legacy_object_with_failing_attribute_access_is_not_cached() -> None:
-    """A throwing property must fail closed rather than abort cache processing."""
+def test_legacy_object_is_not_inspected_to_redact_it() -> None:
+    """An unsupported object's accessors must never run during cache sanitization."""
+    key_access = Mock(side_effect=RuntimeError("unreadable property"))
 
     class UnreadableKey:
         @property
         def session_passkey(self) -> bytes:
-            raise RuntimeError("unreadable property")
+            key_access()
+            raise AssertionError("unexpected key access")
 
     raw = UnreadableKey()
     cached = _sanitize_last_received({"decoded": {"admin": {"raw": raw}}})
     assert cached["decoded"]["admin"]["raw"] == {"session_passkey": REDACTED_BYTES}
+    key_access.assert_not_called()
