@@ -399,6 +399,13 @@ if [[ $1 == run && $2 == python && $3 == -c ]]; then
 fi
 if [[ $1 == run && $2 == pyinstaller ]]; then
   shift 2
+  args=("$@")
+  for ((index = 0; index < ${{#args[@]}}; index++)); do
+    if [[ ${{args[index]}} == --additional-hooks-dir ]]; then
+      cp "${{args[index + 1]}}/hook-meshtastic.py" hook-meshtastic.py
+      mkdir "${{args[index + 1]}}/__pycache__"
+    fi
+  done
   printf '%s\n' "$@" > "${{PYINSTALLER_ARGS}}"
   mkdir -p dist
   : > 'dist/{PRIMARY_CLI_NAME}'
@@ -446,11 +453,14 @@ exit 2
     assert args[metadata_index + 1] == DISTRIBUTION_NAME
     name_index = args.index("-n")
     assert args[name_index + 1] == PRIMARY_CLI_NAME
-    modules_index = args.index("--collect-submodules")
-    assert args[modules_index + 1] == "meshtastic"
+    hook_index = args.index("--additional-hooks-dir")
+    assert not Path(args[hook_index + 1]).exists()
+    hook_source = (tmp_path / "hook-meshtastic.py").read_text(encoding="utf-8")
+    assert 'is_module_or_submodule(name, "meshtastic.tests")' in hook_source
     excluded_index = args.index("--exclude-module")
     assert args[excluded_index + 1] == "meshtastic.tests"
     assert "--collect-all" not in args
+    assert "--collect-submodules" not in args
     assert [
         args[index + 1] for index, arg in enumerate(args) if arg == "--add-data"
     ] == [

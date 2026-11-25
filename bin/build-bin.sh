@@ -28,13 +28,26 @@ for member in py.typed _runtime_compatibility.json; do
 	fi
 done
 
+# Filter the package walk itself. An analysis exclusion alone still hands
+# every discovered test module to PyInstaller as a hidden import.
+hook_dir="$(mktemp -d)"
+trap 'rm -rf -- "${hook_dir}"' EXIT
+cat > "${hook_dir}/hook-meshtastic.py" <<'PY'
+from PyInstaller.utils.hooks import collect_submodules, is_module_or_submodule
+
+hiddenimports = collect_submodules(
+    "meshtastic",
+    filter=lambda name: not is_module_or_submodule(name, "meshtastic.tests"),
+)
+PY
+
 "${PROJECT_RUN[@]}" pyinstaller \
 	--clean \
 	--noconfirm \
 	-F \
 	-n "${primary_cli}" \
 	--copy-metadata "${distribution_name}" \
-	--collect-submodules meshtastic \
+	--additional-hooks-dir "${hook_dir}" \
 	--exclude-module meshtastic.tests \
 	"${product_data[@]}" \
 	meshtastic/__main__.py
