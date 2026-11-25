@@ -35,7 +35,14 @@ become null. Internal fields (`raw`, `decoded`, `payload`,
 `adminSessionPassKey`, and protobuf `sessionPasskey`/`session_passkey`) are omitted recursively
 from JSON, including inside list-wrapped observations and `lastReceived`;
 receive metadata remains available. `--info` uses the same exclusion policy.
-The detached Python records retain their full cached contents. Other actions
+The detached Python records retain their full cached contents, including the
+operational `adminSessionPassKey` used for administrative requests. The cached
+`lastReceived` admin packet redacts the session passkey in its decoded mapping
+and protobuf copies, including their serialized payloads. Unsupported legacy
+objects are replaced with a redaction marker and undecodable admin payload
+bytes are omitted from the cache. Original receive and response
+callbacks still receive the unmodified packet. Treat full Python records and
+raw callbacks as sensitive. Other actions
 and table-only `--show-fields` cannot be combined with
 `--nodes --json`.
 
