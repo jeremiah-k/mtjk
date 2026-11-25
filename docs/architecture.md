@@ -152,6 +152,21 @@ follows these rules:
 These rules are validated heavily in behavioral and concurrency tests because
 many failures only appear during reconnect, shutdown, or overlapping requests.
 
+The shared deferred publication worker preserves FIFO delivery. Callback
+exceptions (including callback-local `SystemExit` and `KeyboardInterrupt`) are
+logged without retrying the callback or terminating the worker. If the worker
+itself has exited unexpectedly, the next submission or explicit stop attempts
+to recover a single worker to drain the existing queue. Shutdown remains
+terminal for new submissions; if the worker fails during shutdown, `join()`
+reports an incomplete drain and another `stop()` can recover the same pending
+queue. BLE compatibility publication uses the same admission path. Disconnect
+flushes wait for a FIFO barrier or the terminal drain within their timeout.
+The executor's worker remains the sole consumer, including after shutdown has
+begun. A flush called from that worker returns without waiting for itself.
+Subscribers should return promptly: a slow subscriber
+can delay later events across interfaces, and the publication queue is not
+bounded by default.
+
 ## Compatibility boundary
 
 Compatibility is a design constraint rather than an attempt to freeze every

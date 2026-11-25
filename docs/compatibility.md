@@ -428,6 +428,11 @@ considered stable API and may change without deprecation warnings.
 | `meshtastic.util`      | `flags_to_list()`         | `flagsToList()`        |
 | `meshtastic.util`      | `flags_from_list()`       | `flagsFromList()`      |
 
+`DeferredExecution.stop()` closes admission, and repeated calls can restart a
+failed worker to drain accepted work. After stop, `join()` returns true only
+when the same worker finished draining. A replaced worker or an incomplete
+terminal drain returns false.
+
 ### Node and Tunnel
 
 | Module                      | Compatibility symbol                                   | Canonical symbol                        |
