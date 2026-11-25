@@ -236,18 +236,21 @@ class Tunnel:
                 logger.info(
                     "Creating TUN device; CAP_NET_ADMIN or root is typically required."
                 )
+                self._check_setup_cancelled()
                 self.tun = LinuxTunDevice(name="mesh")
+                self._check_setup_cancelled()
                 self.tun.up()
+                self._check_setup_cancelled()
                 self.tun.ifconfig(address=myAddr, netmask=netmask, mtu=TUN_MTU)
 
-            if self._stop_event.is_set():
-                raise Tunnel.TunnelError("Tunnel closed during initialization")
+            self._check_setup_cancelled()
 
             # The reservation prevents another constructor or teardown from
             # touching this subscription. Keep pubsub hooks outside the lock.
             # Mark intent first in case subscribe partially succeeds then raises.
             self._subscribed = True
             pub.subscribe(onTunnelReceive, TUNNEL_TOPIC)
+            self._check_setup_cancelled()
 
             if self.iface.noProto:
                 logger.warning(
@@ -264,14 +267,18 @@ class Tunnel:
                 # Publish only a fully initialized owner. A concurrent close()
                 # may retire this instance during initialization; publishing a
                 # retired tunnel would wedge the process slot permanently.
-                if self._stop_event.is_set():
-                    raise Tunnel.TunnelError("Tunnel closed during initialization")
+                self._check_setup_cancelled()
                 mt_config.tunnel_instance = self
                 self._initializing = False
                 self._ready_event.set()
         except BaseException:
             self._retire()
             raise
+
+    def _check_setup_cancelled(self) -> None:
+        """Stop setup at resource boundaries; the constructor owns rollback."""
+        if self._stop_event.is_set():
+            raise Tunnel.TunnelError("Tunnel closed during initialization")
 
     def onReceive(self, packet: dict[str, Any]) -> None:
         """Handle an incoming mesh packet and forward its payload into the TUN device when appropriate.

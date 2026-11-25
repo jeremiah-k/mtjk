@@ -499,3 +499,39 @@ def test_interruption_after_reservation_rolls_back_owner() -> None:
     assert tunnel_module._tunnel_owner is None
     replacement = Tunnel(_interface())
     replacement.close()
+
+
+def test_cancel_during_device_creation_does_not_configure_late_device() -> None:
+    """A device acquired after cancellation belongs to constructor rollback."""
+    entered = threading.Event()
+    release = threading.Event()
+    device = MagicMock()
+
+    def create(**_kwargs: object) -> MagicMock:
+        entered.set()
+        assert release.wait(_WAIT)
+        return device
+
+    with (
+        patch("meshtastic.tunnel.LinuxTunDevice", side_effect=create),
+        patch("meshtastic.tunnel.pub.subscribe") as subscribe,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        future = pool.submit(Tunnel, _interface(no_proto=False))
+        try:
+            assert entered.wait(_WAIT)
+            owner = tunnel_module._tunnel_owner
+            assert owner is not None
+            owner.close()
+            with pytest.raises(Tunnel.TunnelError, match="Only one active Tunnel"):
+                Tunnel(_interface())
+        finally:
+            release.set()
+        with pytest.raises(Tunnel.TunnelError, match="closed during initialization"):
+            future.result(_WAIT)
+        device.up.assert_not_called()
+        device.ifconfig.assert_not_called()
+        device.close.assert_called_once_with()
+        subscribe.assert_not_called()
+    replacement = Tunnel(_interface())
+    replacement.close()
