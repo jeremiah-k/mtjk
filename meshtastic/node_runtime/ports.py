@@ -14,6 +14,7 @@ concentrated in this module.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NoReturn, TypedDict, TypeVar
 
@@ -22,6 +23,7 @@ from meshtastic.util import Timeout
 
 if TYPE_CHECKING:
     from meshtastic.node import Node
+    from meshtastic.node_runtime.response_runtime import _NodeChannelResponseRuntime
 
 _ResultT = TypeVar("_ResultT")
 
@@ -71,6 +73,16 @@ class _NodePort:
             The facade timeout used by request/response waits.
         """
         return self._node._timeout  # noqa: SLF001
+
+    @property
+    def channel_response_runtime(self) -> _NodeChannelResponseRuntime | None:
+        """Resolve the live channel response owner when present on the facade."""
+        return getattr(self._node, "_channel_response_runtime", None)
+
+    @property
+    def channel_snapshot_lock(self) -> AbstractContextManager[object] | None:
+        """Return the optional facade lock used by channel presentation paths."""
+        return getattr(self._node, "_node_db_lock", None)
 
     @property
     def factory_reset_request_value(self) -> int:

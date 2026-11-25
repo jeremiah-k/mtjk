@@ -248,6 +248,7 @@ class Node:  # pylint: disable=too-many-instance-attributes
         )
         self._channel_presentation_runtime = _NodeChannelPresentationRuntime(
             self,
+            self._node_port,
             channel_state=self._channel_state,
             export_runtime=self._channel_export_runtime,
         )

@@ -11,6 +11,7 @@ from meshtastic.util import messageToJson, pskToString
 
 from .channel_export_runtime import _NodeChannelExportRuntime
 from .channel_state import _NodeChannelState
+from .ports import _NodePort
 
 if TYPE_CHECKING:
     from meshtastic.node import Node
@@ -31,12 +32,14 @@ class _NodeChannelPresentationRuntime:
     def __init__(
         self,
         node: "Node",
+        port: _NodePort | None = None,
         *,
         channel_state: _NodeChannelState,
         export_runtime: _NodeChannelExportRuntime,
         cli_print: Callable[[str], None] = print,
     ) -> None:
         self._node = node
+        self._port = port if port is not None else _NodePort(node)
         self._channel_state = channel_state
         self._export_runtime = export_runtime
         self._cli_print = cli_print
@@ -128,7 +131,7 @@ class _NodeChannelPresentationRuntime:
         cli_print = self._cli_print if cli_print is None else cli_print
         local_config_snapshot: Message | None = None
         module_config_snapshot: Message | None = None
-        node_db_lock = getattr(self._node, "_node_db_lock", None)
+        node_db_lock = self._port.channel_snapshot_lock
         if (
             node_db_lock is not None
             and hasattr(node_db_lock, "__enter__")

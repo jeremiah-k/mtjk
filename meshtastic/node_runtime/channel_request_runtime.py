@@ -124,11 +124,7 @@ class _NodeChannelRequestRuntime:
     def wait_for_config(self, *, attribute: str = "channels") -> bool:
         """Wait for node attribute using historical timeout semantics."""
         if attribute == "channels":
-            channel_response_runtime = getattr(
-                self._node,
-                "_channel_response_runtime",
-                None,
-            )
+            channel_response_runtime = self._port.channel_response_runtime
             has_channel_request_failed = (
                 getattr(channel_response_runtime, "has_channel_request_failed", None)
                 if channel_response_runtime is not None
@@ -202,11 +198,7 @@ class _NodeChannelRequestRuntime:
                 MAX_CHANNELS - 1,
             )
             return None
-        channel_response_runtime = getattr(
-            self._node,
-            "_channel_response_runtime",
-            None,
-        )
+        channel_response_runtime = self._port.channel_response_runtime
         mark_channel_request_sent = (
             getattr(channel_response_runtime, "mark_channel_request_sent", None)
             if channel_response_runtime is not None

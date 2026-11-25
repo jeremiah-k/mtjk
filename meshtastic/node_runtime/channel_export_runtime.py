@@ -50,7 +50,7 @@ class _NodeChannelExportRuntime:
     def _snapshot_local_config(self) -> localonly_pb2.LocalConfig:
         """Return detached localConfig snapshot for consistent field checks/copies."""
         config_snapshot = localonly_pb2.LocalConfig()
-        node_db_lock = getattr(self._node, "_node_db_lock", None)
+        node_db_lock = self._port.channel_snapshot_lock
         if node_db_lock is None:
             local_config = getattr(self._node, "localConfig", None)
             if local_config is not None:
