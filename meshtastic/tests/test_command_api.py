@@ -1152,7 +1152,9 @@ def test_embedded_invalid_channel_index_reports_argument_error(
     monkeypatch.setattr(client, "getNode", get_node)
     output: list[str] = []
     result = executeCommand(
-        client, ["--ch-index", "invalid", "--ch-set", "name", "new"], output=output.append
+        client,
+        ["--ch-index", "invalid", "--ch-set", "name", "new"],
+        output=output.append,
     )
     assert result.exitCode == 2
     assert isinstance(result.error, ValueError)
