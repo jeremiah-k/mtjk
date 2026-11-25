@@ -198,7 +198,7 @@ def test_init_on_node_info_receive_returns_when_sender_missing(
 def test_init_on_admin_receive_redacts_last_received(
     iface_with_nodes: MeshInterface,
 ) -> None:
-    """Admin packets should preserve payload shape and redact only session passkey."""
+    """A legacy object payload is replaced by a redaction marker in the cache."""
     iface = iface_with_nodes
     packet: dict[str, Any] = {
         "from": 4808675309,
@@ -218,8 +218,8 @@ def test_init_on_admin_receive_redacts_last_received(
     assert node["adminSessionPassKey"] == b"abc123"
     last_received_admin = node["lastReceived"]["decoded"]["admin"]
     assert isinstance(last_received_admin, dict)
-    assert isinstance(last_received_admin.get("raw"), SimpleNamespace)
-    assert last_received_admin["raw"].session_passkey == b"<redacted>"
+    # The legacy object is never copied or inspected; only a marker is cached.
+    assert last_received_admin["raw"] == {"session_passkey": b"<redacted>"}
     # Input packet should remain unchanged for callback consumers.
     assert packet["decoded"]["admin"]["raw"].session_passkey == b"abc123"
 
