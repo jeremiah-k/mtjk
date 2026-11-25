@@ -1144,6 +1144,23 @@ def test_remote_reset_nodedb_owns_ack_before_finalization(
     cast(Mock, client.close).assert_not_called()
 
 
+def test_embedded_invalid_channel_index_reports_argument_error(
+    client: MeshInterface, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject a nonnumeric channel selector before dispatching the command."""
+    get_node = Mock(side_effect=AssertionError("invalid argv reached dispatch"))
+    monkeypatch.setattr(client, "getNode", get_node)
+    output: list[str] = []
+    result = executeCommand(
+        client, ["--ch-index", "invalid", "--ch-set", "name", "new"], output=output.append
+    )
+    assert result.exitCode == 2
+    assert isinstance(result.error, ValueError)
+    assert "--ch-index" in result.output
+    assert output == [result.output]
+    get_node.assert_not_called()
+
+
 def test_embedded_invalid_channel_field_reports_guidance_without_leaking_selection(
     client: MeshInterface,
     monkeypatch: pytest.MonkeyPatch,

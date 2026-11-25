@@ -362,13 +362,7 @@ def executeCommand(
             ):
                 raise _CommandExit(2, "Specify at least one supported command")
             args.dest = args.dest or BROADCAST_ADDR
-            # The parser stores --ch-index as text; coerce it here so the
-            # embedded selection matches the standalone bootstrap coercion.
-            invocation = CliInvocation(
-                args,
-                parser,
-                int(args.ch_index) if args.ch_index is not None else None,
-            )
+            invocation = CliInvocation(args, parser, args.ch_index)
             with (
                 _command_scope(interface, capture._write),
                 activate_invocation(invocation),

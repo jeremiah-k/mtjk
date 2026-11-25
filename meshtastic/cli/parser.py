@@ -341,6 +341,7 @@ def addSelectionArgs(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         "--ch-index",
         help="Set the specified channel index for channel-specific commands. Channels start at 0 (0 is the PRIMARY channel).",
         action="store",
+        type=int,
         metavar="INDEX",
     )
 
