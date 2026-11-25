@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import base64
+import threading
+import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from meshtastic import configure_verify
 from meshtastic.configure_verify import (
+    ConfigureReconnectResult,
     _is_repeated_field,
     _verify_channel_url_against_state,
     _verify_channel_url_match,
@@ -212,6 +217,58 @@ def test_verify_fields_repeated_match() -> None:
         )
         == []
     )
+
+
+@pytest.mark.unit
+def test_post_reconnect_verification_waits_for_inflight_module_section() -> None:
+    """A section still streaming from the reload burst is awaited, not failed."""
+    iface = MagicMock()
+    iface.isConnected.is_set.return_value = True
+    local_config = config_pb2.Config()
+    local_config.lora.region = config_pb2.Config.LoRaConfig.RegionCode.US
+    module_config = module_config_pb2.ModuleConfig()
+    module_config.ClearField("telemetry")
+    node = SimpleNamespace(localConfig=local_config, moduleConfig=module_config)
+    iface.getNode.return_value = node
+
+    def _deliver_telemetry_section() -> None:
+        module_config.telemetry.device_update_interval = 900
+
+    threading.Timer(0.15, _deliver_telemetry_section).start()
+
+    result = configure_verify._verify_post_reconnect_config(
+        iface,
+        "^local",
+        verify_module_config_fields={"telemetry": {"deviceUpdateInterval": 900}},
+    )
+
+    assert result is ConfigureReconnectResult.VERIFIED
+    assert module_config.HasField("telemetry")
+
+
+@pytest.mark.unit
+def test_post_reconnect_verification_absent_section_after_drain_still_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A section that never arrives still fails closed once the drain gives up."""
+    monkeypatch.setattr(configure_verify, "_RELOAD_SECTION_DRAIN_MAX_SECONDS", 0.1)
+    iface = MagicMock()
+    iface.isConnected.is_set.return_value = True
+    module_config = module_config_pb2.ModuleConfig()
+    module_config.ClearField("telemetry")
+    node = SimpleNamespace(localConfig=config_pb2.Config(), moduleConfig=module_config)
+    iface.getNode.return_value = node
+
+    started = time.monotonic()
+    result = configure_verify._verify_post_reconnect_config(
+        iface,
+        "^local",
+        verify_module_config_fields={"telemetry": {"deviceUpdateInterval": 900}},
+    )
+
+    assert result is ConfigureReconnectResult.VERIFICATION_INCOMPLETE
+    assert time.monotonic() - started >= 0.05
+    assert not module_config.HasField("telemetry")
 
 
 @pytest.mark.unit

@@ -14,7 +14,7 @@ from typing import Any, Literal, cast
 
 import meshtastic.util
 from meshtastic._core_constants import DECODE_ERROR_KEY
-from meshtastic._deadline import _remaining_timeout
+from meshtastic._deadline import _current_deadline, _remaining_timeout
 from meshtastic.mesh_interface import MeshInterface
 from meshtastic.mesh_interface_runtime.request_wait import DECODE_FAILED_PREFIX
 from meshtastic.node_runtime.admin_wait import (
@@ -30,6 +30,12 @@ from meshtastic.protobuf import admin_pb2, apponly_pb2, channel_pb2, config_pb2
 # Firmware: src/mesh/Default.h default_neighbor_info_broadcast_secs.
 _NEIGHBOR_INFO_EFFECTIVE_DEFAULT_SECS = 21600
 _LORA_DEFAULT_CODING_RATE = 5
+
+# A post-reload config burst streams sections over several frames while
+# waitForConfig can already complete on bootstrap identity state. Cap the
+# extra drain wait so a genuinely absent section still fails closed promptly.
+_RELOAD_SECTION_DRAIN_MAX_SECONDS = 3.0
+_RELOAD_SECTION_DRAIN_POLL_SECONDS = 0.05
 
 
 def _lora_dormant_fields(
@@ -732,6 +738,73 @@ def _invalidate_requested_config_sections(
                 root.ClearField(name)
 
 
+def _absent_requested_config_sections(
+    target_node: Any,
+    *,
+    config_fields: dict[str, dict[str, Any]] | None,
+    module_config_fields: dict[str, dict[str, Any]] | None,
+) -> list[tuple[str, str]]:
+    """Return ``(root_name, section)`` pairs still absent after a reload burst."""
+    absent: list[tuple[str, str]] = []
+    for root_name, fields in (
+        ("localConfig", config_fields),
+        ("moduleConfig", module_config_fields),
+    ):
+        if not fields:
+            continue
+        root = getattr(target_node, root_name, None)
+        if root is None:
+            continue
+        descriptors = getattr(root.DESCRIPTOR, "fields_by_name", {})
+        has_field = getattr(root, "HasField", None)
+        if not callable(has_field):
+            continue
+        for section in fields:
+            name = meshtastic.util.camel_to_snake(section)
+            if name not in descriptors:
+                continue
+            try:
+                is_present = bool(has_field(name))
+            except (TypeError, ValueError):
+                continue
+            if not is_present:
+                absent.append((root_name, name))
+    return absent
+
+
+def _wait_for_reloaded_config_sections(
+    target_node: Any,
+    *,
+    config_fields: dict[str, dict[str, Any]] | None,
+    module_config_fields: dict[str, dict[str, Any]] | None,
+) -> None:
+    """Wait for an in-flight reload burst to repopulate invalidated sections.
+
+    ``waitForConfig`` completes once bootstrap identity state (my info, node
+    database, lora section) is available, which can happen while the rest of a
+    post-reload burst is still streaming. Invalidated sections only become
+    trustworthy once their fresh copies land, so transient absence is not yet
+    evidence of a missing section: poll briefly within the enclosing operation
+    budget before verification treats absence as final.
+    """
+    deadline = _current_deadline()
+    wait_limit = _RELOAD_SECTION_DRAIN_MAX_SECONDS
+    if deadline is not None:
+        wait_limit = min(wait_limit, deadline - time.monotonic())
+    if wait_limit <= 0:
+        return
+    wait_until = time.monotonic() + wait_limit
+    while _absent_requested_config_sections(
+        target_node,
+        config_fields=config_fields,
+        module_config_fields=module_config_fields,
+    ):
+        remaining = wait_until - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(_RELOAD_SECTION_DRAIN_POLL_SECONDS, remaining))
+
+
 def _reload_requested_sections(
     target_node: Any,
     *,
@@ -1081,6 +1154,11 @@ def _verify_post_reconnect_config(
         return ConfigureReconnectResult.VERIFICATION_INCOMPLETE
 
     target_node = interface.getNode(node_dest)
+    _wait_for_reloaded_config_sections(
+        target_node,
+        config_fields=verify_config_fields,
+        module_config_fields=verify_module_config_fields,
+    )
     verified_fields: list[str] = []
 
     if verify_channel_url:

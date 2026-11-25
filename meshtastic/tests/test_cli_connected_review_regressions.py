@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from meshtastic import configure_verify
 from meshtastic.cli import (
     channel_contact_actions,
     configure_actions,
@@ -431,6 +432,9 @@ def test_reconnect_does_not_verify_staged_cache(
     node = _node()
     interface = _interface(node)
     monkeypatch.setattr(configure_actions, "CONFIG_REBOOT_PROBE_SECONDS", 0)
+    # The drain wait would spend the whole one-second budget on the absent
+    # section and end as a deadline failure instead of an incomplete verification.
+    monkeypatch.setattr(configure_verify, "_RELOAD_SECTION_DRAIN_MAX_SECONDS", 0.0)
     result = configure_actions._post_configure_reconnect_and_verify(
         interface,
         timeout=1,
