@@ -438,3 +438,82 @@ def test_reconnect_does_not_verify_staged_cache(
     assert result is ConfigureReconnectResult.VERIFICATION_INCOMPLETE
     interface.waitForConfig.assert_called_once_with()
     assert not node.localConfig.HasField("power")
+
+
+@pytest.mark.parametrize("argv", [["--reply"], ["--sendtext", "hello", "--reply"]])
+def test_unsupported_embedded_option_fails_before_dispatch(argv: list[str]) -> None:
+    """An option outside the embedded surface is refused before any dispatch."""
+    from meshtastic.commands import executeCommand
+
+    interface = _interface(_node())
+    result = executeCommand(interface, argv)
+    assert result.exitCode == 2
+    interface.getNode.assert_not_called()
+    interface.sendText.assert_not_called()
+
+
+def test_requested_qr_uses_forced_result_reporter() -> None:
+    from meshtastic.cli.context import ActionOutcome, CliContext
+
+    reporter = MagicMock()
+    hooks = dispatch._build_connected_dispatch_hooks(
+        cli_exit=_exit,
+        cli_print=reporter,
+        powermon_available=lambda: False,
+        powermon_error=lambda: None,
+        get_meter=lambda: None,
+        log_set_factory=None,
+        power_stress_factory=None,
+    )
+    node = _node()
+    node.getURL.return_value = "https://meshtastic.org/e/#synthetic"
+    context = CliContext(
+        _interface(node),
+        argparse.Namespace(
+            qr=True, qr_all=False, contact_qr=None, dest="^local", quiet=True
+        ),
+        {},
+        ActionOutcome(),
+    )
+    channel_contact_actions._handle_channel_contact_display(
+        context, hooks.channel_contact
+    )
+    reporter.assert_any_call(
+        "Primary channel URL: https://meshtastic.org/e/#synthetic", force=True
+    )
+
+
+def test_region_missing_does_not_hide_other_field_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _node()
+    interface = _interface(node)
+    monkeypatch.setattr(
+        set_actions,
+        "verify_local_config_apply",
+        MagicMock(
+            return_value=LocalApplyVerification(
+                LocalApplyStatus.RELOAD_FAILED,
+                missing_sections=("lora",),
+                mismatched_fields=("power.ls_secs",),
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="power.ls_secs"):
+        set_actions._verify_local_set_apply(
+            interface,
+            node,
+            node_dest="^local",
+            pre_write_config_id=1,
+            config_fields={"lora": {"region": 1}, "power": {"ls_secs": 20}},
+            module_config_fields={},
+            cli_exit=_exit,
+            cli_print=MagicMock(),
+        )
+
+
+def test_row_number_is_display_only() -> None:
+    from meshtastic.cli.messaging_service_actions import _validate_cli_sort_field
+
+    with pytest.raises(RuntimeError, match="Unknown --sort field 'N'"):
+        _validate_cli_sort_field(MagicMock(), "N", cli_exit=_exit)
