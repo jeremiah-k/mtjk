@@ -4,7 +4,8 @@ name: Sync Upstream Master
 # (legacy_import_paths, mesh_interface_methods, node_methods,
 # top_level_exports) changes. The embedded provenance block moves with every
 # upstream commit even when the surface is byte-identical, so provenance-only
-# regenerations are detected and skipped: no commit, no push, no PR. The
+# regenerations are detected and skipped: no commit, no push, no new PR.
+# Close an obsolete bot PR if the surface has returned to develop. The
 # committed provenance sha therefore goes stale between real surface changes;
 # the next real refresh PR carries the accumulated sha jump.
 # develop is protected (PRs required), so the refreshed snapshot lands
@@ -21,6 +22,12 @@ on:
   schedule:
     - cron: 0 7 * * *
   workflow_dispatch: {}
+
+# Manual and scheduled runs share one bot branch. Keep the active run and
+# coalesce superseded pending refreshes.
+concurrency:
+  group: upstream-api-baseline-refresh
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -43,6 +50,10 @@ jobs:
         with:
           ref: develop
           fetch-depth: 0
+      - name: Install Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
       - name: Fetch upstream/master and pin SHA
         run: |
           git fetch "${UPSTREAM_URL}" "${UPSTREAM_REF}"
@@ -144,17 +155,56 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("surface_changed=true\n")
           PY
-      - name: Open baseline refresh PR (only when API surface changed)
-        if: steps.compare.outputs.surface_changed == 'true'
+      - name: Find existing baseline branch PR
+        id: existing-pr
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          # Refuse to refresh a same-repository branch used by a human PR.
+          pull_requests="$(gh pr list \
+            --base develop \
+            --head bot/upstream-baseline \
+            --state open \
+            --json number,isCrossRepository,headRefName,baseRefName,author)"
+          jq -r '
+            map(select(
+              .isCrossRepository == false
+              and .headRefName == "bot/upstream-baseline"
+              and .baseRefName == "develop"
+            ))
+            | map(. + {workflow_owned: (
+                .author.is_bot == true
+                and (.author.login == "app/github-actions" or .author.login == "github-actions[bot]")
+              )})
+            | "number=\(map(select(.workflow_owned))[0].number // "")",
+              "blocked=\(any(.[]; .workflow_owned | not))"
+          ' <<< "$pull_requests" >> "$GITHUB_OUTPUT"
+      - name: Close obsolete baseline refresh PR
+        if: steps.compare.outputs.surface_changed == 'false' && steps.existing-pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPEN_PR_NUMBER: ${{ steps.existing-pr.outputs.number }}
+        run: |
+          # Compare against the same base that produced the no-change result.
+          git fetch --no-tags origin develop
+          if ! git diff --quiet HEAD FETCH_HEAD -- "${BASELINE_FILE}"; then
+            echo "Develop's committed baseline moved during this run. Keeping the open PR."
+            exit 0
+          fi
+          gh pr close "$OPEN_PR_NUMBER" \
+            --comment "The regenerated API surface now matches develop; no refresh is needed."
+      - name: Open baseline refresh PR (only when API surface changed)
+        if: steps.compare.outputs.surface_changed == 'true' && steps.existing-pr.outputs.blocked == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPEN_PR_NUMBER: ${{ steps.existing-pr.outputs.number }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${BASELINE_FILE}"
           git checkout -B bot/upstream-baseline
           git commit -m "Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
-          git push origin bot/upstream-baseline --force
+          git push --force-with-lease origin bot/upstream-baseline
           pr_title="Refresh api_baseline_master.json from upstream/master@${UPSTREAM_SHORT_SHA}"
           pr_body="Automated refresh of the upstream API baseline snapshot (mirror of upstream/master at \`${UPSTREAM_SHORT_SHA}\`). Merges with no checks expected: PRs opened by the workflow token do not trigger CI, and develop requires no approvals."
           pr_body_file="$(mktemp)"
@@ -163,12 +213,7 @@ jobs:
             cat "${RUNNER_TEMP}/surface-summary.txt"
             printf '```\n'
           } > "${pr_body_file}"
-          open_pr_number="$(gh pr list \
-            --base develop \
-            --head bot/upstream-baseline \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')"
+          open_pr_number="$OPEN_PR_NUMBER"
           if [[ -n "${open_pr_number}" ]]; then
             gh api --method PATCH \
               "repos/${GITHUB_REPOSITORY}/pulls/${open_pr_number}" \
