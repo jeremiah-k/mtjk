@@ -138,10 +138,12 @@ def test_failed_replacement_keeps_pending_work_and_allows_retry() -> None:
             assert executor.thread is old_worker
             with pytest.raises(RuntimeError, match="start failed"):
                 executor.stop()
-        executor.queueWork(lambda: completed.append("recovered"))
+        assert not executor._queue_work_non_blocking(
+            lambda: completed.append("rejected after stop")
+        )
         executor.stop()
         assert executor.join(_WAIT)
-        assert completed == ["accepted", "recovered"]
+        assert completed == ["accepted"]
     finally:
         executor.stop()
         assert executor.join(_WAIT)
@@ -208,9 +210,12 @@ def test_broken_logging_handler_still_reports_to_stderr(
         raise ValueError("callback failed")
 
     try:
-        with patch(
-            "meshtastic.util.logger.exception",
-            side_effect=RuntimeError("handler failed"),
+        with (
+            patch(
+                "meshtastic.util.logger.exception",
+                side_effect=RuntimeError("handler failed"),
+            ),
+            patch.object(logging, "raiseExceptions", False),
         ):
             executor.queueWork(fail)
             executor.queueWork(completed.set)
@@ -251,6 +256,22 @@ def test_stop_can_recover_worker_that_fails_during_terminal_drain() -> None:
         release.set()
         executor.stop()
         assert executor.join(_WAIT)
+
+
+def test_join_rejects_a_replaced_worker_snapshot() -> None:
+    """A join of the old thread cannot report that its replacement finished."""
+    executor = DeferredExecution._create_lazy("join-replacement")
+    with patch.object(executor, "_run", lambda: None):
+        executor.queueWork(lambda: None)
+        assert executor.join(_WAIT)
+    worker = executor.thread
+    assert worker is not None
+    with patch.object(
+        worker, "join", side_effect=lambda _timeout: executor.queueWork(lambda: None)
+    ):
+        assert not executor.join(_WAIT)
+    executor.stop()
+    assert executor.join(_WAIT)
 
 
 def test_restart_logging_can_reenter_admission() -> None:

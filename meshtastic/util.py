@@ -662,8 +662,6 @@ class Acknowledgment:
 class DeferredExecution:
     """A thread that accepts closures to run, and runs them as they are received."""
 
-    # Sentinel object to signal shutdown of the worker thread
-    _SHUTDOWN = object()
     queue: Queue[Any]
     _shutdown: bool
     _drained: threading.Event
@@ -739,8 +737,7 @@ class DeferredExecution:
     def _report_to_stderr(message: str) -> None:
         """Emit a failure line to stderr when the logging handlers are broken."""
         try:
-            if logging.raiseExceptions:
-                sys.stderr.write(f"{message}\n")
+            sys.stderr.write(f"{message}\n")
         except Exception:  # noqa: BLE001 - stderr reporting must never raise
             pass
 
@@ -812,26 +809,35 @@ class DeferredExecution:
     def stop(self) -> None:
         """Signal the worker thread to shut down gracefully.
 
-        Enqueues a sentinel value after all work accepted before this call. The
-        worker drains those pending items in FIFO order and exits when it reaches
-        the sentinel. Repeated calls never admit new work or enqueue another
-        sentinel; they can recover a worker that failed during terminal drain.
-        If replacement startup fails, the exception propagates and shutdown may
-        be retried.
+        Close admission and let the worker drain accepted work in FIFO order.
+        Repeated calls can recover a worker that failed during terminal drain.
+        If replacement startup fails, admission remains closed and stop may be
+        retried.
         """
         replacing = False
         with self._stop_lock:
-            if self._shutdown:
-                if not self._drained.is_set():
-                    replacing = self._ensure_started_locked()
-            else:
-                if self.thread is not None:
-                    replacing = self._ensure_started_locked()
-                    self.queue.put(self._SHUTDOWN)
-                else:
-                    self._drained.set()
-                self._shutdown = True
+            self._shutdown = True
+            if self.thread is None and self.queue.empty():
+                self._drained.set()
+            elif not self._drained.is_set():
+                replacing = self._ensure_started_locked()
         self._report_restart(replacing)
+
+    def _flush(self, completed: threading.Event, timeout: float) -> bool:
+        """Wait for a FIFO barrier or for accepted work at shutdown to drain."""
+        if completed.is_set():
+            return True
+        if self._queue_work_non_blocking(completed.set):
+            if self.thread is not threading.current_thread():
+                return completed.wait(timeout)
+            return completed.is_set()
+        with self._stop_lock:
+            if not self._shutdown or self.thread is threading.current_thread():
+                return False
+        self.stop()
+        if self._drained.wait(timeout):
+            completed.set()
+        return completed.is_set()
 
     def join(self, timeout: float | None = None) -> bool:
         """Wait for the worker thread to finish.
@@ -847,8 +853,9 @@ class DeferredExecution:
         Returns
         -------
         bool
-            True if the thread finished within the timeout and, after stop,
-            the shutdown sentinel was reached; False otherwise.
+            True if the same worker finished within the timeout and, after
+            stop, the queue drained. False if the worker was replaced, is
+            still running, or failed before completing a terminal drain.
         """
         with self._stop_lock:
             thread = self.thread
@@ -866,18 +873,22 @@ class DeferredExecution:
 
         Callables retrieved from ``self.queue`` are attempted in FIFO order.
         Exceptions from a callable, including callback-local termination signals,
-        are logged without retrying the callable. Normal exit occurs at the
-        shutdown sentinel; infrastructure failure is recovered on the next
+        are logged without retrying the callable. Normal exit occurs once
+        admission is closed and the queue is empty; infrastructure failure is
+        recovered on the next
         admission or stop if a replacement worker can be started.
         """
         while True:
             try:
                 o = self.queue.get(timeout=_DEFERRED_QUEUE_POLL_TIMEOUT_SECONDS)
             except Empty:
+                # An admission could race the timed-out get, before stop
+                # closes the queue. Check both under the admission lock.
+                with self._stop_lock:
+                    if self._shutdown and self.queue.empty():
+                        self._drained.set()
+                        return
                 continue
-            if o is self._SHUTDOWN:
-                self._drained.set()
-                break
             try:
                 o()
             except BaseException:  # noqa: BLE001 - isolate arbitrary subscriber code

@@ -1,6 +1,7 @@
 """Exercise the real deferred publisher through BLE's compatibility adapter."""
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
 import pytest
@@ -39,17 +40,17 @@ def test_ble_admission_recovers_dead_worker_in_fifo_order() -> None:
         assert executor.join(_WAIT)
 
 
-def test_ble_fallback_cannot_steal_terminal_sentinel() -> None:
+def test_ble_flush_waits_for_terminal_drain_on_the_worker() -> None:
     executor = DeferredExecution("ble-terminal-drain")
     entered = threading.Event()
     release = threading.Event()
     flushed = threading.Event()
-    order: list[str] = []
+    workers: list[threading.Thread] = []
 
     def block() -> None:
         entered.set()
         assert release.wait(_WAIT)
-        order.append("first")
+        workers.append(threading.current_thread())
 
     publisher = BLECompatibilityEventPublisher(
         Mock(), publishing_thread_provider=lambda: executor
@@ -57,15 +58,42 @@ def test_ble_fallback_cannot_steal_terminal_sentinel() -> None:
     try:
         executor.queueWork(block)
         assert entered.wait(_WAIT)
-        executor.queueWork(lambda: order.append("second"))
+        executor.queueWork(lambda: workers.append(threading.current_thread()))
         executor.stop()
-        publisher._drain_publish_queue_on_thread(flushed, publishing_thread=executor)
-        assert not flushed.is_set()
-        assert order == []
-        release.set()
+        assert publisher._resolve_publishing_thread(for_flush=True) is executor
+        with ThreadPoolExecutor() as pool:
+            flush = pool.submit(publisher.drain_publish_queue, flushed)
+            try:
+                assert not flushed.is_set()
+                assert workers == []
+            finally:
+                release.set()
+            flush.result(_WAIT)
+        assert flushed.is_set()
         assert executor.join(_WAIT)
-        assert order == ["first", "second"]
+        assert executor.thread is not None
+        assert workers == [executor.thread, executor.thread]
     finally:
         release.set()
+        executor.stop()
+        assert executor.join(_WAIT)
+
+
+def test_ble_flush_recovers_failed_terminal_worker() -> None:
+    executor = DeferredExecution._create_lazy("ble-failed-terminal-worker")
+    release = threading.Event()
+    delivered = threading.Event()
+    publisher = BLECompatibilityEventPublisher(
+        Mock(), publishing_thread_provider=lambda: executor
+    )
+    with patch.object(executor, "_run", release.wait):
+        executor.queueWork(delivered.set)
+        executor.stop()
+        release.set()
+        assert not executor.join(_WAIT)
+    try:
+        publisher.wait_for_disconnect_notifications(_WAIT)
+        assert delivered.is_set()
+    finally:
         executor.stop()
         assert executor.join(_WAIT)

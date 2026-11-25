@@ -65,7 +65,7 @@ class BLECompatibilityEventPublisher:
 
     @staticmethod
     def _is_live_publishing_thread(publishing_thread: object | None) -> bool:
-        """Return whether a publishing-thread facade appears alive/usable."""
+        """Return whether a facade can accept work, including worker recovery."""
         if publishing_thread is None:
             return False
         if isinstance(publishing_thread, DeferredExecution):
@@ -89,7 +89,7 @@ class BLECompatibilityEventPublisher:
         return alive_result if isinstance(alive_result, bool) else False
 
     def _resolve_publishing_thread(
-        self, *, use_cached_fallback: bool = True
+        self, *, use_cached_fallback: bool = True, for_flush: bool = False
     ) -> object | None:
         """Resolve publishing-thread facade with cached fallback on provider failure.
 
@@ -106,9 +106,15 @@ class BLECompatibilityEventPublisher:
         string because BLE module import must not depend on the runtime
         publish-queue state of that module at import time.
         """
+        def _available(candidate: object | None) -> bool:
+            # A stopped executor still owns its terminal drain.
+            return (for_flush and isinstance(candidate, DeferredExecution)) or (
+                self._is_live_publishing_thread(candidate)
+            )
+
         try:
             publishing_thread = self._publishing_thread_provider()
-            if self._is_live_publishing_thread(publishing_thread):
+            if _available(publishing_thread):
                 self._last_publishing_thread = publishing_thread
                 return publishing_thread
             if publishing_thread is not None:
@@ -120,14 +126,14 @@ class BLECompatibilityEventPublisher:
             )
         if not use_cached_fallback:
             return None
-        if self._is_live_publishing_thread(self._last_publishing_thread):
+        if _available(self._last_publishing_thread):
             return self._last_publishing_thread
         self._last_publishing_thread = None
         # Loaded by string: BLE module import must not depend on the runtime
         # publish-queue state of the mesh-interface module.
         mesh_iface_module = _load_runtime_module("meshtastic.mesh_interface")
         fallback_thread = getattr(mesh_iface_module, "publishingThread", None)
-        if self._is_live_publishing_thread(fallback_thread):
+        if _available(fallback_thread):
             self._last_publishing_thread = fallback_thread
             return fallback_thread
         return None
@@ -226,12 +232,12 @@ class BLECompatibilityEventPublisher:
         Returns
         -------
         None
-            This method returns ``None`` and falls back to inline draining on
-            queueing or wait failures.
+            The deferred executor owns its drain. For legacy queue facades,
+            queueing or wait failures may trigger inline draining.
         """
         self._flush_disconnect_notifications(
             timeout,
-            publishing_thread=self._resolve_publishing_thread(),
+            publishing_thread=self._resolve_publishing_thread(for_flush=True),
         )
 
     def _flush_disconnect_notifications(
@@ -246,6 +252,9 @@ class BLECompatibilityEventPublisher:
         if publishing_thread is None:
             return
         flush_event = Event()
+        if isinstance(publishing_thread, DeferredExecution):
+            self._flush_deferred_queue(publishing_thread, flush_event, timeout)
+            return
 
         def _queue_flush_notification() -> bool:
             return self._enqueue_publish_callback(
@@ -301,8 +310,21 @@ class BLECompatibilityEventPublisher:
         """
         self._drain_publish_queue_on_thread(
             flush_event,
-            publishing_thread=self._resolve_publishing_thread(),
+            publishing_thread=self._resolve_publishing_thread(for_flush=True),
         )
+
+    def _flush_deferred_queue(
+        self, executor: DeferredExecution, flush_event: Event, timeout: float
+    ) -> None:
+        """Wait for the executor's own consumer to drain through a barrier."""
+        if not _safe_execute_through_adapter(
+            self._iface,
+            lambda: executor._flush(flush_event, timeout),  # noqa: SLF001
+            default_return=False,
+            error_msg="Error flushing deferred publish queue",
+            reraise=False,
+        ):
+            logger.debug("Deferred publish queue flush did not complete")
 
     def _drain_publish_queue_on_thread(
         self,
@@ -327,19 +349,9 @@ class BLECompatibilityEventPublisher:
         if publishing_thread is None:
             return
         if isinstance(publishing_thread, DeferredExecution):
-            # Never become a second consumer of the real executor, even when
-            # its worker appears dead: recovery can race this fallback, and
-            # draining directly could steal its terminal shutdown sentinel.
-            if not flush_event.is_set():
-                _safe_execute_through_adapter(
-                    self._iface,
-                    lambda: publishing_thread._queue_work_non_blocking(  # noqa: SLF001
-                        flush_event.set
-                    ),
-                    default_return=False,
-                    error_msg="Error recovering deferred publish queue",
-                    reraise=False,
-                )
+            self._flush_deferred_queue(
+                publishing_thread, flush_event, DISCONNECT_TIMEOUT_SECONDS
+            )
             return
         thread = getattr(publishing_thread, "thread", None)
         thread_drain = getattr(thread, "_drain_publish_queue", None)

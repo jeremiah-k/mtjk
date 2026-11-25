@@ -55,7 +55,7 @@ def _publisher_with_thread(
     monkeypatch.setattr(
         publisher,
         "_resolve_publishing_thread",
-        lambda use_cached_fallback=True: publishing_thread,
+        lambda **_kwargs: publishing_thread,
     )
     return publisher
 
