@@ -155,3 +155,42 @@ def test_legacy_status_service_publishes_on_supplied_queue(
     publish.assert_called_once_with(
         "meshtastic.connection.status", interface=iface, connected=True
     )
+
+
+@pytest.mark.unit
+def test_retained_queue_helpers_delegate_using_supplied_thread() -> None:
+    from threading import Event
+    from unittest.mock import MagicMock, patch
+
+    from meshtastic.interfaces.ble.compatibility_service import (
+        BLECompatibilityEventPublisher,
+        BLECompatibilityEventService,
+    )
+
+    iface, thread, callback = MagicMock(), object(), MagicMock()
+    event = Event()
+    with (
+        patch.object(
+            BLECompatibilityEventPublisher,
+            "_enqueue_publish_callback",
+            return_value=True,
+        ) as enqueue,
+        patch.object(
+            BLECompatibilityEventPublisher, "_flush_disconnect_notifications"
+        ) as flush,
+        patch.object(
+            BLECompatibilityEventPublisher, "_drain_publish_queue_on_thread"
+        ) as drain,
+    ):
+        assert BLECompatibilityEventService._enqueue_publish_callback(
+            thread, callback, prefer_non_blocking=True
+        )
+        BLECompatibilityEventService.wait_for_disconnect_notifications(
+            iface, 0.5, publishing_thread=thread
+        )
+        BLECompatibilityEventService.drain_publish_queue(
+            iface, event, publishing_thread=thread
+        )
+    enqueue.assert_called_once_with(thread, callback, prefer_non_blocking=True)
+    flush.assert_called_once_with(0.5, publishing_thread=thread)
+    drain.assert_called_once_with(event, publishing_thread=thread)

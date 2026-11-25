@@ -616,57 +616,9 @@ class BLECompatibilityEventService:
         bool
             ``True`` when the callback was queued, otherwise ``False``.
         """
-        queue_work = getattr(publishing_thread, "queueWork", None)
-        queue_work_non_blocking = _get_declared_callable(
-            publishing_thread, "_queue_work_non_blocking"
+        return BLECompatibilityEventPublisher._enqueue_publish_callback(  # noqa: SLF001
+            publishing_thread, callback, prefer_non_blocking=prefer_non_blocking
         )
-        queue = getattr(publishing_thread, "queue", None)
-        put_nowait = getattr(queue, "put_nowait", None)
-        can_queue_work = callable(queue_work)
-        can_put_nowait = callable(put_nowait)
-        queue_work_callback: Callable[[Any], object] | None = (
-            cast(Callable[[Any], object], queue_work) if can_queue_work else None
-        )
-        queue_work_non_blocking_callback: Callable[[Any], bool] | None = (
-            cast(Callable[[Any], bool], queue_work_non_blocking)
-            if callable(queue_work_non_blocking)
-            else None
-        )
-        put_nowait_callback: Callable[[Any], object] | None = (
-            cast(Callable[[Any], object], put_nowait) if can_put_nowait else None
-        )
-        thread = getattr(publishing_thread, "thread", None)
-        is_alive = getattr(thread, "is_alive", None)
-        thread_is_alive: bool | None = None
-        if callable(is_alive):
-            try:
-                alive_result = is_alive()
-            except Exception:  # noqa: BLE001 - enqueue path is best effort
-                alive_result = False
-            thread_is_alive = alive_result if isinstance(alive_result, bool) else False
-        if thread_is_alive is False:
-            return False
-
-        queued = False
-        if prefer_non_blocking:
-            if queue_work_non_blocking_callback is not None:
-                queued = queue_work_non_blocking_callback(callback)
-            elif put_nowait_callback is not None:
-                try:
-                    put_nowait_callback(callback)
-                    queued = True
-                except Full:
-                    pass
-        elif queue_work_callback is not None:
-            queue_work_callback(callback)
-            queued = True
-        elif put_nowait_callback is not None:
-            try:
-                put_nowait_callback(callback)
-                queued = True
-            except Full:
-                pass
-        return queued
 
     @staticmethod
     def wait_for_disconnect_notifications(
@@ -693,52 +645,12 @@ class BLECompatibilityEventService:
             This method returns ``None`` and falls back to inline draining on
             queueing or wait failures.
         """
-        if timeout is None:
-            timeout = DISCONNECT_TIMEOUT_SECONDS
-        if publishing_thread is None:
-            return
-        flush_event = Event()
-
-        def _queue_flush_notification() -> bool:
-            return BLECompatibilityEventService._enqueue_publish_callback(
-                publishing_thread,
-                flush_event.set,
-                prefer_non_blocking=True,
-            )
-
-        queued = BLECompatibilityEventService._safe_execute(
-            iface,
-            _queue_flush_notification,
-            default_return=False,
-            error_msg="Runtime error during disconnect notification flush (possible threading issue)",
-            reraise=False,
+        publisher = BLECompatibilityEventPublisher(
+            iface, publishing_thread_provider=lambda: publishing_thread
         )
-        if not queued:
-            BLECompatibilityEventService.drain_publish_queue(
-                iface,
-                flush_event,
-                publishing_thread=publishing_thread,
-            )
-            return
-
-        if not flush_event.wait(timeout=timeout):
-            thread = getattr(publishing_thread, "thread", None)
-            is_alive = getattr(thread, "is_alive", None)
-            alive_result = False
-            if callable(is_alive):
-                try:
-                    alive_result = is_alive()
-                except Exception:  # noqa: BLE001 - disconnect fallback must continue
-                    alive_result = False
-            thread_is_alive = alive_result if isinstance(alive_result, bool) else False
-            if thread_is_alive:
-                logger.debug("Timed out waiting for publish queue flush")
-            else:
-                BLECompatibilityEventService.drain_publish_queue(
-                    iface,
-                    flush_event,
-                    publishing_thread=publishing_thread,
-                )
+        publisher._flush_disconnect_notifications(  # noqa: SLF001
+            timeout, publishing_thread=publishing_thread
+        )
 
     @staticmethod
     def drain_publish_queue(
@@ -763,58 +675,12 @@ class BLECompatibilityEventService:
         None
             Drains callbacks best-effort and suppresses callback failures.
         """
-        if publishing_thread is None:
-            return
-        thread = getattr(publishing_thread, "thread", None)
-        thread_drain = getattr(thread, "_drain_publish_queue", None)
-        if callable(thread_drain):
-            try:
-                BLECompatibilityEventService._safe_execute(
-                    iface,
-                    lambda: thread_drain(flush_event),
-                    error_msg="Error draining publish queue via publishing thread",
-                    reraise=True,
-                )
-                return
-            except Exception:  # noqa: BLE001 - fall back to direct draining path
-                logger.debug(
-                    "Error draining publish queue via publishing thread; falling back to direct drain.",
-                    exc_info=True,
-                )
-
-        # Do not call iface._drain_publish_queue here - it would recursively
-        # call this method again. Instead, fall through to the direct queue
-        # draining logic below.
-
-        queue = getattr(publishing_thread, "queue", None)
-        get_nowait = getattr(queue, "get_nowait", None)
-        if queue is None or not callable(get_nowait):
-            return
-        iterations = 0
-        while not flush_event.is_set():
-            if iterations >= MAX_DRAIN_ITERATIONS:
-                logger.debug(
-                    "Stopping publish queue drain after %d callbacks to avoid shutdown starvation",
-                    MAX_DRAIN_ITERATIONS,
-                )
-                break
-            try:
-                runnable = get_nowait()
-            except Empty:
-                break
-            except Exception:  # noqa: BLE001 - direct drain must stay best effort
-                logger.debug(
-                    "Error reading deferred publish queue during direct drain",
-                    exc_info=True,
-                )
-                break
-            iterations += 1
-            BLECompatibilityEventService._safe_execute(
-                iface,
-                cast(Callable[[], Any], runnable),
-                error_msg="Error in deferred publish callback",
-                reraise=False,
-            )
+        publisher = BLECompatibilityEventPublisher(
+            iface, publishing_thread_provider=lambda: publishing_thread
+        )
+        publisher._drain_publish_queue_on_thread(  # noqa: SLF001
+            flush_event, publishing_thread=publishing_thread
+        )
 
     @staticmethod
     def publish_connection_status(

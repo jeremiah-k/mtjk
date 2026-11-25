@@ -511,20 +511,29 @@ class TestBLEReceiveRecoveryServiceEdgeCases:
     def test_resolve_controller_candidate_factory_raises(self) -> None:
         """Test handling factory that raises exception."""
 
-        def failing_factory(iface: Any) -> None:
+        called = False
+
+        def failing_factory() -> None:
+            nonlocal called
+            called = True
             raise RuntimeError("test error")
 
         mock_iface = MagicMock()
         result = BLEReceiveRecoveryService._resolve_controller_candidate(
             failing_factory, iface=mock_iface
         )
+        assert called
         assert result is None
 
     def test_controller_for_shim_class_cannot_be_resolved(self) -> None:
         """Test when controller class resolution returns a class (not instance)."""
 
         # This tests the edge case where resolved is still a class after factory probe
-        def class_factory(iface: Any) -> type[BLEReceiveRecoveryController]:
+        called = False
+
+        def class_factory() -> type[BLEReceiveRecoveryController]:
+            nonlocal called
+            called = True
             # Return the class itself instead of instance
             return BLEReceiveRecoveryController
 
@@ -533,6 +542,7 @@ class TestBLEReceiveRecoveryServiceEdgeCases:
             class_factory, iface=mock_iface
         )
         # Should return None when the result is still a class
+        assert called
         assert result is None
 
     def test_resolve_controller_candidate_with_required_method(self) -> None:

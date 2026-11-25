@@ -39,8 +39,11 @@ from meshtastic.interfaces.ble.lifecycle_shutdown_runtime import (
     BLEShutdownLifecycleCoordinator,
 )
 from meshtastic.interfaces.ble.ports import _BLESessionStatePort
+
 # COMPAT_STABLE_SHIM: Re-export legacy receive service name for compatibility.
-from meshtastic.interfaces.ble.receive_compat_service import BLEReceiveRecoveryService
+from meshtastic.interfaces.ble.receive_compat_service import (  # pylint: disable=useless-import-alias
+    BLEReceiveRecoveryService as BLEReceiveRecoveryService,
+)
 from meshtastic.interfaces.ble.session_state import _session_state_for
 from meshtastic.interfaces.ble.utils import (
     _sleep,
