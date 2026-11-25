@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from pubsub import pub
@@ -126,11 +126,13 @@ def test_simradio_node_waits_for_next_boot_marker(
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(marker)
 
-    monkeypatch.setattr(time, "sleep", _record_reboot)
     monkeypatch.setattr(
-        time,
-        "monotonic",
-        iter((0.0, 0.0, 0.1)).__next__,
+        simradio_harness,
+        "time",
+        SimpleNamespace(
+            monotonic=iter((0.0, 0.0, 0.1)).__next__,
+            sleep=_record_reboot,
+        ),
     )
 
     node.wait_for_reboot(node.boot_count(), timeout=1.0)
@@ -404,14 +406,12 @@ def test_simradio_mesh_paces_text_sends_per_originating_node() -> None:
     mesh.nodes[0].iface = iface_zero
     mesh.nodes[1].iface = iface_one
 
-    with (
-        patch.object(
-            time,
-            "monotonic",
-            side_effect=(10.0, 10.0, 10.25, 11.1, 11.1, 11.1),
-        ),
-        patch.object(time, "sleep") as sleep,
-    ):
+    # Patch the harness's binding so other threads keep using the real clock.
+    clock = SimpleNamespace(
+        monotonic=Mock(side_effect=(10.0, 10.0, 10.25, 11.1, 11.1, 11.1)),
+        sleep=Mock(),
+    )
+    with patch.object(simradio_harness, "time", clock):
         first = mesh.send_text(0, "first", wantAck=False)
         second = mesh.send_text(0, "second", wantAck=False)
         other = mesh.send_text(1, "other", wantAck=False)
@@ -419,7 +419,7 @@ def test_simradio_mesh_paces_text_sends_per_originating_node() -> None:
     assert first.id == 1
     assert second.id == 2
     assert other.id == 3
-    sleep.assert_called_once_with(
+    clock.sleep.assert_called_once_with(
         pytest.approx(simradio_harness.TEXT_MESSAGE_MIN_INTERVAL_SECONDS - 0.25)
     )
     iface_zero.sendText.assert_any_call("first", wantAck=False)
