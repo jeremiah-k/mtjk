@@ -454,6 +454,27 @@ def test_unsupported_embedded_option_fails_before_dispatch(argv: list[str]) -> N
     interface.sendText.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("argv", "label"),
+    [
+        (["--set-owner", ""], "Long Name"),
+        (["--set-owner-short", "  "], "Short Name"),
+        (["--set-ham", " "], "Ham radio callsign"),
+    ],
+)
+def test_blank_embedded_owner_value_reports_the_empty_name_error(
+    argv: list[str], label: str
+) -> None:
+    """A blank owner, short name, or callsign fails instead of being skipped."""
+    from meshtastic.commands import executeCommand
+
+    interface = _interface(_node())
+    result = executeCommand(interface, argv)
+    assert result.exitCode == 1
+    assert f"ERROR: {label} cannot be empty" in result.output
+    interface.getNode.return_value.setOwner.assert_not_called()
+
+
 def test_requested_qr_uses_forced_result_reporter() -> None:
     from meshtastic.cli.context import ActionOutcome, CliContext
 
