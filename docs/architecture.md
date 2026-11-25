@@ -159,7 +159,9 @@ itself has exited unexpectedly, the next submission or explicit stop attempts
 to recover a single worker to drain the existing queue. Shutdown remains
 terminal for new submissions; if the worker fails during shutdown, `join()`
 reports an incomplete drain and another `stop()` can recover the same pending
-queue without adding another sentinel. Subscribers should return promptly: a slow subscriber
+queue without adding another sentinel. BLE compatibility publication uses the
+same admission path and never drains the real executor on a second thread.
+Subscribers should return promptly: a slow subscriber
 can delay later events across interfaces, and the publication queue is not
 bounded by default.
 

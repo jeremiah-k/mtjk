@@ -23,6 +23,7 @@ from meshtastic.interfaces.ble.utils import (
     _resolve_safe_execute as _resolve_safe_execute_hook,
 )
 from meshtastic.interfaces.ble.utils import _safe_execute_through_adapter
+from meshtastic.util import DeferredExecution
 
 if TYPE_CHECKING:
     from meshtastic.interfaces.ble.interface import BLEInterface
@@ -67,6 +68,10 @@ class BLECompatibilityEventPublisher:
         """Return whether a publishing-thread facade appears alive/usable."""
         if publishing_thread is None:
             return False
+        if isinstance(publishing_thread, DeferredExecution):
+            # Its admission path owns worker recovery; a dead worker is not a
+            # reason to discard the facade or bypass its FIFO queue.
+            return publishing_thread._accepts_work()  # noqa: SLF001
         thread = getattr(publishing_thread, "thread", None)
         if thread is None:
             return True
@@ -153,6 +158,10 @@ class BLECompatibilityEventPublisher:
         bool
             ``True`` when the callback was queued, otherwise ``False``.
         """
+        if isinstance(publishing_thread, DeferredExecution):
+            # The atomic path both recovers dead workers and reports rejection
+            # after stop. The public queueWork() intentionally returns None.
+            return publishing_thread._queue_work_non_blocking(callback)  # noqa: SLF001
         queue_work = getattr(publishing_thread, "queueWork", None)
         queue_work_non_blocking = _get_declared_callable(
             publishing_thread, "_queue_work_non_blocking"
@@ -316,6 +325,21 @@ class BLECompatibilityEventPublisher:
             Drains callbacks best-effort and suppresses callback failures.
         """
         if publishing_thread is None:
+            return
+        if isinstance(publishing_thread, DeferredExecution):
+            # Never become a second consumer of the real executor, even when
+            # its worker appears dead: recovery can race this fallback, and
+            # draining directly could steal its terminal shutdown sentinel.
+            if not flush_event.is_set():
+                _safe_execute_through_adapter(
+                    self._iface,
+                    lambda: publishing_thread._queue_work_non_blocking(  # noqa: SLF001
+                        flush_event.set
+                    ),
+                    default_return=False,
+                    error_msg="Error recovering deferred publish queue",
+                    reraise=False,
+                )
             return
         thread = getattr(publishing_thread, "thread", None)
         thread_drain = getattr(thread, "_drain_publish_queue", None)
