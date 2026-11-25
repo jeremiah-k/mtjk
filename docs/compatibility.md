@@ -260,58 +260,50 @@ remain callable and silent.
 
 Additional approved BLE compatibility and promotions:
 
-| Symbol                                                                                     | Status               | Warning policy | Notes                                                                              |
-| ------------------------------------------------------------------------------------------ | -------------------- | -------------- | ---------------------------------------------------------------------------------- |
-| `BLEClient.find_device`                                                                    | `COMPAT_STABLE_SHIM` | Silent         | Historical snake_case.                                                             |
-| `BLEClient.findDevice`                                                                     | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
-| `BLEClient.read_gatt_char`                                                                 | `PRIMARY`            | Silent         | Historical snake_case BLE API; no promoted camelCase alias.                        |
-| `BLEClient.start_notify`                                                                   | `PRIMARY`            | Silent         | Historical snake_case BLE API; no promoted camelCase alias.                        |
-| `BLEClient.is_connected`                                                                   | `COMPAT_STABLE_SHIM` | Silent         | Shim for `isConnected`.                                                            |
-| `BLEClient.isConnected`                                                                    | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
-| `BLEClient.stop_notify`                                                                    | `COMPAT_STABLE_SHIM` | Silent         | Shim for `stopNotify`.                                                             |
-| `BLEClient.stopNotify`                                                                     | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
-| `BLEErrorHandler.safe_execute`                                                             | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `_safe_execute`.                                                 |
-| `BLEErrorHandler.safe_cleanup`                                                             | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `_safe_cleanup`.                                                 |
-| `BLECompatibilityEventService.publish_connection_status_legacy`                            | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `publish_connection_status`.                                     |
-| `BLECompatibilityEventPublisher.publish_connection_status_legacy`                          | `COMPAT_STABLE_SHIM` | Silent         | Bound wrapper alias for `publish_connection_status`.                               |
-| `meshtastic.interfaces.ble.lifecycle_service._is_currently_connected_elsewhere`            | `INTERNAL_COMPAT`    | Silent         | Internal monkeypatch/probe seam re-exported from `gating`.                         |
-| `meshtastic.interfaces.ble.lifecycle_service._ORIGINAL_GET_CONNECTED_CLIENT_STATUS`        | `INTERNAL_COMPAT`    | Silent         | Internal runtime baseline alias for status monkeypatch detection.                  |
-| `meshtastic.interfaces.ble.lifecycle_service._ORIGINAL_GET_CONNECTED_CLIENT_STATUS_LOCKED` | `INTERNAL_COMPAT`    | Silent         | Internal runtime baseline alias for locked status monkeypatch detection.           |
-| `meshtastic.interfaces.ble.lifecycle_service._ORIGINAL_VERIFY_OWNERSHIP_SNAPSHOT`          | `INTERNAL_COMPAT`    | Silent         | Internal runtime baseline alias for ownership-snapshot monkeypatch detection.      |
-| `meshtastic.interfaces.ble.lifecycle_service._ORIGINAL_FINALIZE_CONNECTION_GATES`          | `INTERNAL_COMPAT`    | Silent         | Internal runtime baseline alias for gate-finalization monkeypatch detection.       |
-| `meshtastic.interfaces.ble.lifecycle_service._ORIGINAL_IS_OWNED_CONNECTED_CLIENT`          | `INTERNAL_COMPAT`    | Silent         | Internal runtime baseline alias for ownership-check monkeypatch detection.         |
-| `BLEInterface.find_device`                                                                 | `COMPAT_STABLE_SHIM` | Silent         | Historical snake_case wrapper.                                                     |
-| `BLEInterface.findDevice`                                                                  | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
-| `BLEInterface._from_num_handler`                                                           | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
-| `BLEInterface._log_radio_handler`                                                          | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
-| `BLEInterface._legacy_log_radio_handler`                                                   | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
-| `BLENotificationDispatcher._log_radio_handler`                                             | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
-| `BLENotificationDispatcher._legacy_log_radio_handler`                                      | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
-| `BLEClient._discover`                                                                      | `COMPAT_STABLE_SHIM` | Silent         | Historical internal discovery entrypoint.                                          |
-| `BLEReceiveRecoveryService`                                                                | `COMPAT_STABLE_SHIM` | Silent         | Legacy receive-service class alias re-exported from `receive_service`.             |
-| `BLEStateManager.current_state`                                                            | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_current_state`.                                          |
-| `BLEStateManager.is_connected`                                                             | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_connected`.                                           |
-| `BLEStateManager.is_closing`                                                               | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_closing`.                                             |
-| `BLEStateManager.can_connect`                                                              | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_can_connect`.                                            |
-| `BLEStateManager.is_connecting`                                                            | `INTERNAL_COMPAT`    | Silent         | Public property alias for `_is_connecting`.                                        |
-| `BLEStateManager.is_active`                                                                | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_active`.                                              |
-| `BLEStateManager.transition_to()`                                                          | `INTERNAL_COMPAT`    | Silent         | Compatibility wrapper for `_transition_to()`.                                      |
-| `BLEStateManager.reset_to_disconnected()`                                                  | `INTERNAL_COMPAT`    | Silent         | Compatibility wrapper for `_reset_to_disconnected()`.                              |
-| `BLEStateManager._lock`                                                                    | `INTERNAL_COMPAT`    | Silent         | Legacy alias for `lock` property.                                                  |
-| `BLEManagementCommandHandler._start_management_phase()`                                    | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `start_management_phase()`.                       |
-| `BLEManagementCommandHandler._resolve_management_target()`                                 | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `resolve_management_target()`.                    |
-| `BLEManagementCommandHandler._acquire_client_for_target()`                                 | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `acquire_client_for_target()`.                    |
-| `BLEManagementCommandHandler._execute_with_client()`                                       | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `execute_with_client()`.                          |
-| `BLEManagementCommandsService._resolve_handler()`                                          | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for service shim handler resolution.                  |
-| `BLEManagementCommandsService._make_handler()`                                             | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for service shim handler resolution.                  |
-| `BLEInterface._fromnum_notify_enabled`                                                     | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed FROMNUM notify state.           |
-| `BLEInterface._malformed_notification_count`                                               | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed malformed-notification counter. |
-| `BLEInterface._malformed_notification_lock`                                                | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed malformed-notification lock.    |
-| `meshtastic.ble_interface.BleakClient`                                                     | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
-| `meshtastic.ble_interface.BleakScanner`                                                    | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
-| `meshtastic.ble_interface.BLEDevice`                                                       | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
-| `meshtastic.ble_interface.BleakError`                                                      | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
-| `meshtastic.ble_interface.BleakDBusError`                                                  | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
+| Symbol                                                            | Status               | Warning policy | Notes                                                                              |
+| ----------------------------------------------------------------- | -------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `BLEClient.find_device`                                           | `COMPAT_STABLE_SHIM` | Silent         | Historical snake_case.                                                             |
+| `BLEClient.findDevice`                                            | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
+| `BLEClient.read_gatt_char`                                        | `PRIMARY`            | Silent         | Historical snake_case BLE API; no promoted camelCase alias.                        |
+| `BLEClient.start_notify`                                          | `PRIMARY`            | Silent         | Historical snake_case BLE API; no promoted camelCase alias.                        |
+| `BLEClient.is_connected`                                          | `COMPAT_STABLE_SHIM` | Silent         | Shim for `isConnected`.                                                            |
+| `BLEClient.isConnected`                                           | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
+| `BLEClient.stop_notify`                                           | `COMPAT_STABLE_SHIM` | Silent         | Shim for `stopNotify`.                                                             |
+| `BLEClient.stopNotify`                                            | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
+| `BLEErrorHandler.safe_execute`                                    | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `_safe_execute`.                                                 |
+| `BLEErrorHandler.safe_cleanup`                                    | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `_safe_cleanup`.                                                 |
+| `BLECompatibilityEventService.publish_connection_status_legacy`   | `COMPAT_STABLE_SHIM` | Silent         | Wrapper alias for `publish_connection_status`.                                     |
+| `BLECompatibilityEventPublisher.publish_connection_status_legacy` | `COMPAT_STABLE_SHIM` | Silent         | Bound wrapper alias for `publish_connection_status`.                               |
+| `BLEInterface.find_device`                                        | `COMPAT_STABLE_SHIM` | Silent         | Historical snake_case wrapper.                                                     |
+| `BLEInterface.findDevice`                                         | `PRIMARY`            | Silent         | Approved promoted camelCase name.                                                  |
+| `BLEInterface._from_num_handler`                                  | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
+| `BLEInterface._log_radio_handler`                                 | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
+| `BLEInterface._legacy_log_radio_handler`                          | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
+| `BLENotificationDispatcher._log_radio_handler`                    | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
+| `BLENotificationDispatcher._legacy_log_radio_handler`             | `COMPAT_STABLE_SHIM` | Silent         | Preserved compatibility entrypoint (shim).                                         |
+| `BLEClient._discover`                                             | `COMPAT_STABLE_SHIM` | Silent         | Historical internal discovery entrypoint.                                          |
+| `BLEReceiveRecoveryService`                                       | `COMPAT_STABLE_SHIM` | Silent         | Legacy receive-service class alias re-exported from `receive_service`.             |
+| `BLEStateManager.current_state`                                   | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_current_state`.                                          |
+| `BLEStateManager.is_connected`                                    | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_connected`.                                           |
+| `BLEStateManager.is_closing`                                      | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_closing`.                                             |
+| `BLEStateManager.can_connect`                                     | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_can_connect`.                                            |
+| `BLEStateManager.is_connecting`                                   | `INTERNAL_COMPAT`    | Silent         | Public property alias for `_is_connecting`.                                        |
+| `BLEStateManager.is_active`                                       | `INTERNAL_COMPAT`    | Silent         | Compatibility alias for `_is_active`.                                              |
+| `BLEStateManager.transition_to()`                                 | `INTERNAL_COMPAT`    | Silent         | Compatibility wrapper for `_transition_to()`.                                      |
+| `BLEStateManager.reset_to_disconnected()`                         | `INTERNAL_COMPAT`    | Silent         | Compatibility wrapper for `_reset_to_disconnected()`.                              |
+| `BLEStateManager._lock`                                           | `INTERNAL_COMPAT`    | Silent         | Legacy alias for `lock` property.                                                  |
+| `BLEManagementCommandHandler._start_management_phase()`           | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `start_management_phase()`.                       |
+| `BLEManagementCommandHandler._resolve_management_target()`        | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `resolve_management_target()`.                    |
+| `BLEManagementCommandHandler._acquire_client_for_target()`        | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `acquire_client_for_target()`.                    |
+| `BLEManagementCommandHandler._execute_with_client()`              | `INTERNAL_COMPAT`    | Silent         | Internal compatibility alias for `execute_with_client()`.                          |
+| `BLEInterface._fromnum_notify_enabled`                            | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed FROMNUM notify state.           |
+| `BLEInterface._malformed_notification_count`                      | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed malformed-notification counter. |
+| `BLEInterface._malformed_notification_lock`                       | `INTERNAL_COMPAT`    | Silent         | Internal compatibility bridge to dispatcher-backed malformed-notification lock.    |
+| `meshtastic.ble_interface.BleakClient`                            | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
+| `meshtastic.ble_interface.BleakScanner`                           | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
+| `meshtastic.ble_interface.BLEDevice`                              | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
+| `meshtastic.ble_interface.BleakError`                             | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
+| `meshtastic.ble_interface.BleakDBusError`                         | `COMPAT_STABLE_SHIM` | Silent         | Legacy module-level import compatibility.                                          |
 
 Approved BLE deprecation:
 
@@ -470,66 +462,49 @@ destination fails the pre-existing locality check first.
 
 ### BLE and Related Exports
 
-`meshtastic.interfaces.ble.management_service` remains a facade/re-export path,
-so management mappings intentionally appear for both source modules.
-
-| Module                                                | Compatibility symbol                                                | Canonical symbol                                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient.find_device()`                                           | `BLEClient.findDevice()`                                                                          |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient._discover()`                                             | `BLEClient.discover()`                                                                            |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient.is_connected()`                                          | `BLEClient.isConnected()`                                                                         |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient.stop_notify()`                                           | `BLEClient.stopNotify()`                                                                          |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient.async_await()`                                           | `BLEClient._async_await()`                                                                        |
-| `meshtastic.interfaces.ble.client`                    | `BLEClient.async_run()`                                             | `BLEClient._async_run()`                                                                          |
-| `meshtastic.interfaces.ble.errors`                    | `BLEErrorHandler.safe_execute()`                                    | `BLEErrorHandler._safe_execute()`                                                                 |
-| `meshtastic.interfaces.ble.errors`                    | `BLEErrorHandler.safe_cleanup()`                                    | `BLEErrorHandler._safe_cleanup()`                                                                 |
-| `meshtastic.interfaces.ble.compatibility_service`     | `BLECompatibilityEventService.publish_connection_status_legacy()`   | `BLECompatibilityEventService.publish_connection_status()`                                        |
-| `meshtastic.interfaces.ble.compatibility_service`     | `BLECompatibilityEventPublisher.publish_connection_status_legacy()` | `BLECompatibilityEventPublisher.publish_connection_status()`                                      |
-| `meshtastic.ble_interface`                            | `BleakClient`                                                       | `bleak.BleakClient`                                                                               |
-| `meshtastic.ble_interface`                            | `BleakScanner`                                                      | `bleak.BleakScanner`                                                                              |
-| `meshtastic.ble_interface`                            | `BLEDevice`                                                         | `bleak.backends.device.BLEDevice`                                                                 |
-| `meshtastic.ble_interface`                            | `BleakError`                                                        | `bleak.exc.BleakError`                                                                            |
-| `meshtastic.ble_interface`                            | `BleakDBusError`                                                    | `bleak.exc.BleakDBusError`                                                                        |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_is_currently_connected_elsewhere`                                 | `meshtastic.interfaces.ble.gating._is_currently_connected_elsewhere`                              |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_ORIGINAL_GET_CONNECTED_CLIENT_STATUS`                             | `meshtastic.interfaces.ble.lifecycle_compat_service._ORIGINAL_GET_CONNECTED_CLIENT_STATUS`        |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_ORIGINAL_GET_CONNECTED_CLIENT_STATUS_LOCKED`                      | `meshtastic.interfaces.ble.lifecycle_compat_service._ORIGINAL_GET_CONNECTED_CLIENT_STATUS_LOCKED` |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_ORIGINAL_VERIFY_OWNERSHIP_SNAPSHOT`                               | `meshtastic.interfaces.ble.lifecycle_compat_service._ORIGINAL_VERIFY_OWNERSHIP_SNAPSHOT`          |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_ORIGINAL_FINALIZE_CONNECTION_GATES`                               | `meshtastic.interfaces.ble.lifecycle_compat_service._ORIGINAL_FINALIZE_CONNECTION_GATES`          |
-| `meshtastic.interfaces.ble.lifecycle_service`         | `_ORIGINAL_IS_OWNED_CONNECTED_CLIENT`                               | `meshtastic.interfaces.ble.lifecycle_compat_service._ORIGINAL_IS_OWNED_CONNECTED_CLIENT`          |
-| `meshtastic.interfaces.ble.interface`                 | `find_device()`                                                     | `findDevice()`                                                                                    |
-| `meshtastic.interfaces.ble.interface`                 | `from_num_handler()`                                                | `BLENotificationDispatcher.from_num_handler()`                                                    |
-| `meshtastic.interfaces.ble.interface`                 | `log_radio_handler()`                                               | `BLENotificationDispatcher.log_radio_handler()`                                                   |
-| `meshtastic.interfaces.ble.interface`                 | `legacy_log_radio_handler()`                                        | `BLENotificationDispatcher.legacy_log_radio_handler()`                                            |
-| `meshtastic.interfaces.ble.interface`                 | `_from_num_handler()`                                               | `BLENotificationDispatcher.from_num_handler()`                                                    |
-| `meshtastic.interfaces.ble.interface`                 | `_log_radio_handler()`                                              | `BLENotificationDispatcher.log_radio_handler()`                                                   |
-| `meshtastic.interfaces.ble.interface`                 | `_legacy_log_radio_handler()`                                       | `BLENotificationDispatcher.legacy_log_radio_handler()`                                            |
-| `meshtastic.interfaces.ble.interface`                 | `_fromnum_notify_enabled`                                           | `BLENotificationDispatcher.fromnum_notify_enabled`                                                |
-| `meshtastic.interfaces.ble.interface`                 | `_malformed_notification_count`                                     | `BLENotificationDispatcher.malformed_notification_count`                                          |
-| `meshtastic.interfaces.ble.interface`                 | `_malformed_notification_lock`                                      | `BLENotificationDispatcher.malformed_notification_lock`                                           |
-| `meshtastic.interfaces.ble.notifications`             | `BLENotificationDispatcher._log_radio_handler()`                    | `BLENotificationDispatcher.log_radio_handler()`                                                   |
-| `meshtastic.interfaces.ble.notifications`             | `BLENotificationDispatcher._legacy_log_radio_handler()`             | `BLENotificationDispatcher.legacy_log_radio_handler()`                                            |
-| `meshtastic.interfaces.ble.receive_service`           | `BLEReceiveRecoveryService`                                         | `BLEReceiveRecoveryController`                                                                    |
-| `meshtastic.interfaces.ble.management_runtime`        | `BLEManagementCommandHandler._start_management_phase()`             | `BLEManagementCommandHandler.start_management_phase()`                                            |
-| `meshtastic.interfaces.ble.management_runtime`        | `BLEManagementCommandHandler._resolve_management_target()`          | `BLEManagementCommandHandler.resolve_management_target()`                                         |
-| `meshtastic.interfaces.ble.management_runtime`        | `BLEManagementCommandHandler._acquire_client_for_target()`          | `BLEManagementCommandHandler.acquire_client_for_target()`                                         |
-| `meshtastic.interfaces.ble.management_runtime`        | `BLEManagementCommandHandler._execute_with_client()`                | `BLEManagementCommandHandler.execute_with_client()`                                               |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandHandler._start_management_phase()`             | `BLEManagementCommandHandler.start_management_phase()`                                            |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandHandler._resolve_management_target()`          | `BLEManagementCommandHandler.resolve_management_target()`                                         |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandHandler._acquire_client_for_target()`          | `BLEManagementCommandHandler.acquire_client_for_target()`                                         |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandHandler._execute_with_client()`                | `BLEManagementCommandHandler.execute_with_client()`                                               |
-| `meshtastic.interfaces.ble.management_compat_service` | `BLEManagementCommandsService._resolve_handler()`                   | `BLEManagementCommandsService._handler_for_shim()`                                                |
-| `meshtastic.interfaces.ble.management_compat_service` | `BLEManagementCommandsService._make_handler()`                      | `BLEManagementCommandsService._handler_for_shim()`                                                |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandsService._resolve_handler()`                   | `BLEManagementCommandsService._handler_for_shim()`                                                |
-| `meshtastic.interfaces.ble.management_service`        | `BLEManagementCommandsService._make_handler()`                      | `BLEManagementCommandsService._handler_for_shim()`                                                |
-| `meshtastic.interfaces.ble.state`                     | `current_state`                                                     | `_current_state`                                                                                  |
-| `meshtastic.interfaces.ble.state`                     | `is_connected`                                                      | `_is_connected`                                                                                   |
-| `meshtastic.interfaces.ble.state`                     | `is_closing`                                                        | `_is_closing`                                                                                     |
-| `meshtastic.interfaces.ble.state`                     | `can_connect`                                                       | `_can_connect`                                                                                    |
-| `meshtastic.interfaces.ble.state`                     | `is_connecting`                                                     | `_is_connecting`                                                                                  |
-| `meshtastic.interfaces.ble.state`                     | `is_active`                                                         | `_is_active`                                                                                      |
-| `meshtastic.interfaces.ble.state`                     | `transition_to()`                                                   | `_transition_to()`                                                                                |
-| `meshtastic.interfaces.ble.state`                     | `reset_to_disconnected()`                                           | `_reset_to_disconnected()`                                                                        |
-| `meshtastic.interfaces.ble.state`                     | `_lock` property (internal compatibility alias)                     | `lock` property                                                                                   |
+| Module                                            | Compatibility symbol                                                | Canonical symbol                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `meshtastic.interfaces.ble.client`                | `BLEClient.find_device()`                                           | `BLEClient.findDevice()`                                     |
+| `meshtastic.interfaces.ble.client`                | `BLEClient._discover()`                                             | `BLEClient.discover()`                                       |
+| `meshtastic.interfaces.ble.client`                | `BLEClient.is_connected()`                                          | `BLEClient.isConnected()`                                    |
+| `meshtastic.interfaces.ble.client`                | `BLEClient.stop_notify()`                                           | `BLEClient.stopNotify()`                                     |
+| `meshtastic.interfaces.ble.client`                | `BLEClient.async_await()`                                           | `BLEClient._async_await()`                                   |
+| `meshtastic.interfaces.ble.client`                | `BLEClient.async_run()`                                             | `BLEClient._async_run()`                                     |
+| `meshtastic.interfaces.ble.errors`                | `BLEErrorHandler.safe_execute()`                                    | `BLEErrorHandler._safe_execute()`                            |
+| `meshtastic.interfaces.ble.errors`                | `BLEErrorHandler.safe_cleanup()`                                    | `BLEErrorHandler._safe_cleanup()`                            |
+| `meshtastic.interfaces.ble.compatibility_service` | `BLECompatibilityEventPublisher.publish_connection_status_legacy()` | `BLECompatibilityEventPublisher.publish_connection_status()` |
+| `meshtastic.ble_interface`                        | `BleakClient`                                                       | `bleak.BleakClient`                                          |
+| `meshtastic.ble_interface`                        | `BleakScanner`                                                      | `bleak.BleakScanner`                                         |
+| `meshtastic.ble_interface`                        | `BLEDevice`                                                         | `bleak.backends.device.BLEDevice`                            |
+| `meshtastic.ble_interface`                        | `BleakError`                                                        | `bleak.exc.BleakError`                                       |
+| `meshtastic.ble_interface`                        | `BleakDBusError`                                                    | `bleak.exc.BleakDBusError`                                   |
+| `meshtastic.interfaces.ble.interface`             | `find_device()`                                                     | `findDevice()`                                               |
+| `meshtastic.interfaces.ble.interface`             | `from_num_handler()`                                                | `BLENotificationDispatcher.from_num_handler()`               |
+| `meshtastic.interfaces.ble.interface`             | `log_radio_handler()`                                               | `BLENotificationDispatcher.log_radio_handler()`              |
+| `meshtastic.interfaces.ble.interface`             | `legacy_log_radio_handler()`                                        | `BLENotificationDispatcher.legacy_log_radio_handler()`       |
+| `meshtastic.interfaces.ble.interface`             | `_from_num_handler()`                                               | `BLENotificationDispatcher.from_num_handler()`               |
+| `meshtastic.interfaces.ble.interface`             | `_log_radio_handler()`                                              | `BLENotificationDispatcher.log_radio_handler()`              |
+| `meshtastic.interfaces.ble.interface`             | `_legacy_log_radio_handler()`                                       | `BLENotificationDispatcher.legacy_log_radio_handler()`       |
+| `meshtastic.interfaces.ble.interface`             | `_fromnum_notify_enabled`                                           | `BLENotificationDispatcher.fromnum_notify_enabled`           |
+| `meshtastic.interfaces.ble.interface`             | `_malformed_notification_count`                                     | `BLENotificationDispatcher.malformed_notification_count`     |
+| `meshtastic.interfaces.ble.interface`             | `_malformed_notification_lock`                                      | `BLENotificationDispatcher.malformed_notification_lock`      |
+| `meshtastic.interfaces.ble.notifications`         | `BLENotificationDispatcher._log_radio_handler()`                    | `BLENotificationDispatcher.log_radio_handler()`              |
+| `meshtastic.interfaces.ble.notifications`         | `BLENotificationDispatcher._legacy_log_radio_handler()`             | `BLENotificationDispatcher.legacy_log_radio_handler()`       |
+| `meshtastic.interfaces.ble.management_runtime`    | `BLEManagementCommandHandler._start_management_phase()`             | `BLEManagementCommandHandler.start_management_phase()`       |
+| `meshtastic.interfaces.ble.management_runtime`    | `BLEManagementCommandHandler._resolve_management_target()`          | `BLEManagementCommandHandler.resolve_management_target()`    |
+| `meshtastic.interfaces.ble.management_runtime`    | `BLEManagementCommandHandler._acquire_client_for_target()`          | `BLEManagementCommandHandler.acquire_client_for_target()`    |
+| `meshtastic.interfaces.ble.management_runtime`    | `BLEManagementCommandHandler._execute_with_client()`                | `BLEManagementCommandHandler.execute_with_client()`          |
+| `meshtastic.interfaces.ble.compatibility_service` | `BLECompatibilityEventService.publish_connection_status_legacy()`   | `BLECompatibilityEventService.publish_connection_status()`   |
+| `meshtastic.interfaces.ble.receive_service`       | `BLEReceiveRecoveryService`                                         | `BLEReceiveRecoveryController`                               |
+| `meshtastic.interfaces.ble.state`                 | `current_state`                                                     | `_current_state`                                             |
+| `meshtastic.interfaces.ble.state`                 | `is_connected`                                                      | `_is_connected`                                              |
+| `meshtastic.interfaces.ble.state`                 | `is_closing`                                                        | `_is_closing`                                                |
+| `meshtastic.interfaces.ble.state`                 | `can_connect`                                                       | `_can_connect`                                               |
+| `meshtastic.interfaces.ble.state`                 | `is_connecting`                                                     | `_is_connecting`                                             |
+| `meshtastic.interfaces.ble.state`                 | `is_active`                                                         | `_is_active`                                                 |
+| `meshtastic.interfaces.ble.state`                 | `transition_to()`                                                   | `_transition_to()`                                           |
+| `meshtastic.interfaces.ble.state`                 | `reset_to_disconnected()`                                           | `_reset_to_disconnected()`                                   |
+| `meshtastic.interfaces.ble.state`                 | `_lock` property (internal compatibility alias)                     | `lock` property                                              |
 
 ### Powermon and Slog
 

@@ -3,12 +3,13 @@
 # pylint: disable=redefined-outer-name
 
 import contextlib
+import logging
 import math
 import threading
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any, Callable, cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from bleak.exc import BleakError
@@ -17,6 +18,7 @@ from bleak.exc import BleakError
 from meshtastic.interfaces.ble import (
     BLEInterface,
 )
+from meshtastic.interfaces.ble.receive_service import BLEReceiveRecoveryController
 from tests._ble_interface_core_support import (
     START_FAILED_MSG,
 )
@@ -174,9 +176,9 @@ def test_receive_recovery_backoff_reaches_configured_cap_for_non_power_of_two(
         raising=True,
     )
 
-    receive_service_mod.BLEReceiveRecoveryService._recover_receive_thread(
-        iface, "receive_thread_fatal"
-    )
+    receive_service_mod.BLEReceiveRecoveryController(
+        cast(Any, iface)
+    ).recover_receive_thread("receive_thread_fatal")
 
     assert wait_calls == [30.0]
     assert iface._read_retry_count == 7
@@ -409,7 +411,6 @@ def test_start_receive_thread_clears_cached_thread_when_start_fails(
 ) -> None:
     """Verify start failures clear cached receive-thread references for service/facade paths."""
     from meshtastic.interfaces.ble.interface import BLEInterface
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
 
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
@@ -455,7 +456,7 @@ def test_start_receive_thread_clears_cached_thread_when_start_fails(
         else:
 
             def start_receive(*, name: str) -> None:
-                BLELifecycleService._start_receive_thread(iface, name=name)
+                iface._get_lifecycle_controller()._start_receive_thread(name=name)
 
         with pytest.raises(RuntimeError, match=START_FAILED_MSG):
             start_receive(name="BLEReceiveStartFailure")
@@ -732,8 +733,6 @@ def test_start_receive_thread_retains_cached_thread_when_start_noops(
     -------
     None
     """
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
-
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
         with _snapshot_receive_start_state(iface):
@@ -756,7 +755,9 @@ def test_start_receive_thread_retains_cached_thread_when_start_noops(
                 on_start=_assert_cached_thread,
             )
 
-            BLELifecycleService._start_receive_thread(iface, name="BLEReceiveStartNoop")
+            iface._get_lifecycle_controller()._start_receive_thread(
+                name="BLEReceiveStartNoop"
+            )
 
             assert start_calls == [thread_like]
             assert iface._receiveThread is cast(Any, thread_like)
@@ -768,8 +769,6 @@ def test_start_receive_thread_pending_marker_allows_later_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify inconclusive start markers allow restart after pending-timeout expiry."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
-
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
         with _snapshot_receive_start_state(iface):
@@ -778,8 +777,8 @@ def test_start_receive_thread_pending_marker_allows_later_restart(
             _run_receive_pending_marker_scenario(
                 monkeypatch,
                 iface=iface,
-                start_receive=lambda name: BLELifecycleService._start_receive_thread(
-                    iface, name=name
+                start_receive=lambda name: iface._get_lifecycle_controller()._start_receive_thread(
+                    name=name
                 ),
                 prefix="BLEReceivePending",
                 t0=100.0,
@@ -792,16 +791,14 @@ def test_start_receive_thread_from_current_thread_defers_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Restart requests from the active receive thread should defer replacement."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
-
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
         with _snapshot_receive_start_state(iface):
             _run_receive_current_thread_deferral_scenario(
                 monkeypatch,
                 iface=iface,
-                start_receive=lambda name: BLELifecycleService._start_receive_thread(
-                    iface, name=name
+                start_receive=lambda name: iface._get_lifecycle_controller()._start_receive_thread(
+                    name=name
                 ),
                 deferred_name="BLEReceiveDeferred",
                 t0=200.0,
@@ -868,8 +865,6 @@ def test_start_receive_thread_ident_only_probe_keeps_pending_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ident-only start probes should not clear pending marker or recovery attempts."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
-
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     try:
         with _snapshot_receive_start_state(iface):
@@ -890,7 +885,9 @@ def test_start_receive_thread_ident_only_probe_keeps_pending_state(
                 created_threads=[thread_like],
             )
 
-            BLELifecycleService._start_receive_thread(iface, name="BLEReceiveIdentOnly")
+            iface._get_lifecycle_controller()._start_receive_thread(
+                name="BLEReceiveIdentOnly"
+            )
 
             assert iface._receiveThread is cast(Any, thread_like)
             assert iface._receive_start_pending is True
@@ -899,3 +896,48 @@ def test_start_receive_thread_ident_only_probe_keeps_pending_state(
             assert start_calls == [thread_like]
     finally:
         iface.close()
+
+
+class TestReceiveRecoveryControllerEmptyReadWarnings:
+    """Empty-read warning behavior for polling and notify-driven modes."""
+
+    class _Iface:
+        def __init__(self, *, fromnum_notify_enabled: bool) -> None:
+            self._fromnum_notify_enabled = fromnum_notify_enabled
+            self._last_empty_read_warning = 0.0
+            self._suppressed_empty_read_warnings = 0
+
+    def test_log_empty_read_warning_uses_debug_in_polling_mode(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Polling mode without FROMNUM notifications should avoid warning-level noise."""
+        iface = self._Iface(fromnum_notify_enabled=False)
+        controller = BLEReceiveRecoveryController(cast(Any, iface))
+
+        with patch(
+            "meshtastic.interfaces.ble.receive_service.time.monotonic",
+            return_value=100.0,
+        ):
+            with caplog.at_level(logging.DEBUG):
+                controller.log_empty_read_warning()
+
+        assert "BLE receive queue empty after retries" in caplog.text
+        assert "polling mode without FROMNUM notifications" in caplog.text
+        assert not any(record.levelno >= logging.WARNING for record in caplog.records)
+
+    def test_log_empty_read_warning_uses_debug_with_fromnum_notify(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Notify mode also permits advisory write wakeups with no response data."""
+        iface = self._Iface(fromnum_notify_enabled=True)
+        controller = BLEReceiveRecoveryController(cast(Any, iface))
+
+        with patch(
+            "meshtastic.interfaces.ble.receive_service.time.monotonic",
+            return_value=100.0,
+        ):
+            with caplog.at_level(logging.DEBUG):
+                controller.log_empty_read_warning()
+
+        assert "BLE receive queue empty after retries" in caplog.text
+        assert not any(record.levelno >= logging.WARNING for record in caplog.records)

@@ -169,9 +169,10 @@ class BLEReceiveRecoveryService:
             ):  # noqa: BLE001 - best-effort cache attach
                 iface._receive_recovery_controller = controller
             return controller
-        with contextlib.suppress(
-            Exception
-        ), state_lock:  # noqa: BLE001 - best-effort cache attach
+        with (
+            contextlib.suppress(Exception),
+            state_lock,
+        ):  # noqa: BLE001 - best-effort cache attach
             cached = _get_declared_member(iface, "_receive_recovery_controller")
             cached_controller = BLEReceiveRecoveryService._resolve_controller_candidate(
                 cached,

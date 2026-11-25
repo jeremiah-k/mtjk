@@ -339,6 +339,8 @@ class BLEManagementCommandHandler:
             if isinstance(instance_dict, dict) and method_name in instance_dict:
                 return _invoke_override()
             try:
+                # Loaded by string: the interface module imports this module, so
+                # a module-level import would be circular.
                 interface_module = _load_runtime_module(
                     "meshtastic.interfaces.ble.interface"
                 )

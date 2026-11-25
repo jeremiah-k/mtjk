@@ -863,7 +863,9 @@ def test_connect_rechecks_ownership_before_publishing_connected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """connect() should discard a client that becomes stale after the first check."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
+    from meshtastic.interfaces.ble.lifecycle_ownership_runtime import (
+        BLEConnectionOwnershipLifecycleCoordinator,
+    )
 
     target_address = "AA:BB:CC:DD:EE:12"
     iface = _build_minimal_connect_test_interface()
@@ -902,9 +904,9 @@ def test_connect_rechecks_ownership_before_publishing_connected(
         raising=True,
     )
     monkeypatch.setattr(
-        BLELifecycleService,
+        BLEConnectionOwnershipLifecycleCoordinator,
         "_get_connected_client_status_locked",
-        _next_status,
+        lambda self, client: _next_status(cast("BLEInterface", self), client),
         raising=True,
     )
     monkeypatch.setattr(

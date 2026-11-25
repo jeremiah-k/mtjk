@@ -1027,7 +1027,9 @@ def test_finalize_connection_gates_cleans_up_when_client_loses_ownership_mid_fin
     is_closing: bool,
 ) -> None:
     """Gate finalization should clean up provisional claims when ownership disappears mid-finalize."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
+    from meshtastic.interfaces.ble.lifecycle_ownership_runtime import (
+        BLEConnectionOwnershipLifecycleCoordinator,
+    )
 
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     connected_client = DummyClient()
@@ -1040,15 +1042,15 @@ def test_finalize_connection_gates_cleans_up_when_client_loses_ownership_mid_fin
         iface._connection_alias_key = "alias-key"
 
     monkeypatch.setattr(
-        BLELifecycleService,
+        BLEConnectionOwnershipLifecycleCoordinator,
         "_get_connected_client_status",
-        lambda _iface, _client: (True, False),
+        lambda self, _client: (True, False),
         raising=True,
     )
     monkeypatch.setattr(
-        BLELifecycleService,
+        BLEConnectionOwnershipLifecycleCoordinator,
         "_get_connected_client_status_locked",
-        lambda _iface, _client: (False, is_closing),
+        lambda self, _client: (False, is_closing),
         raising=True,
     )
     monkeypatch.setattr(iface, "_mark_address_keys_connected", lambda *_keys: None)
@@ -1073,7 +1075,9 @@ def test_finalize_connection_gates_logs_when_result_is_already_stale(
     is_closing: bool,
 ) -> None:
     """Gate finalization should no-op when initial ownership check already reports stale result."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
+    from meshtastic.interfaces.ble.lifecycle_ownership_runtime import (
+        BLEConnectionOwnershipLifecycleCoordinator,
+    )
 
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     connected_client = DummyClient()
@@ -1081,9 +1085,9 @@ def test_finalize_connection_gates_logs_when_result_is_already_stale(
     mark_disconnected_calls: list[tuple[str | None, str | None]] = []
 
     monkeypatch.setattr(
-        BLELifecycleService,
+        BLEConnectionOwnershipLifecycleCoordinator,
         "_get_connected_client_status",
-        lambda _iface, _client: (False, is_closing),
+        lambda self, _client: (False, is_closing),
         raising=True,
     )
     monkeypatch.setattr(
@@ -1116,14 +1120,16 @@ def test_is_owned_connected_client_reads_status_tuple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Owned-client helper should return the first element of status tuple."""
-    from meshtastic.interfaces.ble.lifecycle_service import BLELifecycleService
+    from meshtastic.interfaces.ble.lifecycle_ownership_runtime import (
+        BLEConnectionOwnershipLifecycleCoordinator,
+    )
 
     iface = _build_interface(monkeypatch, DummyClient(), start_receive_thread=False)
     client = cast(BLEClient, DummyClient())
     monkeypatch.setattr(
-        BLELifecycleService,
+        BLEConnectionOwnershipLifecycleCoordinator,
         "_get_connected_client_status",
-        lambda _iface, _client: (True, False),
+        lambda self, _client: (True, False),
         raising=True,
     )
     assert iface._is_owned_connected_client(client) is True
