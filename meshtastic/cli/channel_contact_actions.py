@@ -33,6 +33,7 @@ class ChannelContactHooks:
     is_local_destination: Callable[[Any, str], bool]
     modem_preset_shorthands: tuple[tuple[tuple[str, ...], str, str, str], ...]
     qr_render: Callable[[str], str] | None = None
+    result_print: Callable[[str], None] | None = None
 
 
 def _handle_contact_import(context: CliContext) -> None:
@@ -405,6 +406,7 @@ def _handle_channel_contact_display(
     args = context.args
     interface = context.interface
 
+    result_print = hooks.result_print or hooks.cli_print
     if args.qr or args.qr_all:
         context.outcome.close_now = True
         url = interface.getNode(args.dest, True, **context.get_node_kwargs).getURL(
@@ -419,7 +421,7 @@ def _handle_channel_contact_display(
             url,
             description=description,
             qr_render=hooks.qr_render,
-            cli_print=hooks.cli_print,
+            cli_print=result_print,
         )
 
     if args.contact_qr:
@@ -433,7 +435,7 @@ def _handle_channel_contact_display(
             url,
             description="Contact URL",
             qr_render=hooks.qr_render,
-            cli_print=hooks.cli_print,
+            cli_print=result_print,
         )
 
 

@@ -6,7 +6,7 @@ import argparse
 import threading
 from types import SimpleNamespace
 from typing import NoReturn
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -23,8 +23,10 @@ from meshtastic.configure_verify import (
     ConfigureReconnectResult,
     LocalApplyStatus,
     LocalApplyVerification,
+    _reload_requested_sections,
 )
 from meshtastic.errors import RequestRejectedError
+from meshtastic.node_runtime.settings_runtime.message import _NodeSettingsMessageBuilder
 from meshtastic.protobuf import channel_pb2, localonly_pb2
 
 pytestmark = pytest.mark.unit
@@ -47,15 +49,26 @@ def _node() -> MagicMock:
 
 
 @pytest.mark.parametrize(
-    "path", ["bluetooth.bluetooth", "bluetooth.enabled.extra", "power.ls_secs.extra"]
+    "path",
+    [
+        "bluetooth.bluetooth",
+        "bluetooth.enabled.extra",
+        "power.ls_secs.extra",
+        "version",
+        "version.foo",
+    ],
 )
 def test_invalid_get_path_does_not_read_or_print_values(path: str) -> None:
     node = _node()
+    node.localConfig.network.wifi_psk = "wifi-secret-sentinel"
+    node.moduleConfig.mqtt.password = "mqtt-secret-sentinel"
     output: list[str] = []
     assert not preference_runtime.get_pref(
         node, path, allow_secrets=True, cli_print=output.append
     )
     assert "123456" not in "\n".join(output)
+    assert "wifi-secret-sentinel" not in "\n".join(output)
+    assert "mqtt-secret-sentinel" not in "\n".join(output)
     node.requestConfig.assert_not_called()
 
 
@@ -115,16 +128,26 @@ def _set_args() -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize("mutation", ["write", "commit"])
 def test_expected_values_are_detached_before_device_writes(
     monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
 ) -> None:
     node = _node()
     interface = _interface(node)
     verify = MagicMock()
     monkeypatch.setattr(set_actions, "_verify_local_set_apply", verify)
-    node.commitSettingsTransaction.side_effect = lambda: setattr(
-        node.localConfig.lora, "hop_limit", 2
-    )
+    if mutation == "commit":
+        node.commitSettingsTransaction.side_effect = lambda: setattr(
+            node.localConfig.lora, "hop_limit", 2
+        )
+    else:
+
+        def mutate(field: str) -> None:
+            if field == "lora":
+                node.localConfig.lora.hop_limit = 2
+
+        node.writeConfig.side_effect = mutate
     sleeps: list[float] = []
     set_actions._handle_set_command(
         interface,
@@ -158,7 +181,9 @@ def test_partial_transaction_failure_attempts_close_and_preserves_error() -> Non
             sleep=lambda _seconds: None,
         )
     assert caught.value is error
-    assert node.writeConfig.call_count == 2
+    assert node.writeConfig.call_args_list == [call("lora"), call("power")]
+    assert not node.localConfig.HasField("lora")
+    assert not node.localConfig.HasField("power")
     node.beginSettingsTransaction.assert_called_once_with()
     node.commitSettingsTransaction.assert_called_once_with()
     assert "Any writes already accepted may be committed" in str(output.call_args_list)
@@ -189,6 +214,7 @@ def test_secret_preflight_error_and_returning_exit_fail_closed() -> None:
     assert node.localConfig.bluetooth.fixed_pin == 123456
 
 
+@pytest.mark.parametrize("fast_reconnect", [False, True])
 @pytest.mark.parametrize(
     "failure",
     [
@@ -199,11 +225,16 @@ def test_secret_preflight_error_and_returning_exit_fail_closed() -> None:
     ],
 )
 def test_readback_send_failure_or_missing_section_attempts_reconnect(
-    monkeypatch: pytest.MonkeyPatch, failure: Exception | LocalApplyVerification
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception | LocalApplyVerification,
+    fast_reconnect: bool,
 ) -> None:
     node = _node()
     interface = _interface(node)
-    interface.isConnected.clear()
+    if fast_reconnect:
+        interface.configId = 2
+    else:
+        interface.isConnected.clear()
     readback = MagicMock(
         side_effect=failure if isinstance(failure, Exception) else None,
         return_value=failure,
@@ -223,7 +254,20 @@ def test_readback_send_failure_or_missing_section_attempts_reconnect(
         cli_exit=_exit,
         cli_print=MagicMock(),
     )
-    reconnect.assert_called_once()
+    readback.assert_called_once_with(
+        node,
+        config_fields={"lora": {"region": 1}, "power": {"ls_secs": 20}},
+        module_config_fields=None,
+        timeout_sec=set_actions.LOCAL_SET_APPLY_VERIFY_SECONDS,
+    )
+    reconnect.assert_called_once_with(
+        interface,
+        timeout=configure_actions.CONFIG_RECONNECT_WAIT_SECONDS,
+        node_dest="^local",
+        verify_config_fields={"lora": {"region": 1}, "power": {"ls_secs": 20}},
+        verify_module_config_fields=None,
+        verify_channel_url_against_state=configure_actions._verify_channel_url_against_state,
+    )
 
 
 def test_region_only_warning_is_forced_when_reload_is_unavailable(
@@ -303,3 +347,94 @@ def test_readback_routing_rejection_remains_terminal(
             cli_print=MagicMock(),
         )
     reconnect.assert_not_called()
+
+
+@pytest.mark.parametrize("report_error", [RuntimeError("sink"), KeyboardInterrupt()])
+def test_report_failure_cannot_skip_partial_write_cleanup(
+    report_error: BaseException,
+) -> None:
+    node = _node()
+
+    def write(field: str) -> None:
+        if field == "power":
+            raise OSError("write failed")
+
+    def report(message: str, **_kwargs: object) -> None:
+        if "Any writes already accepted" in message:
+            raise report_error
+
+    node.writeConfig.side_effect = write
+    with pytest.raises(
+        KeyboardInterrupt if isinstance(report_error, KeyboardInterrupt) else OSError
+    ):
+        set_actions._handle_set_command(
+            _interface(node), _set_args(), {}, cli_exit=_exit, cli_print=report
+        )
+    assert node.writeConfig.call_args_list == [call("lora"), call("power")]
+    node.commitSettingsTransaction.assert_called_once_with()
+
+
+def test_pending_section_payload_is_detached_from_inbound_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _node()
+    interface = _interface(node)
+    builder = _NodeSettingsMessageBuilder(node)
+    sent = []
+
+    def write(field: str) -> None:
+        if field == "lora":
+            node.localConfig.power.ls_secs = 10
+        else:
+            node.localConfig.power.ls_secs = 11
+        sent.append(builder.build_write_message(field))
+
+    node.writeConfig.side_effect = write
+    monkeypatch.setattr(set_actions, "_verify_local_set_apply", MagicMock())
+    set_actions._handle_set_command(
+        interface,
+        _set_args(),
+        {},
+        cli_exit=_exit,
+        cli_print=MagicMock(),
+        sleep=lambda _: None,
+    )
+    assert sent[0].set_config.lora.hop_limit == 3
+    assert sent[1].set_config.power.ls_secs == 20
+    assert builder.build_write_message("power").set_config.power.ls_secs == 11
+
+
+def test_readback_send_failure_invalidates_later_sections() -> None:
+    node = _node()
+    send = MagicMock(side_effect=OSError("link down"))
+    with pytest.raises(OSError):
+        _reload_requested_sections(
+            node,
+            config_fields={"lora": {"hop_limit": 3}, "power": {"ls_secs": 20}},
+            module_config_fields=None,
+            send_request=send,
+            wait_for_section=MagicMock(),
+            sent_request_ids=[],
+        )
+    assert not node.localConfig.HasField("lora")
+    assert not node.localConfig.HasField("power")
+    send.assert_called_once_with(
+        node, node.localConfig.DESCRIPTOR.fields_by_name["lora"]
+    )
+
+
+def test_reconnect_does_not_verify_staged_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _node()
+    interface = _interface(node)
+    monkeypatch.setattr(configure_actions, "CONFIG_REBOOT_PROBE_SECONDS", 0)
+    result = configure_actions._post_configure_reconnect_and_verify(
+        interface,
+        timeout=1,
+        node_dest="^local",
+        verify_config_fields={"power": {"ls_secs": 10}},
+    )
+    assert result is ConfigureReconnectResult.VERIFICATION_INCOMPLETE
+    interface.waitForConfig.assert_called_once_with()
+    assert not node.localConfig.HasField("power")

@@ -1172,6 +1172,7 @@ def test_embedded_invalid_channel_field_reports_guidance_without_leaking_selecti
         ["--ch-index", "0", "--ch-set", "not_a_field", "1", "--quiet"],
         output=output.append,
     )
+    assert not result.succeeded
     assert not isinstance(result.error, TypeError)
     assert "not_a_field" in result.output
     assert "Choices are" in result.output

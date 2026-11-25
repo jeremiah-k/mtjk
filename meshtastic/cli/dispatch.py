@@ -199,6 +199,7 @@ def _build_connected_dispatch_hooks(
     channel_contact_hooks = channel_contact_actions.ChannelContactHooks(
         cli_exit=cli_exit,
         cli_print=cli_print,
+        result_print=lambda message: cli_print(message, force=True),
         get_channel_index=current_channel_index,
         set_channel_index=set_current_channel_index,
         resolve_pref=preference_runtime.resolve_pref,

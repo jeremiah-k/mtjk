@@ -1,6 +1,9 @@
 """Settings request/response and admin command-family runtime owners."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, cast
 
 from google.protobuf.descriptor import FieldDescriptor
@@ -14,6 +17,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ERR_INVALID_CONFIG_NAME = "Error: No valid config with name {}"
+
+# A CLI batch can validate several sections before the first write. Receive
+# callbacks may change the shared cache while those writes are in progress.
+# Bind the detached section to this call, not to the Node or another thread.
+_WRITE_SECTION: ContextVar[tuple[object, str, str, Message] | None] = ContextVar(
+    "config_write_section", default=None
+)
+
+
+@contextmanager
+def _config_write_section(
+    node: object, config_name: str, setter_name: str, section: Message
+) -> Iterator[None]:
+    """Use the validated section for one writeConfig invocation."""
+    copy = type(section)()
+    copy.CopyFrom(section)
+    token = _WRITE_SECTION.set((node, config_name, setter_name, copy))
+    try:
+        yield
+    finally:
+        _WRITE_SECTION.reset(token)
 
 
 class _NodeSettingsMessageBuilder:
@@ -82,6 +106,9 @@ class _NodeSettingsMessageBuilder:
 
     def get_write_config_entry(self, config_name: str) -> tuple[str, Any] | None:
         """Return dispatch entry for one write-config section when available."""
+        staged = _WRITE_SECTION.get()
+        if staged is not None and staged[0] is self._node and staged[1] == config_name:
+            return staged[2], staged[3]
         return self._write_config_dispatch().get(config_name)
 
     def build_write_message(self, config_name: str) -> admin_pb2.AdminMessage:

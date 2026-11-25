@@ -63,7 +63,10 @@ def test_main_configure_post_reconnect_verifies_matching_config_values(
     )
     iface.isConnected = threading.Event()
     iface.isConnected.set()
-    iface.waitForConfig = MagicMock()
+    # The reload is what proves the value: the device resends the section.
+    iface.waitForConfig = MagicMock(
+        side_effect=lambda: setattr(target_local.power, "ls_secs", 222)
+    )
     target_node.requestConfig = MagicMock(
         side_effect=lambda field_desc: (
             setattr(target_local.power, "ls_secs", 222)

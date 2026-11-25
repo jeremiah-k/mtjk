@@ -668,6 +668,29 @@ def _wait_for_section_reload_under_deadline(
     return _received()
 
 
+def _invalidate_requested_config_sections(
+    target_node: Any,
+    *,
+    config_fields: dict[str, dict[str, Any]] | None,
+    module_config_fields: dict[str, dict[str, Any]] | None,
+) -> None:
+    """Mark every requested section unknown before verification or after a failed apply."""
+    for root_name, fields in (
+        ("localConfig", config_fields),
+        ("moduleConfig", module_config_fields),
+    ):
+        if not fields:
+            continue
+        root = getattr(target_node, root_name, None)
+        if root is None:
+            continue
+        descriptors = getattr(root.DESCRIPTOR, "fields_by_name", {})
+        for section in fields:
+            name = meshtastic.util.camel_to_snake(section)
+            if name in descriptors:
+                root.ClearField(name)
+
+
 def _reload_requested_sections(
     target_node: Any,
     *,
@@ -710,6 +733,13 @@ def _reload_requested_sections(
         Requested section names that were skipped or not repopulated, in
         request order.
     """
+    # Clear the entire requested set before the first request. A send failure
+    # must not leave later staged sections looking like received device state.
+    _invalidate_requested_config_sections(
+        target_node,
+        config_fields=config_fields,
+        module_config_fields=module_config_fields,
+    )
     not_repopulated: list[str] = []
     for (
         fields,

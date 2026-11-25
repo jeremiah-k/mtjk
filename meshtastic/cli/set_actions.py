@@ -44,9 +44,14 @@ from meshtastic.cli.preference_runtime import (
     split_compound_name,
     walk_config_path,
 )
-from meshtastic.configure_verify import LocalApplyStatus, verify_local_config_apply
+from meshtastic.configure_verify import (
+    LocalApplyStatus,
+    _invalidate_requested_config_sections,
+    verify_local_config_apply,
+)
 from meshtastic.errors import RequestRejectedError, ResponseDecodeError
 from meshtastic.mesh_interface import MeshInterface
+from meshtastic.node_runtime.settings_runtime.message import _config_write_section
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +441,10 @@ def _handle_set_command(
         return
 
     pre_write_config_id = getattr(interface, "configId", None)
-    live_configs = (node.localConfig, node.moduleConfig)
+    # Replay assignment reporting on detached copies, never on an untransmitted
+    # live section. The preflight snapshot remains the source of the wire values.
+    report_snapshot = ConfigSnapshotCopies.from_node(node)
+    live_configs = (report_snapshot.local_config, report_snapshot.module_config)
     fields: set[str] = set()
     for raw_pref_name, raw_value in set_entries:
         normalized_pref_name = normalize_pref_name(raw_pref_name)
@@ -468,11 +476,14 @@ def _handle_set_command(
 
     local_node = getattr(interface, "localNode", None)
     verify = bool(fields and node is local_node and not getattr(node, "noProto", False))
-    if verify:
-        # Freeze the validated detached copy: inbound responses may replace the
-        # live cache during assignment, a write, or the commit/settle wait.
-        config_fields, module_config_fields = _freeze_set_expected_values(
-            snapshot, set_entries
+    # Freeze the validated detached copy: inbound responses may replace the
+    # live cache during assignment, a write, or the commit/settle wait.
+    config_fields, module_config_fields = _freeze_set_expected_values(
+        snapshot, set_entries
+    )
+    if fields != (set(config_fields) | set(module_config_fields)):
+        _terminate_cli(
+            cli_exit, "ERROR: could not freeze all requested --set sections."
         )
 
     if fields:
@@ -485,11 +496,36 @@ def _handle_set_command(
         try:
             for field in sorted(fields):
                 cli_print(f"Writing {field} configuration to device")
-                node.writeConfig(field)
+                is_module_section = field not in config_fields
+                root = node.moduleConfig if is_module_section else node.localConfig
+                source = (
+                    snapshot.module_config
+                    if is_module_section
+                    else snapshot.local_config
+                )
+                setter = "set_module_config" if is_module_section else "set_config"
+                section = getattr(source, field)
+                # Preserve the historical facade/cache shape for writeConfig
+                # callers, but send from the detached section even if an
+                # inbound response changes the cache before serialization.
+                getattr(root, field).CopyFrom(section)
+                with _config_write_section(node, field, setter, section):
+                    node.writeConfig(field)
             if transaction:
                 commit_attempted = True
                 node.commitSettingsTransaction()
         except BaseException:
+            # The radio may have accepted some writes, and others may not have
+            # been sent. Neither the original nor the staged cache can prove
+            # device state; make all touched sections reload on the next read.
+            try:
+                _invalidate_requested_config_sections(
+                    node,
+                    config_fields=config_fields,
+                    module_config_fields=module_config_fields,
+                )
+            except Exception:
+                logger.warning("Could not invalidate failed --set cache", exc_info=True)
             if transaction:
                 # Firmware exposes no abort. Use the same best-effort closure
                 # policy as --configure and preserve the original failure.

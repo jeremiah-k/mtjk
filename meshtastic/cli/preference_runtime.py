@@ -1200,7 +1200,7 @@ def get_pref(
         obj_desc = config.DESCRIPTOR
         config_type = obj_desc.fields_by_name.get(name[0])
         pref = None
-        if config_type:
+        if config_type is not None and config_type.message_type is not None:
             pref = config_type.message_type.fields_by_name.get(snake_name)
             if valid_path and (pref is not None or whole_field):
                 found = True

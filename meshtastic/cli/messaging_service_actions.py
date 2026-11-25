@@ -760,8 +760,10 @@ def _validate_cli_sort_field(
         *node_data.get_known_field_paths(observed_nodes),
     ]
     resolved = node_data._resolve_field_alias(sort_field)
-    available_set = set(available)
-    if resolved not in available_set and sort_field not in available_set:
+    available_set = set(available) - {"N"}
+    if resolved == "N" or (
+        resolved not in available_set and sort_field not in available_set
+    ):
         choices = textwrap.fill(
             ", ".join(sorted(available_set)),
             width=100,

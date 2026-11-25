@@ -1514,7 +1514,6 @@ EMBEDDED_OPTION_DESTS: frozenset[str] = frozenset(
         "sort",
         "limit",
         "private",
-        "reply",
         "ack",
         "quiet",
         "input_kb_char",

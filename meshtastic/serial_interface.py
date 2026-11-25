@@ -24,6 +24,7 @@ except ImportError:
 import serial  # type: ignore[import-untyped]
 
 import meshtastic.util
+from meshtastic._deadline import _remaining_timeout
 from meshtastic.cancellation import (
     ConnectionCancelledError,
     _cancellable_init,
@@ -297,7 +298,7 @@ class SerialInterface(StreamInterface):
         assert retry_budget is not None
         retry_window = _RetryWindow.start(
             now=time.monotonic(),
-            duration=retry_budget,
+            duration=_remaining_timeout(retry_budget),
             max_attempts=SERIAL_CONNECT_MAX_ATTEMPTS,
         )
         for attempt in range(1, SERIAL_CONNECT_MAX_ATTEMPTS + 1):
@@ -382,7 +383,7 @@ class SerialInterface(StreamInterface):
                     self.stream = None
                 if self._dev_path_auto_detected:
                     self.devPath = None
-                _connection_sleep(retry_delay)
+                _connection_sleep(_remaining_timeout(retry_delay))
 
     def _ensure_stream_for_connect_locked(self, *, requires_stream: bool) -> None:
         """Open/reopen serial stream atomically under StreamInterface connect lock."""

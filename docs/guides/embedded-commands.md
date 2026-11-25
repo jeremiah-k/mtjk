@@ -101,7 +101,7 @@ node database changes, preference backups, device file deletion, input events,
 and connection-status/UI reads. Consult capabilities for exact option spellings.
 Configuration writes retain CLI validation, batching, and device verification.
 
-Transport selection, listening, power monitoring, tunnels, interactive flows,
+Transport selection, listening (including automatic `--reply`), power monitoring, tunnels, interactive flows,
 firmware upload, and file-based configure/import/export workflows belong to the
 standalone CLI. Unsupported options fail before actions run. The embedding
 application owns authorization, destination restrictions, and any narrower
