@@ -6,7 +6,10 @@ import os
 import platform
 import struct
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Final
+from unittest.mock import Mock
 
 import pytest
 
@@ -320,6 +323,23 @@ def test_read_and_write_use_file_descriptor(
 
 
 @pytest.mark.unit
+def test_short_write_reports_failure(
+    fake_kernel_device: tuple[list[Any], list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial packet write must be reported without sending a second packet."""
+    write = Mock(return_value=1)
+    monkeypatch.setattr(os, "write", write)
+    device = LinuxTunDevice()
+    try:
+        with pytest.raises(OSError, match="Short TUN packet write"):
+            device.write(b"packet")
+        write.assert_called_once_with(_FAKE_FD, b"packet")
+    finally:
+        device.close()
+
+
+@pytest.mark.unit
 def test_close_is_idempotent_and_guards_operations(
     fake_kernel_device: tuple[list[Any], list[Any]],
     monkeypatch: pytest.MonkeyPatch,
@@ -428,3 +448,101 @@ def test_real_kernel_attaches_and_releases_tun_interface() -> None:
 
     with pytest.raises(OSError, match="closed"):
         device.read()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("wake", ["packet", "close"])
+def test_idle_nonblocking_read_wakes(
+    monkeypatch: pytest.MonkeyPatch, wake: str
+) -> None:
+    """Use a real pipe to exercise readiness for both data and shutdown."""
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(read_fd, False)
+    reading = threading.Event()
+    real_read = os.read
+
+    def read(fd: int, size: int) -> bytes:
+        try:
+            return real_read(fd, size)
+        except BlockingIOError:
+            reading.set()
+            raise
+
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(os, "open", lambda *_args: os.dup(read_fd))
+            patcher.setattr(
+                tunnel_device.fcntl,
+                "ioctl",
+                lambda *_args: _resolved_name_buffer("mesh0"),
+            )
+            patcher.setattr(os, "read", read)
+            device = LinuxTunDevice()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(device.read)
+                try:
+                    assert reading.wait(5)
+                    if wake == "packet":
+                        os.write(write_fd, b"packet")
+                        assert future.result(5) == b"packet"
+                finally:
+                    device.close()
+                if wake == "close":
+                    with pytest.raises(OSError, match="closed"):
+                        future.result(5)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+@pytest.mark.unit
+def test_close_waits_for_descriptor_write(
+    fake_kernel_device: tuple[list[Any], list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fd cannot be closed/reused between lookup and a bounded native write."""
+    _, closed_fds = fake_kernel_device
+    device = LinuxTunDevice()
+    writing = threading.Event()
+    release = threading.Event()
+
+    def write(fd: int, data: bytes) -> int:
+        assert fd == _FAKE_FD
+        writing.set()
+        assert release.wait(5)
+        assert not closed_fds
+        return len(data)
+
+    monkeypatch.setattr(os, "write", write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writer = pool.submit(device.write, b"packet")
+        try:
+            assert writing.wait(5)
+            closer = pool.submit(device.close)
+            assert device._closed.wait(5)
+            assert not closed_fds
+        finally:
+            release.set()
+        writer.result(5)
+        closer.result(5)
+    assert closed_fds == [_FAKE_FD]
+
+
+@pytest.mark.unit
+def test_control_descriptor_is_opened_nonblocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both idle reads and backpressured writes must be bounded at the syscall."""
+    calls: list[tuple[str, int]] = []
+
+    def open_device(path: str, flags: int) -> int:
+        calls.append((path, flags))
+        return _FAKE_FD
+
+    monkeypatch.setattr(os, "open", open_device)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    monkeypatch.setattr(
+        tunnel_device.fcntl, "ioctl", lambda *_args: _resolved_name_buffer("mesh0")
+    )
+    device = LinuxTunDevice()
+    device.close()
+    assert calls == [(TUN_CONTROL_DEVICE, os.O_RDWR | os.O_NONBLOCK)]

@@ -20,8 +20,11 @@ import ipaddress
 import logging
 import os
 import platform
+import select
+import socket
 import struct
 import subprocess
+import threading
 from types import ModuleType
 from typing import Final
 
@@ -121,10 +124,11 @@ class LinuxTunDevice:
     used (``up``/``ifconfig``/``read``/``write``/``close``) so it can serve
     as a drop-in replacement.
 
-    Note that a blocking :meth:`read` is not interrupted by :meth:`close`
-    called from another thread (close does not reliably wake a blocked
-    reader on Linux). The tunnel keeps its reader on a daemon thread with a
-    join timeout, matching the historical PyTap2-based shutdown behavior.
+    The descriptor is nonblocking. Idle reads wait on TUN readiness or a
+    close notification from a private socket pair.
+    Writes do not block on a full kernel queue; they report
+    ``BlockingIOError`` instead. Descriptor lookup and I/O are serialized
+    with close to prevent fd reuse.
     """
 
     def __init__(self, *, name: str | None = None, mtu: int = DEFAULT_MTU) -> None:
@@ -155,7 +159,11 @@ class LinuxTunDevice:
         self.mtu = mtu
         self.name = ""
         self._fd: int | None = None
-        fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR)
+        self._io_lock = threading.Lock()
+        self._read_lock = threading.Lock()
+        self._close_lock = threading.Lock()
+        self._closed = threading.Event()
+        fd = os.open(TUN_CONTROL_DEVICE, os.O_RDWR | os.O_NONBLOCK)
         try:
             # Preserve PyTap2's naming contract: a supplied name is a prefix
             # and the kernel chooses the numeric suffix ("mesh" -> "mesh0").
@@ -169,16 +177,17 @@ class LinuxTunDevice:
                 IFF_TUN | IFF_NO_PI,
             )
             resolved = fcntl.ioctl(fd, TUNSETIFF, request)
+            self.name = resolved[:IFNAMSIZ].split(b"\x00", 1)[0].decode("ascii")
+            logger.debug("Opened TUN interface %s (mtu=%d)", self.name, self.mtu)
+            self._wake_reader, self._wake_writer = socket.socketpair()
+            self._fd = fd
         except BaseException:
             os.close(fd)
             raise
-        self.name = resolved[:IFNAMSIZ].split(b"\x00", 1)[0].decode("ascii")
-        self._fd = fd
-        logger.debug("Opened TUN interface %s (mtu=%d)", self.name, self.mtu)
 
     def _open_fd(self) -> int:
         """Return the device file descriptor or raise if already closed."""
-        if self._fd is None:
+        if self._closed.is_set() or self._fd is None:
             raise OSError("TUN device is closed")
         return self._fd
 
@@ -247,7 +256,22 @@ class LinuxTunDevice:
         OSError
             If the device is closed or the read fails.
         """
-        return os.read(self._open_fd(), MAX_IP_PACKET_SIZE)
+        # Keep both descriptors valid until the readiness wait returns. The
+        # I/O lock is released during that wait so writes can still proceed.
+        poller = None
+        with self._read_lock:
+            while True:
+                with self._io_lock:
+                    fd = self._open_fd()
+                    try:
+                        return os.read(fd, MAX_IP_PACKET_SIZE)
+                    except BlockingIOError:
+                        pass
+                if poller is None:
+                    poller = select.poll()
+                    poller.register(fd, select.POLLIN)
+                    poller.register(self._wake_reader, select.POLLIN)
+                poller.poll()
 
     def write(self, data: bytes) -> None:
         """Write one raw IP packet to the TUN device.
@@ -262,11 +286,26 @@ class LinuxTunDevice:
         OSError
             If the device is closed or the write fails.
         """
-        os.write(self._open_fd(), data)
+        with self._io_lock:
+            written = os.write(self._open_fd(), data)
+            if written != len(data):
+                raise OSError(f"Short TUN packet write: {written} of {len(data)} bytes")
 
     def close(self) -> None:
         """Close the device file descriptor. Idempotent."""
-        if self._fd is not None:
-            os.close(self._fd)
-            self._fd = None
-            logger.debug("Closed TUN interface %s", self.name)
+        with self._close_lock:
+            if self._fd is None:
+                return
+            self._closed.set()
+            # EOF wakes the poller before waiting for its descriptor lease.
+            try:
+                self._wake_writer.close()
+            finally:
+                with self._read_lock, self._io_lock:
+                    fd = self._fd
+                    self._fd = None
+                    try:
+                        os.close(fd)
+                    finally:
+                        self._wake_reader.close()
+        logger.debug("Closed TUN interface %s", self.name)
