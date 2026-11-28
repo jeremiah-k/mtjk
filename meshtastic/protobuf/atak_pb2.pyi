@@ -3456,6 +3456,331 @@ class SensorFov(_message.Message):
 Global___SensorFov: _TypeAlias = SensorFov  # noqa: Y015
 
 @_typing.final
+class TAKDetection(_message.Message):
+    """
+    Metadata for an event reporting an object found by a passive sensor: an
+    uncrewed aircraft (UAS), its operator or home point, a person or a vehicle.
+
+    Attaches to any TAKPacketV2, like TAKEnvironment and SensorFov. The event
+    still carries the object's position, CoT type and links. Affiliation is not
+    encoded here: the CoT type carries it, and the producer chooses it.
+
+    Carries no identifier except the UAS ID that Remote ID broadcasts.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    class _Kind:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _KindEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._Kind.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        Kind_Unspecified: TAKDetection._Kind.ValueType  # 0
+        """kind not stated"""
+        Kind_Uas: TAKDetection._Kind.ValueType  # 1
+        """uncrewed aircraft"""
+        Kind_UasOperator: TAKDetection._Kind.ValueType  # 2
+        """operator or control-station position"""
+        Kind_UasHome: TAKDetection._Kind.ValueType  # 3
+        """takeoff or home point"""
+        Kind_Person: TAKDetection._Kind.ValueType  # 4
+        """a person"""
+        Kind_Vehicle: TAKDetection._Kind.ValueType  # 5
+        """a vehicle"""
+        Kind_Other: TAKDetection._Kind.ValueType  # 6
+        """any other object"""
+
+    class Kind(_Kind, metaclass=_KindEnumTypeWrapper):
+        """
+        What the reported object is.
+        """
+
+    Kind_Unspecified: TAKDetection.Kind.ValueType  # 0
+    """kind not stated"""
+    Kind_Uas: TAKDetection.Kind.ValueType  # 1
+    """uncrewed aircraft"""
+    Kind_UasOperator: TAKDetection.Kind.ValueType  # 2
+    """operator or control-station position"""
+    Kind_UasHome: TAKDetection.Kind.ValueType  # 3
+    """takeoff or home point"""
+    Kind_Person: TAKDetection.Kind.ValueType  # 4
+    """a person"""
+    Kind_Vehicle: TAKDetection.Kind.ValueType  # 5
+    """a vehicle"""
+    Kind_Other: TAKDetection.Kind.ValueType  # 6
+    """any other object"""
+
+    class _Source:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _SourceEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._Source.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        Source_Unspecified: TAKDetection._Source.ValueType  # 0
+        """no source stated"""
+        Source_RemoteId: TAKDetection._Source.ValueType  # 1
+        """Remote ID broadcast (ASTM F3411)"""
+        Source_Rf: TAKDetection._Source.ValueType  # 2
+        """any other RF emission"""
+        Source_Acoustic: TAKDetection._Source.ValueType  # 4
+        """sound"""
+        Source_Radar: TAKDetection._Source.ValueType  # 8
+        """radar return"""
+        Source_Optical: TAKDetection._Source.ValueType  # 16
+        """visible or infrared imaging"""
+        Source_Thermal: TAKDetection._Source.ValueType  # 32
+        """PIR or thermopile"""
+        Source_Seismic: TAKDetection._Source.ValueType  # 64
+        """ground vibration"""
+        Source_Magnetic: TAKDetection._Source.ValueType  # 128
+        """magnetic field change"""
+
+    class Source(_Source, metaclass=_SourceEnumTypeWrapper):
+        """
+        Kind of sensing behind a report. Values are bits: `sources` is their
+        bitwise OR.
+        """
+
+    Source_Unspecified: TAKDetection.Source.ValueType  # 0
+    """no source stated"""
+    Source_RemoteId: TAKDetection.Source.ValueType  # 1
+    """Remote ID broadcast (ASTM F3411)"""
+    Source_Rf: TAKDetection.Source.ValueType  # 2
+    """any other RF emission"""
+    Source_Acoustic: TAKDetection.Source.ValueType  # 4
+    """sound"""
+    Source_Radar: TAKDetection.Source.ValueType  # 8
+    """radar return"""
+    Source_Optical: TAKDetection.Source.ValueType  # 16
+    """visible or infrared imaging"""
+    Source_Thermal: TAKDetection.Source.ValueType  # 32
+    """PIR or thermopile"""
+    Source_Seismic: TAKDetection.Source.ValueType  # 64
+    """ground vibration"""
+    Source_Magnetic: TAKDetection.Source.ValueType  # 128
+    """magnetic field change"""
+
+    class _State:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _StateEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._State.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        State_Unspecified: TAKDetection._State.ValueType  # 0
+        """state not stated"""
+        State_New: TAKDetection._State.ValueType  # 1
+        """first report of the object"""
+        State_Active: TAKDetection._State.ValueType  # 2
+        """updated from a fresh measurement"""
+        State_Coasting: TAKDetection._State.ValueType  # 3
+        """no fresh measurement; position predicted"""
+        State_Lost: TAKDetection._State.ValueType  # 4
+        """final update; receivers may remove the object"""
+
+    class State(_State, metaclass=_StateEnumTypeWrapper):
+        """
+        Where the reported track is in its life cycle.
+        """
+
+    State_Unspecified: TAKDetection.State.ValueType  # 0
+    """state not stated"""
+    State_New: TAKDetection.State.ValueType  # 1
+    """first report of the object"""
+    State_Active: TAKDetection.State.ValueType  # 2
+    """updated from a fresh measurement"""
+    State_Coasting: TAKDetection.State.ValueType  # 3
+    """no fresh measurement; position predicted"""
+    State_Lost: TAKDetection.State.ValueType  # 4
+    """final update; receivers may remove the object"""
+
+    class _Trend:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _TrendEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._Trend.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        Trend_Unspecified: TAKDetection._Trend.ValueType  # 0
+        """trend not stated"""
+        Trend_Closing: TAKDetection._Trend.ValueType  # 1
+        """distance shrinking"""
+        Trend_Steady: TAKDetection._Trend.ValueType  # 2
+        """distance holding"""
+        Trend_Opening: TAKDetection._Trend.ValueType  # 3
+        """distance growing"""
+
+    class Trend(_Trend, metaclass=_TrendEnumTypeWrapper):
+        """
+        How the distance between the object and the reporting sensor is changing.
+        """
+
+    Trend_Unspecified: TAKDetection.Trend.ValueType  # 0
+    """trend not stated"""
+    Trend_Closing: TAKDetection.Trend.ValueType  # 1
+    """distance shrinking"""
+    Trend_Steady: TAKDetection.Trend.ValueType  # 2
+    """distance holding"""
+    Trend_Opening: TAKDetection.Trend.ValueType  # 3
+    """distance growing"""
+
+    class _UasIdType:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _UasIdTypeEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._UasIdType.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        UasIdType_Unspecified: TAKDetection._UasIdType.ValueType  # 0
+        """no ID type"""
+        UasIdType_SerialNumber: TAKDetection._UasIdType.ValueType  # 1
+        """ANSI/CTA-2063-A serial number"""
+        UasIdType_CaaRegistration: TAKDetection._UasIdType.ValueType  # 2
+        """civil aviation authority registration ID"""
+        UasIdType_UtmAssigned: TAKDetection._UasIdType.ValueType  # 3
+        """UTM-assigned UUID"""
+        UasIdType_SpecificSession: TAKDetection._UasIdType.ValueType  # 4
+        """specific session ID"""
+
+    class UasIdType(_UasIdType, metaclass=_UasIdTypeEnumTypeWrapper):
+        """
+        Type of uas_id. Values match the ASTM F3411 UAS ID types.
+        """
+
+    UasIdType_Unspecified: TAKDetection.UasIdType.ValueType  # 0
+    """no ID type"""
+    UasIdType_SerialNumber: TAKDetection.UasIdType.ValueType  # 1
+    """ANSI/CTA-2063-A serial number"""
+    UasIdType_CaaRegistration: TAKDetection.UasIdType.ValueType  # 2
+    """civil aviation authority registration ID"""
+    UasIdType_UtmAssigned: TAKDetection.UasIdType.ValueType  # 3
+    """UTM-assigned UUID"""
+    UasIdType_SpecificSession: TAKDetection.UasIdType.ValueType  # 4
+    """specific session ID"""
+
+    class _UasStatus:
+        ValueType = _typing.NewType("ValueType", _builtins.int)
+        V: _TypeAlias = ValueType  # noqa: Y015
+
+    class _UasStatusEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[TAKDetection._UasStatus.ValueType], _builtins.type):
+        DESCRIPTOR: _descriptor.EnumDescriptor
+        UasStatus_Unspecified: TAKDetection._UasStatus.ValueType  # 0
+        """status undeclared"""
+        UasStatus_Ground: TAKDetection._UasStatus.ValueType  # 1
+        """on the ground"""
+        UasStatus_Airborne: TAKDetection._UasStatus.ValueType  # 2
+        """in flight"""
+        UasStatus_Emergency: TAKDetection._UasStatus.ValueType  # 3
+        """emergency declared"""
+        UasStatus_SystemFailure: TAKDetection._UasStatus.ValueType  # 4
+        """Remote ID system failure"""
+
+    class UasStatus(_UasStatus, metaclass=_UasStatusEnumTypeWrapper):
+        """
+        Operational status of the UAS. Values match the ASTM F3411 operational
+        status.
+        """
+
+    UasStatus_Unspecified: TAKDetection.UasStatus.ValueType  # 0
+    """status undeclared"""
+    UasStatus_Ground: TAKDetection.UasStatus.ValueType  # 1
+    """on the ground"""
+    UasStatus_Airborne: TAKDetection.UasStatus.ValueType  # 2
+    """in flight"""
+    UasStatus_Emergency: TAKDetection.UasStatus.ValueType  # 3
+    """emergency declared"""
+    UasStatus_SystemFailure: TAKDetection.UasStatus.ValueType  # 4
+    """Remote ID system failure"""
+
+    KIND_FIELD_NUMBER: _builtins.int
+    SOURCES_FIELD_NUMBER: _builtins.int
+    CONFIDENCE_FIELD_NUMBER: _builtins.int
+    STATE_FIELD_NUMBER: _builtins.int
+    TREND_FIELD_NUMBER: _builtins.int
+    COUNT_FIELD_NUMBER: _builtins.int
+    SENSOR_ANCHORED_FIELD_NUMBER: _builtins.int
+    CEP_M_FIELD_NUMBER: _builtins.int
+    RSSI_DBM_FIELD_NUMBER: _builtins.int
+    UAS_ID_FIELD_NUMBER: _builtins.int
+    UAS_ID_TYPE_FIELD_NUMBER: _builtins.int
+    UAS_STATUS_FIELD_NUMBER: _builtins.int
+    kind: Global___TAKDetection.Kind.ValueType
+    """
+    What the reported object is.
+    """
+    sources: _builtins.int
+    """
+    Kinds of sensing behind this report: a bitwise OR of Source values.
+    0 = not stated.
+    """
+    confidence: _builtins.int
+    """
+    Producer's confidence in the report, in percent (0-100). 0 = unknown.
+    """
+    state: Global___TAKDetection.State.ValueType
+    """
+    Where the track is in its life cycle.
+    """
+    trend: Global___TAKDetection.Trend.ValueType
+    """
+    Whether the object is closing on or opening from the reporting sensor.
+    """
+    count: _builtins.int
+    """
+    Number of objects this event stands for. 0 = one.
+    """
+    sensor_anchored: _builtins.bool
+    """
+    True when the event's point is the reporting sensor, because the
+    object's position is unknown.
+    """
+    cep_m: _builtins.int
+    """
+    Horizontal position uncertainty in meters, the CoT point's `ce`.
+    0 = unknown.
+    """
+    rssi_dbm: _builtins.int
+    """
+    Calibrated received power at the reporting sensor, in dBm. 0 = unknown.
+    """
+    uas_id: _builtins.bytes
+    """
+    UAS ID from a Remote ID broadcast, at most 20 bytes. A serial number or
+    CAA registration (see uas_id_type) is ASCII text without the broadcast's
+    trailing NUL fill; any other ID type carries the field's bytes as
+    broadcast. Set only when kind is Kind_Uas.
+    """
+    uas_id_type: Global___TAKDetection.UasIdType.ValueType
+    """
+    Type of uas_id.
+    """
+    uas_status: Global___TAKDetection.UasStatus.ValueType
+    """
+    Operational status from a Remote ID broadcast.
+    """
+    def __init__(
+        self,
+        *,
+        kind: Global___TAKDetection.Kind.ValueType = ...,
+        sources: _builtins.int = ...,
+        confidence: _builtins.int = ...,
+        state: Global___TAKDetection.State.ValueType = ...,
+        trend: Global___TAKDetection.Trend.ValueType = ...,
+        count: _builtins.int = ...,
+        sensor_anchored: _builtins.bool = ...,
+        cep_m: _builtins.int = ...,
+        rssi_dbm: _builtins.int = ...,
+        uas_id: _builtins.bytes = ...,
+        uas_id_type: Global___TAKDetection.UasIdType.ValueType = ...,
+        uas_status: Global___TAKDetection.UasStatus.ValueType = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["cep_m", b"cep_m", "confidence", b"confidence", "count", b"count", "kind", b"kind", "rssi_dbm", b"rssi_dbm", "sensor_anchored", b"sensor_anchored", "sources", b"sources", "state", b"state", "trend", b"trend", "uas_id", b"uas_id", "uas_id_type", b"uas_id_type", "uas_status", b"uas_status"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___TAKDetection: _TypeAlias = TAKDetection  # noqa: Y015
+
+@_typing.final
 class TakTalkMessage(_message.Message):
     """
     TAKTALK chat message payload (CoT type m-t-t).
@@ -3786,6 +4111,7 @@ class TAKPacketV2(_message.Message):
     ENVIRONMENT_FIELD_NUMBER: _builtins.int
     SENSOR_FOV_FIELD_NUMBER: _builtins.int
     START_EPOCH_LO14_FIELD_NUMBER: _builtins.int
+    DETECTION_FIELD_NUMBER: _builtins.int
     MARTI_FIELD_NUMBER: _builtins.int
     CHAT_FIELD_NUMBER: _builtins.int
     AIRCRAFT_FIELD_NUMBER: _builtins.int
@@ -3946,6 +4272,13 @@ class TAKPacketV2(_message.Message):
         """
 
     @_builtins.property
+    def detection(self) -> Global___TAKDetection:
+        """
+        Passive-sensor metadata, present when this event reports an object a
+        sensor found rather than the sender itself. See TAKDetection.
+        """
+
+    @_builtins.property
     def marti(self) -> Global___Marti:
         """
         Directed-routing recipient list (CoT <marti><dest callsign='X'/>…</marti>).
@@ -4080,6 +4413,7 @@ class TAKPacketV2(_message.Message):
         environment: Global___TAKEnvironment | None = ...,
         sensor_fov: Global___SensorFov | None = ...,
         start_epoch_lo14: _builtins.int | None = ...,
+        detection: Global___TAKDetection | None = ...,
         marti: Global___Marti | None = ...,
         chat: Global___GeoChat | None = ...,
         aircraft: Global___AircraftTrack | None = ...,
@@ -4097,10 +4431,12 @@ class TAKPacketV2(_message.Message):
         voice_profile_request: Global___VoiceProfileRequest | None = ...,
         taktalk_room_request: Global___TakTalkRoomRequest | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "start_epoch_lo14", b"start_epoch_lo14", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "taktalk_room_request", b"taktalk_room_request", "task", b"task", "voice_profile", b"voice_profile", "voice_profile_request", b"voice_profile_request"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_detection", b"_detection", "_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "casevac", b"casevac", "chat", b"chat", "detection", b"detection", "emergency", b"emergency", "environment", b"environment", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "rab", b"rab", "raw_detail", b"raw_detail", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "start_epoch_lo14", b"start_epoch_lo14", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "taktalk_room_request", b"taktalk_room_request", "task", b"task", "voice_profile", b"voice_profile", "voice_profile_request", b"voice_profile_request"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "start_epoch_lo14", b"start_epoch_lo14", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "taktalk_room_request", b"taktalk_room_request", "task", b"task", "team", b"team", "uid", b"uid", "voice_profile", b"voice_profile", "voice_profile_request", b"voice_profile_request"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_detection", b"_detection", "_environment", b"_environment", "_marti", b"_marti", "_sensor_fov", b"_sensor_fov", "_start_epoch_lo14", b"_start_epoch_lo14", "aircraft", b"aircraft", "alt_src", b"alt_src", "altitude", b"altitude", "battery", b"battery", "callsign", b"callsign", "casevac", b"casevac", "chat", b"chat", "cot_type_id", b"cot_type_id", "cot_type_str", b"cot_type_str", "course", b"course", "detection", b"detection", "device_callsign", b"device_callsign", "emergency", b"emergency", "endpoint", b"endpoint", "environment", b"environment", "geo_src", b"geo_src", "how", b"how", "latitude_i", b"latitude_i", "longitude_i", b"longitude_i", "marker", b"marker", "marti", b"marti", "payload_variant", b"payload_variant", "phone", b"phone", "rab", b"rab", "raw_detail", b"raw_detail", "remarks", b"remarks", "role", b"role", "route", b"route", "sensor_fov", b"sensor_fov", "shape", b"shape", "speed", b"speed", "stale_seconds", b"stale_seconds", "start_epoch_lo14", b"start_epoch_lo14", "tak_device", b"tak_device", "tak_os", b"tak_os", "tak_platform", b"tak_platform", "tak_version", b"tak_version", "taktalk", b"taktalk", "taktalk_room", b"taktalk_room", "taktalk_room_request", b"taktalk_room_request", "task", b"task", "team", b"team", "uid", b"uid", "voice_profile", b"voice_profile", "voice_profile_request", b"voice_profile_request"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__detection: _TypeAlias = _typing.Literal["detection"]  # noqa: Y015
+    _WhichOneofArgType__detection: _TypeAlias = _typing.Literal["_detection", b"_detection"]  # noqa: Y015
     _WhichOneofReturnType__environment: _TypeAlias = _typing.Literal["environment"]  # noqa: Y015
     _WhichOneofArgType__environment: _TypeAlias = _typing.Literal["_environment", b"_environment"]  # noqa: Y015
     _WhichOneofReturnType__marti: _TypeAlias = _typing.Literal["marti"]  # noqa: Y015
@@ -4111,6 +4447,8 @@ class TAKPacketV2(_message.Message):
     _WhichOneofArgType__start_epoch_lo14: _TypeAlias = _typing.Literal["_start_epoch_lo14", b"_start_epoch_lo14"]  # noqa: Y015
     _WhichOneofReturnType_payload_variant: _TypeAlias = _typing.Literal["chat", "aircraft", "raw_detail", "shape", "marker", "rab", "route", "casevac", "emergency", "task", "taktalk", "taktalk_room", "voice_profile", "voice_profile_request", "taktalk_room_request"]  # noqa: Y015
     _WhichOneofArgType_payload_variant: _TypeAlias = _typing.Literal["payload_variant", b"payload_variant"]  # noqa: Y015
+    @_typing.overload
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__detection) -> _WhichOneofReturnType__detection | None: ...
     @_typing.overload
     def WhichOneof(self, oneof_group: _WhichOneofArgType__environment) -> _WhichOneofReturnType__environment | None: ...
     @_typing.overload
